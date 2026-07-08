@@ -152,6 +152,10 @@ pi の実際の設定構造をモデル化しています：
 
 すべてのデータは `localStorage` に永続化されます。設定ページから JSON 形式で設定全体をエクスポート/インポートできます。
 
+## 🔗 リンク
+
+- **ホームページ：** [raingor.github.io/my-blog](https://raingor.github.io/my-blog/)
+
 ## 📄 ライセンス
 
 MIT
