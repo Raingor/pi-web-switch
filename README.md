@@ -9,6 +9,12 @@
 </p>
 
 <p align="center">
+  <a href="README.md">🇬🇧 English</a> ·
+  <a href="README.zh-CN.md">🇨🇳 中文</a> ·
+  <a href="README.ja.md">🇯🇵 日本語</a>
+</p>
+
+<p align="center">
   <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react" alt="React 19" />
   <img src="https://img.shields.io/badge/TypeScript-5.8-3178C6?logo=typescript" alt="TypeScript" />
   <img src="https://img.shields.io/badge/Tailwind-4-06B6D4?logo=tailwindcss" alt="Tailwind v4" />
