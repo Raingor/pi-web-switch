@@ -152,6 +152,10 @@ pi-web-switch/
 
 所有数据持久化存储在 `localStorage`。通过设置页面可以导出/导入 JSON 格式的完整配置。
 
+## 🔗 相关链接
+
+- **个人主页：** [raingor.github.io/my-blog](https://raingor.github.io/my-blog/)
+
 ## 📄 许可证
 
 MIT

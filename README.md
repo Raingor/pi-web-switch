@@ -152,6 +152,10 @@ The app models pi's real configuration structure:
 
 All data is persisted to `localStorage`. Use the Settings page to export/import configuration as JSON.
 
+## 🔗 Links
+
+- **Homepage:** [raingor.github.io/my-blog](https://raingor.github.io/my-blog/)
+
 ## 📄 License
 
 MIT
