@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useConfigStore } from "@/store/config-store";
+import { useTranslation } from "@/lib/i18n";
 import { formatDateFull } from "@/lib/utils";
 import { History, MessageSquare, Clock, ChevronDown, ChevronRight, Trash2, AlertTriangle, Shield } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
@@ -52,6 +53,7 @@ function ProjectCard({
   defaultOpen: boolean;
   onDelete: (session: SessionInfo, groupPath: string) => void;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(defaultOpen);
   const [deleting, setDeleting] = useState<string | null>(null);
 
@@ -70,7 +72,7 @@ function ProjectCard({
           <div className="text-left">
             <h3 className="text-sm font-semibold" style={{ color: "var(--page-text)" }}>{group.projectName}</h3>
             <p className="text-xs" style={{ color: "var(--muted-text)" }}>
-              {group.totalSessions} sessions · Last active {new Date(group.lastActive).toLocaleDateString()}
+              {group.totalSessions} {t("sessions.sessions_count", String(group.totalSessions)).split(" ")[0]} · {t("sessions.last_active", new Date(group.lastActive).toLocaleDateString())}
             </p>
           </div>
         </div>
@@ -126,7 +128,7 @@ function ProjectCard({
                   <span
                     className="rounded-lg p-1.5"
                     style={{ color: "var(--subtle-text)" }}
-                    title="Updated in the last 3 days — cannot delete"
+                    title={t("sessions.protected")}
                   >
                     <Shield className="h-3.5 w-3.5" />
                   </span>
@@ -138,7 +140,7 @@ function ProjectCard({
                     }}
                     className="rounded-lg p-1.5 transition-opacity"
                     style={{ color: "var(--subtle-text)" }}
-                    title="Delete session"
+                    title={t("sessions.delete")}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
@@ -153,6 +155,7 @@ function ProjectCard({
 }
 
 export function SessionsPage() {
+  const { t } = useTranslation();
   const { initialized } = useConfigStore();
   const [groups, setGroups] = useState<ProjectGroup[]>([]);
   const [loading, setLoading] = useState(true);
@@ -193,10 +196,10 @@ export function SessionsPage() {
         setDeleteTarget(null);
         loadSessions(); // refresh the list
       } else {
-        alert("Failed to delete session file");
+        alert(t("sessions.delete_failed"));
       }
     } catch {
-      alert("Error deleting session");
+      alert(t("sessions.delete_error"));
     } finally {
       setDeleting(false);
     }
@@ -219,7 +222,7 @@ export function SessionsPage() {
   if (error) {
     return (
       <div className="flex items-center justify-center h-64">
-        <p className="text-sm" style={{ color: "var(--error-text, #ef4444)" }}>Failed to load sessions: {error}</p>
+        <p className="text-sm" style={{ color: "var(--error-text, #ef4444)" }}>{t("sessions.delete_failed")}: {error}</p>
       </div>
     );
   }
@@ -229,9 +232,9 @@ export function SessionsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold" style={{ color: "var(--page-text)" }}>Sessions</h1>
+        <h1 className="text-2xl font-bold" style={{ color: "var(--page-text)" }}>{t("sessions.title")}</h1>
         <p className="mt-1 text-sm" style={{ color: "var(--muted-text)" }}>
-          {totalSessions} sessions across {groups.length} projects
+          {t("sessions.summary", String(totalSessions), String(groups.length))}
         </p>
       </div>
 
@@ -241,7 +244,7 @@ export function SessionsPage() {
           type="text"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          placeholder="Filter by project name..."
+          placeholder={t("sessions.filter_placeholder")}
           className="w-full rounded-lg border px-4 py-2.5 pl-10 text-sm"
           style={{
             backgroundColor: "var(--input-bg)",
@@ -257,7 +260,7 @@ export function SessionsPage() {
         {filteredGroups.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12">
             <History className="h-12 w-12" style={{ color: "var(--subtle-text)" }} />
-            <p className="mt-4 text-sm" style={{ color: "var(--muted-text)" }}>No sessions found</p>
+            <p className="mt-4 text-sm" style={{ color: "var(--muted-text)" }}>{t("sessions.no_sessions")}</p>
           </div>
         ) : (
           filteredGroups.map((group, i) => (
@@ -275,7 +278,7 @@ export function SessionsPage() {
       <Modal
         open={!!deleteTarget}
         onClose={() => !deleting && setDeleteTarget(null)}
-        title="Delete Session"
+        title={t("sessions.delete_title")}
       >
         <div className="space-y-4">
           <div className="flex items-start gap-3">

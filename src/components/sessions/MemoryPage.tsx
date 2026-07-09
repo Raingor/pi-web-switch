@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useConfigStore } from "@/store/config-store";
+import { useTranslation } from "@/lib/i18n";
 import { Brain, User, AlertTriangle, Clock, FileText } from "lucide-react";
 
 interface MemoryFile {
@@ -58,6 +59,7 @@ function mdToHtml(text: string): string {
 }
 
 function MemoryCard({ file }: { file: MemoryFile }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(true);
   const Icon = FILE_ICONS[file.filename] || FileText;
   const color = FILE_COLORS[file.filename] || "#6b7280";
@@ -80,9 +82,9 @@ function MemoryCard({ file }: { file: MemoryFile }) {
             <Icon className="h-4 w-4" style={{ color }} />
           </div>
           <div className="text-left">
-            <h3 className="text-sm font-semibold" style={{ color: "var(--page-text)" }}>{file.name}</h3>
+            <h3 className="text-sm font-semibold" style={{ color: "var(--page-text)" }}>{t("memory." + file.filename.replace("MEMORY.md", "project_memories").replace("USER.md", "user_profile").replace("failures.md", "failure_records"))}</h3>
             <p className="text-xs" style={{ color: "var(--muted-text)" }}>
-              {lineCount} lines · Updated {formatDate(file.updatedAt)}
+              {t("memory.lines", String(lineCount))} · {t("memory.updated", formatDate(file.updatedAt))}
             </p>
           </div>
         </div>
@@ -109,6 +111,7 @@ function MemoryCard({ file }: { file: MemoryFile }) {
 }
 
 export function MemoryPage() {
+  const { t } = useTranslation();
   const { initialized } = useConfigStore();
   const [files, setFiles] = useState<MemoryFile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -150,17 +153,17 @@ export function MemoryPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold" style={{ color: "var(--page-text)" }}>Memory</h1>
+        <h1 className="text-2xl font-bold" style={{ color: "var(--page-text)" }}>{t("memory.title")}</h1>
         <p className="mt-1 text-sm" style={{ color: "var(--muted-text)" }}>
-          pi-hermes-memory · {totalLines} total lines across {files.length} files
+          {t("memory.summary", String(totalLines), String(files.length))}
         </p>
       </div>
 
       {files.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-12">
           <Brain className="h-12 w-12" style={{ color: "var(--subtle-text)" }} />
-          <p className="mt-4 text-sm" style={{ color: "var(--muted-text)" }}>No memory files found</p>
-          <p className="text-xs mt-1" style={{ color: "var(--subtle-text)" }}>pi-hermes-memory extension is not installed</p>
+          <p className="mt-4 text-sm" style={{ color: "var(--muted-text)" }}>{t("memory.no_memory")}</p>
+          <p className="text-xs mt-1" style={{ color: "var(--subtle-text)" }}>{t("memory.no_memory_desc")}</p>
         </div>
       ) : (
         <div className="space-y-4">

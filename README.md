@@ -35,11 +35,13 @@
 ## ✨ Features
 
 ### 📊 Dashboard
-- **Token Usage Trend** — Area chart of daily token consumption parsed from session files
-- **Cost Tracking** — Daily cost chart + cost breakdown by provider (pie chart)
-- **Request Volume** — Bar chart showing API call volume over time
-- **Provider Summary** — Table of all providers with totals (tokens, cost, requests)
-- **Key Stats** — Total tokens, total cost, total requests, active providers
+- **Usage Statistics** — Today / 7 days / 30 days / Custom date range selector with auto-refresh (5s/10s/30s/60s)
+- **Token Breakdown** — Exact token count with approximate display (e.g. `1,631,022 ≈ 1.6M`) and Input/Output/Cache Hit/Cache Create breakdown
+- **Cost Tracking** — Daily cost chart + Provider/Model stats tabs with aggregated data
+- **Cache Hit Rate** — Visual progress bar showing cache efficiency
+- **Request Log** — Detailed log table with time, provider, model, tokens, cost
+- **Currency Switch** — Toggle between USD and CNY with real-time conversion (1 USD = 7.2 CNY)
+- **Hourly/Daily Granularity** — Today view shows per-hour data; 7d/30d views show per-day data
 - All data sourced from **real pi session files** (`~/.pi/agent/sessions/*.jsonl`)
 
 ### 📦 Models
@@ -67,6 +69,13 @@
 - **User Profile** — Display `USER.md` preferences and settings
 - **Failure Records** — Browse `failures.md` known issues
 - **Live Sync** — Content updates immediately when memory files change on disk
+
+### 🌐 Multi-language
+- **English** 🇬🇧 — Default
+- **Simplified Chinese** 🇨🇳 — 简体中文
+- **Traditional Chinese** 🇭🇰 — 繁體中文
+- **Japanese** 🇯🇵 — 日本語
+- Language switcher in sidebar footer, persists across sessions
 
 ### ⚙️ Settings
 - **Defaults** — Default provider, model, thinking level, project trust
@@ -153,7 +162,7 @@ pi-web-switch/
 ├── public/
 │   └── pi.svg
 └── src/
-    ├── main.tsx            # Entry point + theme sync + init gate
+    ├── main.tsx            # Entry point + theme sync + init gate + i18n provider
     ├── App.tsx             # Router setup (6 routes)
     ├── index.css           # Tailwind + CSS theme variables (light/dark)
     ├── types/index.ts      # All TypeScript interfaces
@@ -162,12 +171,15 @@ pi-web-switch/
     ├── store/
     │   └── config-store.ts # Zustand store (fetches from /api/pi/*)
     ├── lib/
-    │   ├── utils.ts        # Formatting helpers
-    │   └── config.ts       # Config import/export helpers
+    │   ├── utils.ts        # Formatting helpers (tokens, cost with USD/CNY)
+    │   ├── i18n.tsx        # Multi-language system (React Context + hook)
+    │   ├── currency.ts     # Currency switching (USD/CNY toggle)
+    │   ├── config.ts       # Config import/export helpers
+    │   └── translations/   # Translation files (en, zh-CN, zh-TW, ja)
     └── components/
-        ├── layout/          # AppShell, Sidebar (6 nav items)
+        ├── layout/          # AppShell, Sidebar (6 nav items + language switcher)
         ├── ui/              # StatCard, Badge, Modal, EmptyState
-        ├── dashboard/       # DashboardPage + charts
+        ├── dashboard/       # DashboardPage + charts (hourly/daily granularity)
         ├── models/          # ModelsPage + forms
         ├── providers/       # ProvidersPage + forms
         ├── sessions/        # SessionsPage + MemoryPage
@@ -209,6 +221,7 @@ The Vite dev server exposes these endpoints at `/api/pi/*`:
 | POST | `/api/pi/models` | Write `models.json` |
 | GET | `/api/pi/builtin-providers` | List hardcoded built-in providers |
 | GET | `/api/pi/usage` | Aggregated token/cost/request data from sessions |
+| GET | `/api/pi/usage-range` | Date-range filtered usage with hourly/daily breakdown |
 | GET | `/api/pi/sessions` | Session list grouped by project |
 | DELETE | `/api/pi/session?path=` | Delete a session file (path must be under sessions/) |
 | GET | `/api/pi/memory` | Read MEMORY.md, USER.md, failures.md |
