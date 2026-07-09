@@ -228,7 +228,7 @@ export function ModelsPage() {
         size="lg"
       >
         <AddModelForm
-          providers={availableProviders}
+          providers={allProviders}
           onSubmit={(providerId, model) => {
             addModel(providerId, model);
             setShowAddForm(false);
@@ -417,6 +417,7 @@ interface AddModelFormProps {
 
 function AddModelForm({ providers, onSubmit, onCancel }: AddModelFormProps) {
   const { t } = useTranslation();
+  const { allModels } = useConfigStore();
   const [providerId, setProviderId] = useState(providers[0]?.id ?? "");
   const [form, setForm] = useState<Partial<Model>>({
     id: "",
@@ -433,13 +434,17 @@ function AddModelForm({ providers, onSubmit, onCancel }: AddModelFormProps) {
     onSubmit(providerId, form as Model);
   };
 
+  // Get models for the selected provider
+  const providerModels = allModels.filter((m) => m.providerId === providerId);
+  const modelOptions = [...new Set(providerModels.map((m) => m.id))];
+
   return (
     <div className="space-y-4">
       <div>
         <label className="block text-xs font-medium text-gray-400">Provider</label>
         <select
           value={providerId}
-          onChange={(e) => setProviderId(e.target.value)}
+          onChange={(e) => { setProviderId(e.target.value); setForm({ ...form, id: "" }); }}
           className="mt-1 w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white"
         >
           {providers.map((p) => (
@@ -454,11 +459,24 @@ function AddModelForm({ providers, onSubmit, onCancel }: AddModelFormProps) {
           <label className="block text-xs font-medium text-gray-400">Model ID *</label>
           <input
             type="text"
+            list="model-list"
             value={form.id ?? ""}
             onChange={(e) => setForm({ ...form, id: e.target.value })}
-            placeholder="e.g. my-custom-model"
+            placeholder={modelOptions.length > 0 ? "Select or type model ID..." : "Enter model ID..."}
             className="mt-1 w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white"
           />
+          <datalist id="model-list">
+            {modelOptions.length > 0 ? (
+              modelOptions.map((mid) => (
+                <option key={mid} value={mid} />
+              ))
+            ) : (
+              <option value="" disabled>No models available for this provider</option>
+            )}
+          </datalist>
+          {modelOptions.length === 0 && (
+            <p className="text-xs mt-1 text-gray-500">No existing models for this provider. Type a new model ID manually.</p>
+          )}
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-400">Display Name</label>
