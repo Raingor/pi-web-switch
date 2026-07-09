@@ -4,7 +4,7 @@ import { useTranslation } from "@/lib/i18n";
 import { useCurrency } from "@/lib/currency";
 import { formatTokens, formatCost, formatNumber, cn, USD_TO_CNY } from "@/lib/utils";
 import {
-  Activity, DollarSign, BarChart3, ArrowUp, ArrowDown, Database, DollarSignIcon,
+  Activity, DollarSign, BarChart3, ArrowUp, ArrowDown, Database, DollarSignIcon, RefreshCw,
 } from "lucide-react";
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -272,6 +272,14 @@ export function DashboardPage() {
           >
             <DollarSignIcon className="h-3.5 w-3.5" />
             {currency}
+          </button>
+          <button
+            onClick={() => { fetchData(); }}
+            className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-gray-800/30"
+            style={{ borderColor: "var(--card-border)", color: "var(--muted-text)", backgroundColor: "var(--card-bg)" }}
+            title="Refresh now"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
           </button>
           <div className="relative">
             <button

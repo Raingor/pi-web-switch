@@ -137,8 +137,9 @@ function parseSessionFile(filePath: string): UsageRecord[] {
           if (!usage || !usage.input) continue;
 
           const timestamp = obj.timestamp || obj.message.timestamp;
-          const date = new Date(timestamp).toISOString().split("T")[0] || "unknown";
-          const hour = new Date(timestamp).getHours();
+          const d = new Date(timestamp);
+          const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+          const hour = d.getHours();
 
           records.push({
             date,

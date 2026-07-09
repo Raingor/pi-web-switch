@@ -38,6 +38,7 @@ export function ProvidersPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [showAuth, setShowAuth] = useState<string | null>(null);
   const [authKey, setAuthKey] = useState("");
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
   const customProviders = allProviders.filter((p) => p.type === "custom");
 
@@ -141,7 +142,7 @@ export function ProvidersPage() {
                       <span
                         onClick={(e) => {
                           e.stopPropagation();
-                          removeCustomProvider(p.id);
+                          setDeleteConfirm(p.id);
                         }}
                         className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-red-400 hover:bg-red-500/10"
                       >
@@ -210,6 +211,22 @@ export function ProvidersPage() {
                       </div>
                     ))}
                   </div>
+
+                  {/* Delete — only for custom providers */}
+                  {p.type === "custom" && (
+                    <div className="mt-6 border-t border-gray-800 pt-4">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDeleteConfirm(p.id);
+                        }}
+                        className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm text-red-400 transition-colors hover:bg-red-500/10"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        Delete {p.name}
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -283,6 +300,48 @@ export function ProvidersPage() {
                 Save Key
               </button>
             </div>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <Modal
+        open={!!deleteConfirm}
+        onClose={() => setDeleteConfirm(null)}
+        title="Delete Provider"
+      >
+        <div className="space-y-4">
+          <div className="flex items-start gap-3">
+            <Trash2 className="h-5 w-5 shrink-0 mt-0.5 text-red-400" />
+            <div>
+              <p className="text-sm text-gray-200">
+                Are you sure you want to delete <strong>{allProviders.find((p) => p.id === deleteConfirm)?.name}</strong>?
+              </p>
+              <p className="text-xs mt-2 text-gray-500">
+                This will remove the provider and all its models from your configuration.
+              </p>
+            </div>
+          </div>
+          <div className="flex justify-end gap-3">
+            <button
+              onClick={() => setDeleteConfirm(null)}
+              className="rounded-lg px-4 py-2 text-sm text-gray-400 hover:bg-gray-800"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                if (deleteConfirm) {
+                  removeCustomProvider(deleteConfirm);
+                  setDeleteConfirm(null);
+                }
+              }}
+              className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium text-white"
+              style={{ backgroundColor: "#dc2626" }}
+            >
+              <Trash2 className="h-4 w-4" />
+              Delete
+            </button>
           </div>
         </div>
       </Modal>

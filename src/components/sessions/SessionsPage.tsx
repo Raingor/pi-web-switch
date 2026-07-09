@@ -193,8 +193,20 @@ export function SessionsPage() {
       );
       const result = await res.json();
       if (result.success) {
+        const { groupPath, session } = deleteTarget;
         setDeleteTarget(null);
-        loadSessions(); // refresh the list
+        setGroups((prev) => {
+          const updated = prev
+            .map((g) => {
+              if (g.projectPath !== groupPath) return g;
+              const remaining = g.sessions.filter((s) => s.filePath !== session.filePath);
+              return remaining.length === 0
+                ? null
+                : { ...g, sessions: remaining, totalSessions: remaining.length };
+            })
+            .filter(Boolean) as ProjectGroup[];
+          return updated;
+        });
       } else {
         alert(t("sessions.delete_failed"));
       }
