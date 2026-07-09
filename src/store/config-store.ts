@@ -355,7 +355,11 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
     set({ modelsJson: updated });
     apiPost("/models", updated);
     const { auth } = get();
-    set({ allProviders: mergeProviders(auth ?? {}, updated) });
+    const newAllProviders = mergeProviders(auth ?? {}, updated);
+    const newAllModels = newAllProviders.flatMap((p) =>
+      p.models.map((m) => ({ ...m, providerId: p.id, providerName: p.name }))
+    );
+    set({ allProviders: newAllProviders, allModels: newAllModels });
   },
 
   removeModel: (providerId, modelId) => {
