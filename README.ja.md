@@ -88,6 +88,11 @@ npm run build  # プロダクションビルド
 
 React 19 + TypeScript 5.8 + Vite 6 + Tailwind CSS v4 + Zustand + Recharts + Lucide React + React Router v7
 
+## 🔗 リンク
+
+- **ホームページ：** [raingor.github.io/my-blog](https://raingor.github.io/my-blog/)
+- **GitHub：** [github.com/Raingor](https://github.com/Raingor)
+
 ## 📄 ライセンス
 
 MIT

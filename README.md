@@ -229,6 +229,7 @@ The Vite dev server exposes these endpoints at `/api/pi/*`:
 ## 🔗 Links
 
 - **Homepage:** [raingor.github.io/my-blog](https://raingor.github.io/my-blog/)
+- **GitHub:** [github.com/Raingor](https://github.com/Raingor)
 
 ## 📄 License
 
