@@ -122,15 +122,17 @@ function piApiPlugin(): Plugin {
           const toParam = parsedUrl.searchParams.get("to") || "";
 
           const now = new Date();
+          const localDateStr = (dt: Date) =>
+            `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
           let fromDate: string;
-          let toDate = now.toISOString().split("T")[0];
+          let toDate = localDateStr(now);
 
           if (range === "today") {
             fromDate = toDate;
           } else if (range === "7d") {
-            const d = new Date(now); d.setDate(d.getDate() - 6); fromDate = d.toISOString().split("T")[0];
+            const d = new Date(now); d.setDate(d.getDate() - 6); fromDate = localDateStr(d);
           } else if (range === "30d") {
-            const d = new Date(now); d.setDate(d.getDate() - 29); fromDate = d.toISOString().split("T")[0];
+            const d = new Date(now); d.setDate(d.getDate() - 29); fromDate = localDateStr(d);
           } else if (range === "custom" && fromParam) {
             fromDate = fromParam;
             if (toParam) toDate = toParam;
