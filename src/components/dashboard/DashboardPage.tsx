@@ -32,7 +32,12 @@ const COLORS = [
 ];
 
 export function DashboardPage() {
-  const { totals, dailyAggregates, providerSummaries, modelSummaries, allProviders } = useConfigStore();
+  const { usage, allProviders } = useConfigStore();
+
+  const totals = usage?.totals ?? { totalTokens: 0, totalCost: 0, totalRequests: 0 };
+  const dailyAggregates = usage?.dailyAggregates ?? [];
+  const providerSummaries = usage?.providerSummaries ?? [];
+  const modelSummaries = usage?.modelSummaries ?? [];
 
   const activeProviders = allProviders.filter((p) => p.models.some((m) => m.enabled));
   const activeModels = allProviders.flatMap((p) =>

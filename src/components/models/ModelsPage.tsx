@@ -34,7 +34,7 @@ function ModelIcon({ model }: { model: Model }) {
 }
 
 export function ModelsPage() {
-  const { allModels, allProviders, updateModel, removeModel, toggleModelEnabled, addModelToProvider, config } =
+  const { allModels, allProviders, settings, updateModel, removeModel, toggleModel, addModel } =
     useConfigStore();
 
   const [search, setSearch] = useState("");
@@ -54,7 +54,7 @@ export function ModelsPage() {
   });
 
   const isEnabled = (providerId: string, modelId: string) => {
-    return config.settings.enabledModels?.includes(`${providerId}/${modelId}`) ?? false;
+    return settings?.enabledModels?.includes(`${providerId}/${modelId}`) ?? false;
   };
 
   return (
@@ -139,7 +139,7 @@ export function ModelsPage() {
                   </p>
                 </div>
                 <button
-                  onClick={() => toggleModelEnabled(m.providerId, m.id)}
+                  onClick={() => toggleModel(m.providerId, m.id)}
                   className={cn(
                     "rounded-lg p-1.5 transition-colors",
                     isEnabled(m.providerId, m.id)
@@ -226,7 +226,7 @@ export function ModelsPage() {
         <AddModelForm
           providers={availableProviders}
           onSubmit={(providerId, model) => {
-            addModelToProvider(providerId, model);
+            addModel(providerId, model);
             setShowAddForm(false);
           }}
           onCancel={() => setShowAddForm(false)}

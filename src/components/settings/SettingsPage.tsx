@@ -2,7 +2,8 @@ import { useState, useRef } from "react";
 import { useConfigStore } from "@/store/config-store";
 import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
-import { downloadConfig, importConfig, resetConfig } from "@/lib/config";
+import { exportConfig, parseImportFile, saveLocalBackup } from "@/lib/config";
+import type { PiConfig } from "@/types";
 import { cn } from "@/lib/utils";
 import {
   Settings,
@@ -19,7 +20,7 @@ import {
 } from "lucide-react";
 
 export function SettingsPage() {
-  const { config, allProviders, allModels, updateSettings, setTheme, addPackage, removePackage, importConfig: importConfigAction, resetToDefaults } = useConfigStore();
+  const { settings, auth, modelsJson, allProviders, allModels, updateSettings, setTheme, addPackage, removePackage, importConfig: importConfigAction, resetToDefaults } = useConfigStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [newPackage, setNewPackage] = useState("");
   const [importError, setImportError] = useState("");
@@ -29,16 +30,28 @@ export function SettingsPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (ev) => {
-      const result = importConfig(ev.target?.result as string);
+    reader.onload = async (ev) => {
+      const result = parseImportFile(ev.target?.result as string);
       if (result) {
-        importConfigAction(result);
+        await importConfigAction(result);
         setImportError("");
       } else {
         setImportError("Invalid config file format");
       }
     };
     reader.readAsText(file);
+  };
+
+  const buildConfigForExport = (): PiConfig => ({
+    settings: settings ?? { theme: "dark", packages: [], enabledModels: [] },
+    auth: auth ?? {},
+    modelsJson: modelsJson ?? { providers: {} },
+  });
+
+  const handleExport = () => {
+    const cfg = buildConfigForExport();
+    saveLocalBackup(cfg);
+    exportConfig(cfg);
   };
 
   const providerOptions = allProviders.map((p) => ({
@@ -68,7 +81,7 @@ export function SettingsPage() {
             <div>
               <label className="block text-xs font-medium text-gray-400">Default Provider</label>
               <select
-                value={config.settings.defaultProvider ?? ""}
+                value={settings?.defaultProvider ?? ""}
                 onChange={(e) => updateSettings({ defaultProvider: e.target.value })}
                 className="mt-1 w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white"
               >
@@ -81,7 +94,7 @@ export function SettingsPage() {
             <div>
               <label className="block text-xs font-medium text-gray-400">Default Model</label>
               <select
-                value={config.settings.defaultModel ?? ""}
+                value={settings?.defaultModel ?? ""}
                 onChange={(e) => updateSettings({ defaultModel: e.target.value })}
                 className="mt-1 w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white"
               >
@@ -96,7 +109,7 @@ export function SettingsPage() {
             <div>
               <label className="block text-xs font-medium text-gray-400">Default Thinking Level</label>
               <select
-                value={config.settings.defaultThinkingLevel ?? "medium"}
+                value={settings?.defaultThinkingLevel ?? "medium"}
                 onChange={(e) => updateSettings({ defaultThinkingLevel: e.target.value })}
                 className="mt-1 w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white"
               >
@@ -108,7 +121,7 @@ export function SettingsPage() {
             <div>
               <label className="block text-xs font-medium text-gray-400">Project Trust</label>
               <select
-                value={config.settings.defaultProjectTrust ?? "prompt"}
+                value={settings?.defaultProjectTrust ?? "prompt"}
                 onChange={(e) => updateSettings({ defaultProjectTrust: e.target.value })}
                 className="mt-1 w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white"
               >
@@ -133,7 +146,7 @@ export function SettingsPage() {
               { value: "dark" as const, icon: Moon, label: "Dark" },
               { value: "light/dark" as const, icon: Monitor, label: "System" },
             ].map(({ value, icon: Icon, label }) => {
-              const active = (config.settings.theme ?? "light/dark") === value;
+              const active = (settings?.theme ?? "light/dark") === value;
               return (
                 <button
                   key={value}
@@ -156,7 +169,7 @@ export function SettingsPage() {
             <label className="flex items-center gap-2 text-sm text-gray-400">
               <input
                 type="checkbox"
-                checked={config.settings.hideThinkingBlock ?? false}
+                checked={settings?.hideThinkingBlock ?? false}
                 onChange={(e) => updateSettings({ hideThinkingBlock: e.target.checked })}
                 className="rounded border-gray-600 bg-gray-800 text-blue-500"
               />
@@ -173,10 +186,10 @@ export function SettingsPage() {
         </div>
         <div className="p-6">
           <div className="space-y-2">
-            {(config.settings.enabledModels ?? []).length === 0 ? (
+            {(settings?.enabledModels ?? []).length === 0 ? (
               <p className="text-sm text-gray-500">No models enabled. Enable models from the Models page.</p>
             ) : (
-              (config.settings.enabledModels ?? []).map((ref) => (
+              (settings?.enabledModels ?? []).map((ref) => (
                 <div key={ref} className="flex items-center justify-between rounded-lg border border-gray-800 bg-gray-800/30 px-4 py-2.5">
                   <div className="flex items-center gap-2">
                     <CheckCircle2 className="h-4 w-4 text-emerald-400" />
@@ -229,10 +242,10 @@ export function SettingsPage() {
             </button>
           </div>
           <div className="space-y-2">
-            {(config.settings.packages ?? []).length === 0 ? (
+            {(settings?.packages ?? []).length === 0 ? (
               <p className="text-sm text-gray-500">No packages installed</p>
             ) : (
-              (config.settings.packages ?? []).map((pkg) => (
+              (settings?.packages ?? []).map((pkg) => (
                 <div key={pkg} className="flex items-center justify-between rounded-lg border border-gray-800 bg-gray-800/30 px-4 py-2.5">
                   <div className="flex items-center gap-2">
                     <Package className="h-4 w-4 text-blue-400" />
@@ -259,7 +272,7 @@ export function SettingsPage() {
         <div className="p-6 space-y-4">
           <div className="flex flex-wrap gap-3">
             <button
-              onClick={() => downloadConfig(config)}
+              onClick={handleExport}
               className="flex items-center gap-2 rounded-lg border border-gray-700 bg-gray-800 px-4 py-2 text-sm text-gray-300 hover:bg-gray-700"
             >
               <Download className="h-4 w-4" />
@@ -308,7 +321,9 @@ export function SettingsPage() {
       >
         <div className="space-y-4">
           <p className="text-sm text-gray-400">
-            This will reset all settings to defaults. Your mock usage data will be regenerated. This action cannot be undone.
+            This will reset all settings, auth keys, and custom providers to defaults.
+            Changes are written directly to your pi config files (~/.pi/agent/).
+            This action cannot be undone.
           </p>
           <div className="flex justify-end gap-3">
             <button
