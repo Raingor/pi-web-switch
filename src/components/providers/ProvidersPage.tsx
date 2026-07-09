@@ -29,7 +29,7 @@ const API_TYPES: { value: ApiType; label: string }[] = [
 ];
 
 export function ProvidersPage() {
-  const { allProviders, config, updateCustomProvider, removeCustomProvider, setProviderAuth, removeProviderAuth } =
+  const { allProviders, auth, updateCustomProvider, removeCustomProvider, setProviderAuth, removeProviderAuth } =
     useConfigStore();
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [editProvider, setEditProvider] = useState<string | null>(null);
@@ -116,7 +116,7 @@ export function ProvidersPage() {
                     onClick={(e) => {
                       e.stopPropagation();
                       setShowAuth(p.id);
-                      setAuthKey(config.auth[p.id]?.key ?? "");
+                      setAuthKey(auth?.[p.id]?.key ?? "");
                     }}
                     className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-gray-400 hover:bg-gray-800 hover:text-gray-200"
                   >
@@ -252,7 +252,7 @@ export function ProvidersPage() {
             />
           </div>
           <div className="flex justify-between">
-            {showAuth && config.auth[showAuth] && (
+            {showAuth && auth?.[showAuth] && (
               <button
                 onClick={() => {
                   removeProviderAuth(showAuth!);

@@ -5,7 +5,10 @@ export function AppShell() {
   return (
     <div className="flex h-screen overflow-hidden">
       <Sidebar />
-      <main className="flex-1 overflow-y-auto bg-gray-950">
+      <main
+        className="flex-1 overflow-y-auto"
+        style={{ backgroundColor: "var(--page-bg)" }}
+      >
         <div className="mx-auto max-w-7xl px-8 py-8">
           <Outlet />
         </div>

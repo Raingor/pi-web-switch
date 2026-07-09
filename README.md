@@ -5,7 +5,7 @@
 <h1 align="center">pi-web-switch</h1>
 
 <p align="center">
-  <strong>Web UI for pi coding agent configuration management</strong>
+  <strong>Web UI for pi coding agent — live configuration management, session browser, and memory viewer</strong>
 </p>
 
 <p align="center">
@@ -23,7 +23,11 @@
 </p>
 
 <p align="center">
-  Inspired by <a href="https://github.com/farion1231/cc-switch">cc-switch</a> — a visual dashboard for managing your <a href="https://pi.dev">pi coding agent</a> providers, models, token usage, and settings.
+  Inspired by <a href="https://github.com/farion1231/cc-switch">cc-switch</a> — a visual dashboard for managing your <a href="https://pi.dev">pi coding agent</a> providers, models, token usage, sessions, and settings.
+</p>
+
+<p align="center">
+  <strong>Reads data directly from <code>~/.pi/agent/</code></strong> — no mock data, no database, no backend setup required.
 </p>
 
 ---
@@ -31,40 +35,58 @@
 ## ✨ Features
 
 ### 📊 Dashboard
-- **Token Usage Trend** — 30-day area chart of daily token consumption
+- **Token Usage Trend** — Area chart of daily token consumption parsed from session files
 - **Cost Tracking** — Daily cost chart + cost breakdown by provider (pie chart)
 - **Request Volume** — Bar chart showing API call volume over time
 - **Provider Summary** — Table of all providers with totals (tokens, cost, requests)
 - **Key Stats** — Total tokens, total cost, total requests, active providers
+- All data sourced from **real pi session files** (`~/.pi/agent/sessions/*.jsonl`)
 
 ### 📦 Models
-- **Model Grid** — Browse all models across providers with search and filter
+- **Model Grid** — Browse all built-in and custom models with search and filter
 - **Enable/Disable** — Toggle models on/off to match your `enabledModels` config
-- **Edit Model** — Update capabilities (reasoning, image input), cost, context window, max tokens
-- **Add Model** — Wizard to create new models for any provider
+- **Edit Model** — Update capabilities, cost, context window, max tokens
+- **Add Model** — Create new models for any provider
 - **Delete Model** — Remove custom models
 
 ### 🔌 Providers
-- **Provider List** — Expandable cards showing all built-in and custom providers
+- **Provider List** — Expandable cards for all built-in and custom providers
 - **Custom Providers** — Add Ollama, vLLM, LM Studio, or any OpenAI-compatible provider
-- **API Key Management** — Set/remove API keys per provider
+- **API Key Management** — Set/remove API keys per provider (saved to `auth.json`)
 - **Provider Configuration** — baseUrl, API type, custom headers, auth method
+
+### 💬 Sessions
+- **Project Grouping** — Auto-decodes session directory names into project paths
+- **Session Browser** — View all 100+ sessions across projects
+- **Session Details** — Name, timestamp, message count, duration, provider/model used
+- **Search & Filter** — Filter sessions by project name
+- **Delete Sessions** — Remove old session files (sessions updated within 3 days are protected)
+
+### 🧠 Memory (pi-hermes-memory)
+- **Project Memories** — View `MEMORY.md` content with Markdown rendering
+- **User Profile** — Display `USER.md` preferences and settings
+- **Failure Records** — Browse `failures.md` known issues
+- **Live Sync** — Content updates immediately when memory files change on disk
 
 ### ⚙️ Settings
 - **Defaults** — Default provider, model, thinking level, project trust
-- **Theme** — Light / Dark / System with immediate toggle
+- **Theme** — Light / Dark / System with immediate toggle (CSS variables for both modes)
 - **Enabled Models** — View and manage the full enabled models list
 - **Extensions & Packages** — Manage pi packages list
 - **Import/Export** — Download full config as JSON, restore from backup
-- **Reset** — Factory reset to default configuration
+- **Reset** — Factory reset to blank configuration
+
+## 🌗 Theme Support
+
+Full light and dark mode with system-follow support. Theme toggles instantly via CSS custom properties — no page reload needed. All components adapt including sidebar, modals, forms, charts, and scrollbars.
 
 ## 🧱 Built-in Providers
 
-The app ships with mock data for **12 built-in providers** and **30+ models**:
+The app ships with definitions for **11 built-in providers** and **26 models** (hardcoded from pi's Rust source):
 
 | Provider | Models |
 |----------|--------|
-| Anthropic | Claude Sonnet 4, Opus 4, Haiku 3.5 |
+| Anthropic | Claude Sonnet 4, Sonnet 4.5, Opus 4, Haiku 3.5 |
 | OpenAI | GPT-4o, GPT-4o-mini, GPT-5.1, o3-mini |
 | DeepSeek | DeepSeek V3, DeepSeek R1 |
 | OpenCode | DeepSeek V4 Flash (Free), DeepSeek V4 Flash |
@@ -78,6 +100,13 @@ The app ships with mock data for **12 built-in providers** and **30+ models**:
 
 ## 🚀 Getting Started
 
+### Prerequisites
+
+- **pi coding agent** installed and configured (so `~/.pi/agent/` exists)
+- Node.js 18+
+
+### Setup
+
 ```bash
 # Clone
 git clone https://github.com/Raingor/pi-web-switch.git
@@ -86,7 +115,7 @@ cd pi-web-switch
 # Install dependencies
 npm install
 
-# Start dev server
+# Start dev server (reads ~/.pi/agent/ automatically)
 npm run dev
 
 # Build for production
@@ -95,6 +124,8 @@ npm run build
 # Preview production build
 npm run preview
 ```
+
+The dev server automatically serves pi configuration via Vite middleware at `/api/pi/*` — no separate backend process needed.
 
 ## 🏗️ Tech Stack
 
@@ -115,42 +146,72 @@ npm run preview
 pi-web-switch/
 ├── index.html
 ├── package.json
-├── vite.config.ts
+├── vite.config.ts          # Vite config + pi API plugin (middleware)
 ├── tsconfig.json
+├── server/
+│   └── pi-reader.ts        # Server-side module: reads ~/.pi/agent/ files + parses sessions
 ├── public/
 │   └── pi.svg
 └── src/
-    ├── main.tsx              # Entry point + init gate
-    ├── App.tsx               # Router setup
-    ├── index.css             # Tailwind + globals
-    ├── types/index.ts        # All TypeScript interfaces
+    ├── main.tsx            # Entry point + theme sync + init gate
+    ├── App.tsx             # Router setup (6 routes)
+    ├── index.css           # Tailwind + CSS theme variables (light/dark)
+    ├── types/index.ts      # All TypeScript interfaces
     ├── data/
-    │   ├── mock-config.ts    # Built-in providers + mock config
-    │   └── mock-usage.ts     # 30-day mock usage data generator
+    │   └── builtin-providers.ts  # Hardcoded built-in provider definitions
     ├── store/
-    │   └── config-store.ts   # Zustand store (CRUD + usage slices)
+    │   └── config-store.ts # Zustand store (fetches from /api/pi/*)
     ├── lib/
-    │   ├── utils.ts          # Formatting helpers
-    │   └── config.ts         # localStorage + import/export
+    │   ├── utils.ts        # Formatting helpers
+    │   └── config.ts       # Config import/export helpers
     └── components/
-        ├── layout/           # AppShell, Sidebar
-        ├── ui/               # StatCard, Badge, Modal, EmptyState
-        ├── dashboard/        # DashboardPage + charts
-        ├── models/           # ModelsPage + forms
-        ├── providers/        # ProvidersPage + forms
-        └── settings/         # SettingsPage
+        ├── layout/          # AppShell, Sidebar (6 nav items)
+        ├── ui/              # StatCard, Badge, Modal, EmptyState
+        ├── dashboard/       # DashboardPage + charts
+        ├── models/          # ModelsPage + forms
+        ├── providers/       # ProvidersPage + forms
+        ├── sessions/        # SessionsPage + MemoryPage
+        └── settings/        # SettingsPage
 ```
 
-## 💾 Data Model
+## 💾 Data Source
 
-The app models pi's real configuration structure:
+All data is read directly from **`~/.pi/agent/`** on your machine via a Vite middleware API plugin — no mock data, no database, no external service.
 
-- **`settings.json`** — Default provider, model, enabled models, packages, theme, etc.
-- **`auth.json`** — API keys stored per provider
-- **`models.json`** — Custom provider definitions (baseUrl, API type, models array with cost/capabilities)
-- **Usage data** — 30 days of mock token/cost/request data for 15 model-provider pairs
+| File | Purpose |
+|------|---------|
+| `~/.pi/agent/settings.json` | Default provider, model, theme, enabled models, packages |
+| `~/.pi/agent/auth.json` | API keys per provider |
+| `~/.pi/agent/models.json` | Custom provider definitions (baseUrl, API type, models) |
+| `~/.pi/agent/sessions/*.jsonl` | Session history with token usage, model, provider per message |
+| `~/.pi/agent/pi-hermes-memory/*.md` | Hermes memory (MEMORY.md, USER.md, failures.md) |
 
-All data is persisted to `localStorage`. Use the Settings page to export/import configuration as JSON.
+Changes made in the UI are written back to these files in real time — the pi agent picks them up on next reload.
+
+### Sessions & Usage
+
+- The app parses **106+ JSONL session files** from `sessions/` directory
+- Each assistant message's API usage data (tokens, cost) is extracted and aggregated
+- Dashboard shows real token consumption, costs, and request volumes across all sessions
+- Sessions list groups by project (decoded from directory names) with 24+ project groups
+
+## 🧩 API Routes
+
+The Vite dev server exposes these endpoints at `/api/pi/*`:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/pi/settings` | Read `settings.json` |
+| POST | `/api/pi/settings` | Write `settings.json` |
+| GET | `/api/pi/auth` | Read `auth.json` |
+| POST | `/api/pi/auth` | Write `auth.json` |
+| GET | `/api/pi/models` | Read `models.json` |
+| POST | `/api/pi/models` | Write `models.json` |
+| GET | `/api/pi/builtin-providers` | List hardcoded built-in providers |
+| GET | `/api/pi/usage` | Aggregated token/cost/request data from sessions |
+| GET | `/api/pi/sessions` | Session list grouped by project |
+| DELETE | `/api/pi/session?path=` | Delete a session file (path must be under sessions/) |
+| GET | `/api/pi/memory` | Read MEMORY.md, USER.md, failures.md |
 
 ## 🔗 Links
 

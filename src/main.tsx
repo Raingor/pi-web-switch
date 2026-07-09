@@ -1,23 +1,79 @@
-import { useEffect } from "react";
+import { StrictMode, useEffect } from "react";
+import { createRoot } from "react-dom/client";
 import { useConfigStore } from "@/store/config-store";
 import App from "@/App";
 import "@/index.css";
 
+// ─── Theme Sync ─────────────────────────────────────────
+function useThemeSync(initialized: boolean) {
+  const theme = useConfigStore((s) => s.settings?.theme);
+
+  useEffect(() => {
+    if (!initialized) return;
+    const root = document.documentElement;
+    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+
+    function applyTheme() {
+      root.classList.remove("dark", "light");
+      if (theme === "dark") {
+        root.classList.add("dark");
+      } else if (theme === "light") {
+        root.classList.add("light");
+      } else {
+        // "light/dark" or unset = follow system preference
+        root.classList.add(mediaQuery.matches ? "dark" : "light");
+      }
+    }
+    applyTheme();
+
+    if (theme !== "light" && theme !== "dark") {
+      const handler = () => applyTheme();
+      mediaQuery.addEventListener("change", handler);
+      return () => mediaQuery.removeEventListener("change", handler);
+    }
+  }, [initialized, theme]);
+}
+
 function InitGate({ children }: { children: React.ReactNode }) {
   const initialized = useConfigStore((s) => s.initialized);
+  const loading = useConfigStore((s) => s.loading);
+  const error = useConfigStore((s) => s.error);
   const init = useConfigStore((s) => s.init);
-  const config = useConfigStore((s) => s.config);
+
+  useThemeSync(initialized);
 
   useEffect(() => {
     init();
   }, [init]);
 
-  if (!initialized) {
+  if (!initialized || loading) {
     return (
       <div className="flex h-screen items-center justify-center bg-gray-950">
         <div className="flex flex-col items-center gap-4">
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-gray-600 border-t-blue-500" />
-          <p className="text-sm text-gray-500">Loading configuration...</p>
+          <p className="text-sm text-gray-500">
+            {loading ? "Loading pi configuration..." : "Initializing..."}
+          </p>
+          {error && (
+            <p className="text-sm text-red-400 max-w-md text-center">{error}</p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-gray-950">
+        <div className="flex flex-col items-center gap-4 max-w-md text-center">
+          <p className="text-lg font-semibold text-red-400">Failed to Load Configuration</p>
+          <p className="text-sm text-gray-400">{error}</p>
+          <button
+            onClick={() => init()}
+            className="mt-2 rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-500"
+          >
+            Retry
+          </button>
         </div>
       </div>
     );
@@ -26,10 +82,16 @@ function InitGate({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-export default function Root() {
+function Root() {
   return (
     <InitGate>
       <App />
     </InitGate>
   );
 }
+
+createRoot(document.getElementById("root")!).render(
+  <StrictMode>
+    <Root />
+  </StrictMode>
+);
