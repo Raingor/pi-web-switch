@@ -4,7 +4,15 @@ export function formatTokens(tokens: number): string {
   return tokens.toString();
 }
 
-export function formatCost(cost: number): string {
+export const USD_TO_CNY = 7.2;
+
+export function formatCost(cost: number, currency: "USD" | "CNY" = "USD"): string {
+  if (currency === "CNY") {
+    const cny = cost * USD_TO_CNY;
+    if (cny >= 100) return `¥${cny.toFixed(2)}`;
+    if (cny >= 1) return `¥${cny.toFixed(3)}`;
+    return `¥${cny.toFixed(4)}`;
+  }
   if (cost >= 100) return `$${cost.toFixed(2)}`;
   if (cost >= 1) return `$${cost.toFixed(3)}`;
   if (cost >= 0.01) return `¢${(cost * 100).toFixed(1)}`;

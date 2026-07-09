@@ -114,6 +114,36 @@ function piApiPlugin(): Plugin {
           return res.end(JSON.stringify({ success: ok }));
         }
 
+        // Handle GET /api/pi/usage-range?range=today|7d|30d|custom&from=...&to=...
+        if (method === "GET" && pathOnly === "/api/pi/usage-range") {
+          const parsedUrl = new URL(url, "http://localhost");
+          const range = parsedUrl.searchParams.get("range") || "today";
+          const fromParam = parsedUrl.searchParams.get("from") || "";
+          const toParam = parsedUrl.searchParams.get("to") || "";
+
+          const now = new Date();
+          let fromDate: string;
+          let toDate = now.toISOString().split("T")[0];
+
+          if (range === "today") {
+            fromDate = toDate;
+          } else if (range === "7d") {
+            const d = new Date(now); d.setDate(d.getDate() - 6); fromDate = d.toISOString().split("T")[0];
+          } else if (range === "30d") {
+            const d = new Date(now); d.setDate(d.getDate() - 29); fromDate = d.toISOString().split("T")[0];
+          } else if (range === "custom" && fromParam) {
+            fromDate = fromParam;
+            if (toParam) toDate = toParam;
+          } else {
+            fromDate = toDate;
+          }
+
+          const allRecords = pi.readAllUsage();
+          const usage = pi.getUsageByRange(allRecords, fromDate, toDate);
+          res.setHeader("Content-Type", "application/json");
+          return res.end(JSON.stringify(usage));
+        }
+
         const key = `${method} ${pathOnly}`;
         const handler = routes[key];
         if (handler) {

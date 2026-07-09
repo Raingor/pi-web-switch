@@ -7,19 +7,25 @@ import {
   Pi,
   History,
   Brain,
+  Globe,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useTranslation, LANGUAGES } from "@/lib/i18n";
+import { useState } from "react";
 
 const navItems = [
-  { to: "/", icon: LayoutDashboard, label: "Dashboard" },
-  { to: "/models", icon: Box, label: "Models" },
-  { to: "/providers", icon: Plug, label: "Providers" },
-  { to: "/sessions", icon: History, label: "Sessions" },
-  { to: "/memory", icon: Brain, label: "Memory" },
-  { to: "/settings", icon: Settings, label: "Settings" },
+  { to: "/", icon: LayoutDashboard, key: "nav.dashboard" },
+  { to: "/models", icon: Box, key: "nav.models" },
+  { to: "/providers", icon: Plug, key: "nav.providers" },
+  { to: "/sessions", icon: History, key: "nav.sessions" },
+  { to: "/memory", icon: Brain, key: "nav.memory" },
+  { to: "/settings", icon: Settings, key: "nav.settings" },
 ];
 
 export function Sidebar() {
+  const { t, lang, setLang } = useTranslation();
+  const [langOpen, setLangOpen] = useState(false);
+
   return (
     <aside
       className="flex h-screen w-64 flex-col border-r"
@@ -34,18 +40,18 @@ export function Sidebar() {
         style={{ borderColor: "var(--sidebar-border)" }}
       >
         <div className="flex h-9 w-9 items-center justify-center rounded-lg"
-          style={{ backgroundColor: "var(--sidebar-logo)" }}>
-          <Pi className="h-5 w-5 text-white" />
+          style={{ backgroundColor: "#3b82f6" }}>
+          <Pi className="h-5 w-5" style={{ color: "#ffffff" }} />
         </div>
         <div>
           <h1 className="text-base font-semibold" style={{ color: "var(--page-text)" }}>pi-switch</h1>
-          <p className="text-xs" style={{ color: "var(--subtle-text)" }}>Configuration Manager</p>
+          <p className="text-xs" style={{ color: "var(--subtle-text)" }}>{t("app.subtitle")}</p>
         </div>
       </div>
 
       {/* Navigation */}
       <nav className="flex-1 space-y-1 px-3 py-4">
-        {navItems.map(({ to, icon: Icon, label }) => (
+        {navItems.map(({ to, icon: Icon, key }) => (
           <NavLink
             key={to}
             to={to}
@@ -61,17 +67,49 @@ export function Sidebar() {
             })}
           >
             <Icon className="h-4 w-4" />
-            {label}
+            {t(key)}
           </NavLink>
         ))}
       </nav>
 
-      {/* Footer */}
+      {/* Language Switcher */}
+      <div className="border-t px-3 py-3" style={{ borderColor: "var(--sidebar-border)" }}>
+        <button
+          onClick={() => setLangOpen(!langOpen)}
+          className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors"
+          style={{ color: "var(--sidebar-text)" }}
+        >
+          <Globe className="h-4 w-4" />
+          <span className="flex-1 text-left">{LANGUAGES.find((l) => l.code === lang)?.nativeLabel || "English"}</span>
+        </button>
+        {langOpen && (
+          <div className="mt-1 space-y-0.5 px-1">
+            {LANGUAGES.map((l) => (
+              <button
+                key={l.code}
+                onClick={() => { setLang(l.code); setLangOpen(false); }}
+                className={cn(
+                  "flex w-full items-center gap-3 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors",
+                  lang === l.code ? "bg-blue-600/10 text-blue-400" : ""
+                )}
+                style={{
+                  color: lang === l.code ? "var(--sidebar-active-text)" : "var(--sidebar-text)",
+                  backgroundColor: lang === l.code ? "var(--sidebar-active-bg)" : "transparent",
+                }}
+              >
+                {l.nativeLabel}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Version */}
       <div
-        className="border-t px-6 py-4"
+        className="border-t px-6 py-3"
         style={{ borderColor: "var(--sidebar-border)" }}
       >
-        <p className="text-xs" style={{ color: "var(--subtle-text)" }}>pi-switch v0.1.0</p>
+        <p className="text-xs" style={{ color: "var(--subtle-text)" }}>{t("app.version")}</p>
       </div>
     </aside>
   );

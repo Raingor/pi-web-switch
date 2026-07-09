@@ -1,6 +1,9 @@
 import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { useConfigStore } from "@/store/config-store";
+import { I18nProvider } from "@/lib/i18n";
+import { useTranslation } from "@/lib/i18n";
+import translations from "@/lib/translations";
 import App from "@/App";
 import "@/index.css";
 
@@ -20,7 +23,6 @@ function useThemeSync(initialized: boolean) {
       } else if (theme === "light") {
         root.classList.add("light");
       } else {
-        // "light/dark" or unset = follow system preference
         root.classList.add(mediaQuery.matches ? "dark" : "light");
       }
     }
@@ -32,6 +34,36 @@ function useThemeSync(initialized: boolean) {
       return () => mediaQuery.removeEventListener("change", handler);
     }
   }, [initialized, theme]);
+}
+
+function LoadingScreen() {
+  const { t } = useTranslation();
+  return (
+    <div className="flex h-screen items-center justify-center bg-gray-950">
+      <div className="flex flex-col items-center gap-4">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-gray-600 border-t-blue-500" />
+        <p className="text-sm text-gray-500">{t("loading.config")}</p>
+      </div>
+    </div>
+  );
+}
+
+function ErrorScreen({ error, onRetry }: { error: string; onRetry: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex h-screen items-center justify-center bg-gray-950">
+      <div className="flex flex-col items-center gap-4 max-w-md text-center">
+        <p className="text-lg font-semibold text-red-400">{t("loading.error_title")}</p>
+        <p className="text-sm text-gray-400">{error}</p>
+        <button
+          onClick={onRetry}
+          className="mt-2 rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-500"
+        >
+          {t("loading.retry")}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function InitGate({ children }: { children: React.ReactNode }) {
@@ -47,36 +79,11 @@ function InitGate({ children }: { children: React.ReactNode }) {
   }, [init]);
 
   if (!initialized || loading) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-gray-950">
-        <div className="flex flex-col items-center gap-4">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-gray-600 border-t-blue-500" />
-          <p className="text-sm text-gray-500">
-            {loading ? "Loading pi configuration..." : "Initializing..."}
-          </p>
-          {error && (
-            <p className="text-sm text-red-400 max-w-md text-center">{error}</p>
-          )}
-        </div>
-      </div>
-    );
+    return <LoadingScreen />;
   }
 
   if (error) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-gray-950">
-        <div className="flex flex-col items-center gap-4 max-w-md text-center">
-          <p className="text-lg font-semibold text-red-400">Failed to Load Configuration</p>
-          <p className="text-sm text-gray-400">{error}</p>
-          <button
-            onClick={() => init()}
-            className="mt-2 rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-500"
-          >
-            Retry
-          </button>
-        </div>
-      </div>
-    );
+    return <ErrorScreen error={error} onRetry={init} />;
   }
 
   return <>{children}</>;
@@ -84,9 +91,11 @@ function InitGate({ children }: { children: React.ReactNode }) {
 
 function Root() {
   return (
-    <InitGate>
-      <App />
-    </InitGate>
+    <I18nProvider translations={translations}>
+      <InitGate>
+        <App />
+      </InitGate>
+    </I18nProvider>
   );
 }
 

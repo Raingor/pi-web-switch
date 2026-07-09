@@ -1,5 +1,6 @@
 import { useState, useRef } from "react";
 import { useConfigStore } from "@/store/config-store";
+import { useTranslation } from "@/lib/i18n";
 import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
 import { exportConfig, parseImportFile, saveLocalBackup } from "@/lib/config";
@@ -20,6 +21,7 @@ import {
 } from "lucide-react";
 
 export function SettingsPage() {
+  const { t } = useTranslation();
   const { settings, auth, modelsJson, allProviders, allModels, updateSettings, setTheme, addPackage, removePackage, importConfig: importConfigAction, resetToDefaults } = useConfigStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [newPackage, setNewPackage] = useState("");

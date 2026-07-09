@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useConfigStore } from "@/store/config-store";
+import { useTranslation } from "@/lib/i18n";
 import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -29,6 +30,7 @@ const API_TYPES: { value: ApiType; label: string }[] = [
 ];
 
 export function ProvidersPage() {
+  const { t } = useTranslation();
   const { allProviders, auth, updateCustomProvider, removeCustomProvider, setProviderAuth, removeProviderAuth } =
     useConfigStore();
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -61,24 +63,25 @@ export function ProvidersPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">Providers</h1>
-          <p className="mt-1 text-sm text-gray-400">
-            Manage {allProviders.length} providers ({customProviders.length} custom)
+          <h1 className="text-2xl font-bold" style={{ color: "var(--page-text)" }}>{t("providers.title")}</h1>
+          <p className="mt-1 text-sm" style={{ color: "var(--muted-text)" }}>
+            {allProviders.length} providers ({customProviders.length} custom)
           </p>
         </div>
         <button
           onClick={() => setShowAdd(true)}
-          className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500"
+          className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+          style={{ backgroundColor: "#3b82f6", color: "#ffffff" }}
         >
           <Plus className="h-4 w-4" />
-          Add Provider
+          {t("providers.add_provider")}
         </button>
       </div>
 
       {allProviders.length === 0 ? (
         <EmptyState
           icon={<Plug className="h-12 w-12" />}
-          title="No providers"
+          title={t("providers.title")}
           description="Add your first provider to get started"
         />
       ) : (
@@ -133,7 +136,7 @@ export function ProvidersPage() {
                         className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-gray-400 hover:bg-gray-800 hover:text-gray-200"
                       >
                         <Edit3 className="h-3 w-3" />
-                        Edit
+                        {t("providers.edit_provider")}
                       </span>
                       <span
                         onClick={(e) => {
@@ -143,7 +146,7 @@ export function ProvidersPage() {
                         className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-red-400 hover:bg-red-500/10"
                       >
                         <Trash2 className="h-3 w-3" />
-                        Delete
+                        {t("providers.delete_provider")}
                       </span>
                     </>
                   )}
@@ -215,7 +218,7 @@ export function ProvidersPage() {
       )}
 
       {/* Add Provider Modal */}
-      <Modal open={showAdd} onClose={() => setShowAdd(false)} title="Add Custom Provider" size="lg">
+      <Modal open={showAdd} onClose={() => setShowAdd(false)} title={t("providers.add_provider")} size="lg">
         <ProviderForm
           onSubmit={handleAddProvider}
           onCancel={() => setShowAdd(false)}
@@ -223,7 +226,7 @@ export function ProvidersPage() {
       </Modal>
 
       {/* Edit Provider Modal */}
-      <Modal open={!!editProvider} onClose={() => setEditProvider(null)} title="Edit Provider" size="lg">
+      <Modal open={!!editProvider} onClose={() => setEditProvider(null)} title={t("providers.edit_provider")} size="lg">
         {editProvider && (
           <ProviderForm
             initial={customProviders.find((p) => p.id === editProvider)}
@@ -274,7 +277,8 @@ export function ProvidersPage() {
               <button
                 onClick={() => handleSetAuth(showAuth!)}
                 disabled={!authKey}
-                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50"
+                className="rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50"
+                style={{ backgroundColor: "#3b82f6", color: "#ffffff" }}
               >
                 Save Key
               </button>
@@ -392,7 +396,8 @@ function ProviderForm({ initial, onSubmit, onCancel, isEdit }: ProviderFormProps
         <button
           onClick={handleSubmit}
           disabled={!id || !baseUrl}
-          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50"
+          className="rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50"
+          style={{ backgroundColor: "#3b82f6", color: "#ffffff" }}
         >
           {isEdit ? "Save Changes" : "Add Provider"}
         </button>
