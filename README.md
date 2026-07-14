@@ -226,6 +226,47 @@ The Vite dev server exposes these endpoints at `/api/pi/*`:
 | DELETE | `/api/pi/session?path=` | Delete a session file (path must be under sessions/) |
 | GET | `/api/pi/memory` | Read MEMORY.md, USER.md, failures.md |
 
+## 📦 Pi Package
+
+pi-web-switch can be installed as a **pi coding agent extension**, allowing you to start/stop the dashboard directly from your pi session.
+
+### Install
+
+Add `npm:pi-web-switch` to your `~/.pi/agent/settings.json` packages list:
+
+```json
+{
+  "packages": ["npm:pi-web-switch"]
+}
+```
+
+Or use the Settings page in the dashboard to add it.
+
+### Commands
+
+Once installed, the following commands are available in your pi session:
+
+| Command | Description |
+|---------|-------------|
+| `/pi-web-switch start` | Launch the dashboard at `http://localhost:5173` |
+| `/pi-web-switch stop` | Stop the server |
+| `/pi-web-switch status` | Check if the dashboard is running |
+
+### Package Structure
+
+```
+pi-web-switch/
+├── package.json           # npm package with pi.extensions + pi.skills
+├── pi-package/
+│   ├── index.ts           # Extension entry: registers /pi-web-switch command
+│   └── skills/
+│       └── pi-web-switch/
+│           └── SKILL.md   # Usage documentation
+├── server/
+│   └── pi-reader.ts       # Server-side: reads ~/.pi/agent/ files
+└── src/                   # React frontend
+```
+
 ## 🔗 Links
 
 - **Homepage:** [raingor.github.io/my-blog](https://raingor.github.io/my-blog/)
