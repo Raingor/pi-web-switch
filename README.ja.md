@@ -88,6 +88,45 @@ npm run build  # プロダクションビルド
 
 React 19 + TypeScript 5.8 + Vite 6 + Tailwind CSS v4 + Zustand + Recharts + Lucide React + React Router v7
 
+## 📦 Pi パッケージ
+
+pi-web-switch は **pi コーディングエージェント拡張** としてインストール可能で、pi セッションから直接ダッシュボードを起動・停止できます。
+
+### インストール
+
+`~/.pi/agent/settings.json` の packages に `npm:pi-web-switch` を追加：
+
+```json
+{
+  "packages": ["npm:pi-web-switch"]
+}
+```
+
+### コマンド
+
+インストール後、pi セッションで以下のコマンドが使用可能：
+
+| コマンド | 説明 |
+|---------|------|
+| `/pi-web-switch start` | ダッシュボード起動 http://localhost:5173 |
+| `/pi-web-switch stop` | サーバー停止 |
+| `/pi-web-switch status` | 実行状態を確認 |
+
+### パッケージ構造
+
+```
+pi-web-switch/
+├── package.json           # npm パッケージ + pi.extensions + pi.skills
+├── pi-package/
+│   ├── index.ts           # 拡張エントリ：/pi-web-switch コマンド登録
+│   └── skills/
+│       └── pi-web-switch/
+│           └── SKILL.md   # 使用ドキュメント
+├── server/
+│   └── pi-reader.ts       # サーバーサイド：~/.pi/agent/ 読み取り
+└── src/                   # React フロントエンド
+```
+
 ## 🔗 リンク
 
 - **ホームページ：** [raingor.github.io/my-blog](https://raingor.github.io/my-blog/)

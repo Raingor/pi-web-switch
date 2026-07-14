@@ -127,6 +127,45 @@ npm run preview # 预览生产构建
 
 React 19 + TypeScript 5.8 + Vite 6 + Tailwind CSS v4 + Zustand + Recharts + Lucide React + React Router v7
 
+## 📦 Pi 扩展包
+
+pi-web-switch 可安装为 **pi 编码代理扩展**，在 pi 会话中直接启动/停止仪表盘。
+
+### 安装
+
+在 `~/.pi/agent/settings.json` 的 packages 列表中添加 `npm:pi-web-switch`：
+
+```json
+{
+  "packages": ["npm:pi-web-switch"]
+}
+```
+
+### 命令
+
+安装后在 pi 会话中可用以下命令：
+
+| 命令 | 说明 |
+|------|------|
+| `/pi-web-switch start` | 启动仪表盘 http://localhost:5173 |
+| `/pi-web-switch stop` | 停止服务器 |
+| `/pi-web-switch status` | 查看运行状态 |
+
+### 包结构
+
+```
+pi-web-switch/
+├── package.json           # npm 包 + pi.extensions + pi.skills
+├── pi-package/
+│   ├── index.ts           # 扩展入口：注册 /pi-web-switch 命令
+│   └── skills/
+│       └── pi-web-switch/
+│           └── SKILL.md   # 使用文档
+├── server/
+│   └── pi-reader.ts       # 服务端：读取 ~/.pi/agent/ 文件
+└── src/                   # React 前端
+```
+
 ## 🔗 相关链接
 
 - **个人主页：** [raingor.github.io/my-blog](https://raingor.github.io/my-blog/)
