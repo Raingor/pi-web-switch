@@ -99,7 +99,20 @@ const CHART_LABELS: Record<string, string> = {
 
 // ─── Helpers ────────────────────────────────────────────
 
-function formatTokensShort(n: number): string {
+function formatTokensShort(n: number, lang: string = "en"): string {
+  // 中文：亿 / 万
+  if (lang.startsWith("zh")) {
+    if (n >= 100_000_000) return `${(n / 100_000_000).toFixed(2)}亿`;
+    if (n >= 10_000) return `${(n / 10_000).toFixed(1)}万`;
+    return n.toLocaleString("zh-CN");
+  }
+  // 日文：億 / 万
+  if (lang.startsWith("ja")) {
+    if (n >= 100_000_000) return `${(n / 100_000_000).toFixed(2)}億`;
+    if (n >= 10_000) return `${(n / 10_000).toFixed(1)}万`;
+    return n.toLocaleString("ja-JP");
+  }
+  // 英文：M / K
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return n.toString();
@@ -183,7 +196,7 @@ function StatCard({
 
 // ─── Breakdown Row ──────────────────────────────────────
 
-function BreakdownRow({ label, value, total, color }: { label: string; value: number; total: number; color: string }) {
+function BreakdownRow({ label, value, total, color, lang = "en" }: { label: string; value: number; total: number; color: string; lang?: string }) {
   const pct = total > 0 ? (value / total) * 100 : 0;
   return (
     <div className="flex items-center justify-between py-1.5">
@@ -192,7 +205,7 @@ function BreakdownRow({ label, value, total, color }: { label: string; value: nu
         <span className="text-xs" style={{ color: "var(--muted-text)" }}>{label}</span>
       </div>
       <div className="flex items-center gap-2">
-        <span className="text-xs font-medium" style={{ color: "var(--page-text)" }}>{formatTokensShort(value)}</span>
+        <span className="text-xs font-medium" style={{ color: "var(--page-text)" }}>{formatTokensShort(value, lang)}</span>
         <span className="text-xs" style={{ color: "var(--subtle-text)" }}>({pct.toFixed(1)}%)</span>
       </div>
     </div>
@@ -202,7 +215,7 @@ function BreakdownRow({ label, value, total, color }: { label: string; value: nu
 // ─── Main Component ─────────────────────────────────────
 
 export function DashboardPage() {
-  const { t } = useTranslation();
+  const { t, lang } = useTranslation();
   const { currency, toggle: toggleCurrency } = useCurrency();
   const { initialized } = useConfigStore();
   const [range, setRange] = useState<RangeKey>("today");
@@ -389,13 +402,13 @@ export function DashboardPage() {
               title={t("dashboard.total_tokens")}
               value={data.totalTokens.toLocaleString("en-US")}
               icon={<Activity className="h-4 w-4" style={{ color: "#3b82f6" }} />}
-              subtitle={`≈ ${formatTokensShort(data.totalTokens)}`}
+              subtitle={`≈ ${formatTokensShort(data.totalTokens, lang)}`}
             >
               <div className="mt-3 space-y-0.5 border-t pt-3" style={{ borderColor: "var(--card-border)" }}>
-                <BreakdownRow label={t("dashboard.input")} value={data.totalInput} total={data.totalTokens} color="#3b82f6" />
-                <BreakdownRow label={t("dashboard.output")} value={data.totalOutput} total={data.totalTokens} color="#10b981" />
-                <BreakdownRow label={t("dashboard.cache_create")} value={data.totalCacheWrite} total={data.totalTokens} color="#f59e0b" />
-                <BreakdownRow label={t("dashboard.cache_hit")} value={data.totalCacheRead} total={data.totalTokens} color="#8b5cf6" />
+                <BreakdownRow label={t("dashboard.input")} value={data.totalInput} total={data.totalTokens} color="#3b82f6" lang={lang} />
+                <BreakdownRow label={t("dashboard.output")} value={data.totalOutput} total={data.totalTokens} color="#10b981" lang={lang} />
+                <BreakdownRow label={t("dashboard.cache_create")} value={data.totalCacheWrite} total={data.totalTokens} color="#f59e0b" lang={lang} />
+                <BreakdownRow label={t("dashboard.cache_hit")} value={data.totalCacheRead} total={data.totalTokens} color="#8b5cf6" lang={lang} />
               </div>
             </StatCard>
 
@@ -509,8 +522,8 @@ export function DashboardPage() {
                           <td className="px-4 py-2.5 whitespace-nowrap" style={{ color: "var(--page-text)" }}>{r.timestamp}</td>
                           <td className="px-4 py-2.5" style={{ color: "var(--page-text)" }}>{r.providerId}</td>
                           <td className="px-4 py-2.5" style={{ color: "var(--page-text)" }}>{r.modelId}</td>
-                          <td className="px-4 py-2.5 text-right font-mono" style={{ color: "var(--page-text)" }}>{formatTokensShort(r.input)}</td>
-                          <td className="px-4 py-2.5 text-right font-mono" style={{ color: "var(--page-text)" }}>{formatTokensShort(r.output)}</td>
+                          <td className="px-4 py-2.5 text-right font-mono" style={{ color: "var(--page-text)" }}>{formatTokensShort(r.input, lang)}</td>
+                          <td className="px-4 py-2.5 text-right font-mono" style={{ color: "var(--page-text)" }}>{formatTokensShort(r.output, lang)}</td>
                           <td className="px-4 py-2.5 text-right font-mono" style={{ color: "var(--page-text)" }}>{currency === "CNY" ? `¥${(r.cost * USD_TO_CNY).toFixed(4)}` : formatCostShort(r.cost)}</td>
                           <td className="px-4 py-2.5 text-right font-mono" style={{ color: "var(--page-text)" }}>{r.requests}</td>
                           <td className="px-4 py-2.5 text-center">
@@ -545,9 +558,9 @@ export function DashboardPage() {
                       data.providerStats.map((p, i) => (
                         <tr key={i} className="border-b" style={{ borderColor: "var(--card-border)" }}>
                           <td className="px-4 py-2.5 font-medium" style={{ color: "var(--page-text)" }}>{p.providerId}</td>
-                          <td className="px-4 py-2.5 text-right font-mono" style={{ color: "var(--page-text)" }}>{formatTokensShort(p.totalTokens)}</td>
-                          <td className="px-4 py-2.5 text-right font-mono" style={{ color: "var(--page-text)" }}>{formatTokensShort(p.totalInput)}</td>
-                          <td className="px-4 py-2.5 text-right font-mono" style={{ color: "var(--page-text)" }}>{formatTokensShort(p.totalOutput)}</td>
+                          <td className="px-4 py-2.5 text-right font-mono" style={{ color: "var(--page-text)" }}>{formatTokensShort(p.totalTokens, lang)}</td>
+                          <td className="px-4 py-2.5 text-right font-mono" style={{ color: "var(--page-text)" }}>{formatTokensShort(p.totalInput, lang)}</td>
+                          <td className="px-4 py-2.5 text-right font-mono" style={{ color: "var(--page-text)" }}>{formatTokensShort(p.totalOutput, lang)}</td>
                           <td className="px-4 py-2.5 text-right font-mono" style={{ color: "var(--page-text)" }}>{currency === "CNY" ? `¥${(p.totalCost * USD_TO_CNY).toFixed(4)}` : formatCostShort(p.totalCost)}</td>
                           <td className="px-4 py-2.5 text-right font-mono" style={{ color: "var(--page-text)" }}>{p.totalRequests}</td>
                           <td className="px-4 py-2.5 text-right font-mono" style={{ color: "var(--page-text)" }}>{p.modelCount}</td>
@@ -579,9 +592,9 @@ export function DashboardPage() {
                         <tr key={i} className="border-b" style={{ borderColor: "var(--card-border)" }}>
                           <td className="px-4 py-2.5 font-medium" style={{ color: "var(--page-text)" }}>{m.modelId}</td>
                           <td className="px-4 py-2.5" style={{ color: "var(--page-text)" }}>{m.providerId}</td>
-                          <td className="px-4 py-2.5 text-right font-mono" style={{ color: "var(--page-text)" }}>{formatTokensShort(m.totalTokens)}</td>
-                          <td className="px-4 py-2.5 text-right font-mono" style={{ color: "var(--page-text)" }}>{formatTokensShort(m.totalInput)}</td>
-                          <td className="px-4 py-2.5 text-right font-mono" style={{ color: "var(--page-text)" }}>{formatTokensShort(m.totalOutput)}</td>
+                          <td className="px-4 py-2.5 text-right font-mono" style={{ color: "var(--page-text)" }}>{formatTokensShort(m.totalTokens, lang)}</td>
+                          <td className="px-4 py-2.5 text-right font-mono" style={{ color: "var(--page-text)" }}>{formatTokensShort(m.totalInput, lang)}</td>
+                          <td className="px-4 py-2.5 text-right font-mono" style={{ color: "var(--page-text)" }}>{formatTokensShort(m.totalOutput, lang)}</td>
                           <td className="px-4 py-2.5 text-right font-mono" style={{ color: "var(--page-text)" }}>{currency === "CNY" ? `¥${(m.totalCost * USD_TO_CNY).toFixed(4)}` : formatCostShort(m.totalCost)}</td>
                           <td className="px-4 py-2.5 text-right font-mono" style={{ color: "var(--page-text)" }}>{m.totalRequests}</td>
                         </tr>

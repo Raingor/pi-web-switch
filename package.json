@@ -4,7 +4,14 @@
   "version": "0.2.0",
   "type": "module",
   "description": "Web UI for pi coding agent — live configuration management, session browser, and memory viewer",
-  "keywords": ["pi-package", "pi", "pi-coding-agent", "dashboard", "configuration", "web-ui"],
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-coding-agent",
+    "dashboard",
+    "configuration",
+    "web-ui"
+  ],
   "author": "Raingor",
   "license": "MIT",
   "repository": {
@@ -21,8 +28,12 @@
     "preview": "vite preview"
   },
   "pi": {
-    "extensions": ["./pi-package/index.ts"],
-    "skills": ["./pi-package/skills"]
+    "extensions": [
+      "./pi-package/index.ts"
+    ],
+    "skills": [
+      "./pi-package/skills"
+    ]
   },
   "dependencies": {
     "lucide-react": "^0.487.0",
@@ -39,6 +50,7 @@
     "@vitejs/plugin-react": "^4.4.1",
     "tailwindcss": "^4.1.4",
     "typescript": "~5.8.3",
-    "vite": "^6.3.2"
+    "vite": "^6.3.2",
+    "vite-plugin-pwa": "^1.3.0"
   }
 }
