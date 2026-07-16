@@ -1,8 +1,6 @@
 import { NavLink } from "react-router-dom";
 import {
   LayoutDashboard,
-  Box,
-  Plug,
   Settings,
   Pi,
   History,
@@ -15,8 +13,6 @@ import { useState } from "react";
 
 const navItems = [
   { to: "/", icon: LayoutDashboard, key: "nav.dashboard" },
-  { to: "/models", icon: Box, key: "nav.models" },
-  { to: "/providers", icon: Plug, key: "nav.providers" },
   { to: "/sessions", icon: History, key: "nav.sessions" },
   { to: "/memory", icon: Brain, key: "nav.memory" },
   { to: "/settings", icon: Settings, key: "nav.settings" },
