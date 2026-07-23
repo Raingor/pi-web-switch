@@ -1,7 +1,7 @@
 {
   "name": "@raingor/pi-web-switch",
   "private": false,
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "module",
   "main": "pi-package/index.ts",
   "description": "Web UI for pi coding agent — live configuration management, session browser, and memory viewer",
