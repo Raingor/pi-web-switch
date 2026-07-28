@@ -12,8 +12,6 @@ function generateMockUsage(): UsageRecord[] {
     { providerId: "opencode-go", modelId: "mimo-v2.5", baseTokens: 300_000, baseCost: 0.36 },
     { providerId: "opencode", modelId: "deepseek-v4-flash-free", baseTokens: 800_000, baseCost: 0 },
     { providerId: "opencode", modelId: "deepseek-v4-flash", baseTokens: 200_000, baseCost: 0.06 },
-    { providerId: "sensenova", modelId: "glm-5.2", baseTokens: 350_000, baseCost: 0.28 },
-    { providerId: "sensenova", modelId: "deepseek-v4-flash", baseTokens: 500_000, baseCost: 0.15 },
     { providerId: "anthropic", modelId: "claude-sonnet-4", baseTokens: 150_000, baseCost: 0.45 },
     { providerId: "anthropic", modelId: "claude-haiku-3-5", baseTokens: 90_000, baseCost: 0.036 },
     { providerId: "openai", modelId: "gpt-4o", baseTokens: 80_000, baseCost: 0.20 },

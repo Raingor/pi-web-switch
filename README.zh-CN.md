@@ -99,7 +99,6 @@
 | DeepSeek | DeepSeek V3, DeepSeek R1 |
 | OpenCode | DeepSeek V4 Flash (免费), DeepSeek V4 Flash |
 | OpenCode Go | DeepSeek V4 Flash, V4 Pro, GLM 5.1, Qwen 3.7 Max, MiMo V2.5 |
-| SenseNova | GLM 5.2, DeepSeek V4 Flash |
 | Google Gemini | Gemini 2.5 Flash, Gemini 2.5 Pro |
 | OpenRouter | Claude Sonnet 4, DeepSeek R1 |
 | Mistral | Mistral Large |

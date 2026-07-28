@@ -99,6 +99,15 @@ function Root() {
   );
 }
 
+// ─── UI font size: apply saved value before first paint ─
+applySavedFontSize();
+function applySavedFontSize() {
+  const saved = Number(localStorage.getItem("pi-font-size"));
+  if (saved >= 12 && saved <= 24) {
+    document.documentElement.style.fontSize = `${saved}px`;
+  }
+}
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <Root />

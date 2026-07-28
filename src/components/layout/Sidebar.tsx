@@ -6,6 +6,7 @@ import {
   History,
   Brain,
   Globe,
+  Plug,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTranslation, LANGUAGES } from "@/lib/i18n";
@@ -15,6 +16,7 @@ const navItems = [
   { to: "/", icon: LayoutDashboard, key: "nav.dashboard" },
   { to: "/sessions", icon: History, key: "nav.sessions" },
   { to: "/memory", icon: Brain, key: "nav.memory" },
+  { to: "/providers", icon: Plug, key: "nav.providers_models" },
   { to: "/settings", icon: Settings, key: "nav.settings" },
 ];
 

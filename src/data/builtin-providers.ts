@@ -73,18 +73,6 @@ export const BUILTIN_PROVIDERS: Provider[] = [
     ],
   },
   {
-    id: "sensenova",
-    name: "SenseNova",
-    type: "builtin",
-    api: "openai-completions",
-    hasAuth: true,
-    authMethod: "env",
-    models: [
-      { id: "glm-5.2", name: "GLM 5.2", reasoning: false, input: ["text"], contextWindow: 128000, maxTokens: 8192, cost: { input: 0.8, output: 2.4, cacheRead: 0.4, cacheWrite: 0.8 }, enabled: true },
-      { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash", reasoning: false, input: ["text"], contextWindow: 128000, maxTokens: 8192, cost: { input: 0.3, output: 0.6, cacheRead: 0.15, cacheWrite: 0.3 }, enabled: true },
-    ],
-  },
-  {
     id: "google",
     name: "Google Gemini",
     type: "builtin",

@@ -1,6 +1,7 @@
-import { readFileSync, readdirSync, existsSync, statSync, unlinkSync, writeFileSync } from "fs";
+import { readFileSync, readdirSync, existsSync, statSync, unlinkSync, writeFileSync, mkdirSync, renameSync } from "fs";
 import { homedir } from "os";
-import { join, resolve } from "path";
+import { join, resolve, dirname, relative, sep } from "path";
+import { spawnSync } from "child_process";
 
 const PI_DIR = join(homedir(), ".pi", "agent");
 
@@ -38,8 +39,6 @@ export function writeSettings(settings: any): boolean {
     return false;
   }
 }
-
-import { writeFileSync } from "fs";
 
 // ─── Auth ───────────────────────────────────────────────
 
@@ -674,5 +673,405 @@ export function deleteSessionFile(filePath: string): boolean {
     return true;
   } catch {
     return false;
+  }
+}
+
+// ─── Session Trash (shared with pi-desktop: ~/.pi/agent/.trash) ───
+
+const SESSIONS_DIR = join(PI_DIR, "sessions");
+const TRASH_DIR = join(PI_DIR, ".trash");
+
+export interface TrashEntry {
+  trashPath: string;
+  originalPath: string;
+  fileName: string;
+  trashedAt: string;
+  sessionId: string;
+  sessionName: string;
+  lastActive: string;
+  messageCount: number;
+}
+
+function walkJsonl(dir: string, out: string[]): void {
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return;
+  }
+  for (const name of entries) {
+    const p = join(dir, name);
+    try {
+      if (statSync(p).isDirectory()) walkJsonl(p, out);
+      else if (name.endsWith(".jsonl")) out.push(p);
+    } catch {
+      // skip
+    }
+  }
+}
+
+/** Move a session file into the trash, preserving its path relative to the sessions dir. */
+export function trashSessionFile(filePath: string): boolean {
+  try {
+    const resolved = resolve(filePath);
+    if (!resolved.startsWith(SESSIONS_DIR + sep)) return false;
+    if (!resolved.endsWith(".jsonl") || !existsSync(resolved)) return false;
+    const rel = relative(SESSIONS_DIR, resolved);
+    const trashPath = join(TRASH_DIR, rel);
+    mkdirSync(dirname(trashPath), { recursive: true });
+    renameSync(resolved, trashPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function listTrash(): TrashEntry[] {
+  const files: string[] = [];
+  walkJsonl(TRASH_DIR, files);
+  const entries: TrashEntry[] = [];
+  for (const trashPath of files) {
+    const info = parseSessionFileInfo(trashPath);
+    let trashedAt = "";
+    try {
+      // ctime updates on rename — reflects when the file entered the trash
+      trashedAt = statSync(trashPath).ctime.toISOString();
+    } catch {
+      // keep empty
+    }
+    const rel = relative(TRASH_DIR, trashPath);
+    entries.push({
+      trashPath,
+      originalPath: join(SESSIONS_DIR, rel),
+      fileName: trashPath.split("/").pop() || trashPath,
+      trashedAt,
+      sessionId: info?.id || "",
+      sessionName: info?.name || "",
+      lastActive: info?.lastActive || "",
+      messageCount: info?.messageCount || 0,
+    });
+  }
+  return entries.sort((a, b) => b.trashedAt.localeCompare(a.trashedAt));
+}
+
+export function restoreFromTrash(trashPath: string): boolean {
+  try {
+    const resolved = resolve(trashPath);
+    if (!resolved.startsWith(TRASH_DIR + sep) || !existsSync(resolved)) return false;
+    const rel = relative(TRASH_DIR, resolved);
+    const original = join(SESSIONS_DIR, rel);
+    mkdirSync(dirname(original), { recursive: true });
+    renameSync(resolved, original);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function permanentlyDeleteTrash(trashPath: string): boolean {
+  try {
+    const resolved = resolve(trashPath);
+    if (!resolved.startsWith(TRASH_DIR + sep) || !existsSync(resolved)) return false;
+    unlinkSync(resolved);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ─── Session Preview ────────────────────────────────
+
+export interface SessionPreviewMessage {
+  role: string;
+  text: string;
+  timestamp: string;
+}
+
+/** Read the first user/assistant messages of a session file (text parts only). */
+export function readSessionPreview(filePath: string, limit = 20): { messages: SessionPreviewMessage[]; total: number } | null {
+  try {
+    const resolved = resolve(filePath);
+    const inSessions = resolved.startsWith(SESSIONS_DIR + sep);
+    const inTrash = resolved.startsWith(TRASH_DIR + sep);
+    if ((!inSessions && !inTrash) || !resolved.endsWith(".jsonl") || !existsSync(resolved)) return null;
+
+    const lines = readFileSync(resolved, "utf-8").split("\n").filter((l) => l.trim());
+    const messages: SessionPreviewMessage[] = [];
+    let total = 0;
+    for (const line of lines) {
+      try {
+        const obj = JSON.parse(line);
+        if (obj.type !== "message") continue;
+        const msg = obj.message || {};
+        const role = msg.role || "";
+        if (role !== "user" && role !== "assistant") continue;
+        total++;
+        if (messages.length >= limit) continue;
+        // Extract text parts; fall back to a tool-call marker for pure tool turns
+        let text = "";
+        if (typeof msg.content === "string") {
+          text = msg.content;
+        } else if (Array.isArray(msg.content)) {
+          text = msg.content
+            .filter((c: any) => c?.type === "text" && c.text)
+            .map((c: any) => c.text)
+            .join("\n");
+          if (!text) {
+            const tools = msg.content.filter((c: any) => c?.type === "toolCall").length;
+            if (tools > 0) text = `[${tools} tool call${tools > 1 ? "s" : ""}]`;
+          }
+        }
+        text = text.trim();
+        if (text.length > 400) text = text.slice(0, 400) + "…";
+        messages.push({ role, text, timestamp: obj.timestamp || "" });
+      } catch {
+        // skip
+      }
+    }
+    return { messages, total };
+  } catch {
+    return null;
+  }
+}
+
+// ─── Memory Entry Deletion ───────────────────────────
+
+const MEMORY_FILENAMES = ["MEMORY.md", "USER.md", "failures.md"];
+
+/** Strip the trailing `<!-- created=..., last=... -->` marker from a § section. */
+function sectionText(section: string): string {
+  return section.replace(/<!--\s*created\s*=[^>]*-->\s*$/, "").trim();
+}
+
+/** Delete one §-separated entry (matched by its text) and write the file back. */
+export function deleteMemoryEntry(filename: string, entryText: string): boolean {
+  try {
+    if (!MEMORY_FILENAMES.includes(filename)) return false;
+    const filePath = join(HERMES_DIR, filename);
+    if (!existsSync(filePath)) return false;
+
+    const content = readFileSync(filePath, "utf-8");
+    const sections = content.split("§");
+    const target = entryText.trim();
+    const idx = sections.findIndex((s) => s.trim().length > 0 && sectionText(s) === target);
+    if (idx === -1) return false;
+
+    sections.splice(idx, 1);
+    writeFileSync(filePath, sections.join("§"));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ─── Update Check (npm registry) ────────────────────────
+
+/** npm package that ships the pi binary (bin/pi → its dist/cli.js). */
+const PI_CORE_PACKAGE = "@earendil-works/pi-coding-agent";
+
+const REGISTRY_TIMEOUT_MS = 8000;
+
+export interface UpdateItem {
+  name: string;
+  installed: string;
+  latest: string | null; // null → registry lookup failed
+  hasUpdate: boolean;
+}
+
+export interface UpdateCheckResult {
+  pi: UpdateItem | null; // null → pi version unknown (binary missing)
+  extensions: UpdateItem[];
+  checkedAt: number;
+}
+
+/** Discover the installed pi version: PI_BINARY env → PATH → known locations. */
+function getPiVersion(): string | null {
+  const home = homedir();
+  const candidates = [
+    process.env.PI_BINARY,
+    "pi",
+    `${home}/.npm-global/bin/pi`,
+    `${home}/.npm-packages/bin/pi`,
+    `${home}/.config/yarn/global/node_modules/.bin/pi`,
+    `${home}/.local/share/pnpm/pi`,
+  ].filter(Boolean) as string[];
+
+  for (const bin of candidates) {
+    try {
+      const out = spawnSync(bin, ["--version"], { encoding: "utf8", timeout: 15000 });
+      if (out.status === 0) {
+        const v = out.stdout.trim();
+        if (v) return v;
+      }
+    } catch {
+      // try next candidate
+    }
+  }
+  return null;
+}
+
+function readJsonFile<T>(filePath: string): T | null {
+  try {
+    return JSON.parse(readFileSync(filePath, "utf-8")) as T;
+  } catch {
+    return null;
+  }
+}
+
+/** Numeric segment-wise semver comparison; returns true when latest > installed. */
+function isNewerVersion(installed: string, latest: string): boolean {
+  const parse = (v: string) =>
+    (v.replace(/^v/, "").split("-")[0] ?? "").split(".").map((s) => parseInt(s, 10) || 0);
+  const a = parse(installed);
+  const b = parse(latest);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const ai = a[i] ?? 0;
+    const bi = b[i] ?? 0;
+    if (bi > ai) return true;
+    if (bi < ai) return false;
+  }
+  return false;
+}
+
+async function fetchLatestVersion(pkgName: string): Promise<string | null> {
+  try {
+    const res = await fetch(`https://registry.npmjs.org/${encodeURIComponent(pkgName)}/latest`, {
+      signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS),
+      headers: { accept: "application/json" },
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { version?: string };
+    return typeof data.version === "string" ? data.version : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Installed extensions: names from ~/.pi/agent/npm/package.json deps, versions from node_modules. */
+function listInstalledExtensions(): { name: string; installed: string }[] {
+  const dir = join(PI_DIR, "npm");
+  const manifest = readJsonFile<{ dependencies?: Record<string, string> }>(join(dir, "package.json"));
+  if (!manifest?.dependencies) return [];
+  return Object.keys(manifest.dependencies).map((name) => {
+    const pkg = readJsonFile<{ version?: string }>(join(dir, "node_modules", name, "package.json"));
+    return { name, installed: pkg?.version ?? "unknown" };
+  });
+}
+
+/**
+ * Check pi core and every installed extension against the npm registry.
+ * Registry lookups run in parallel; individual failures degrade to latest=null
+ * instead of failing the whole check.
+ */
+export async function checkUpdates(): Promise<UpdateCheckResult> {
+  const piVersion = getPiVersion();
+  const extensions = listInstalledExtensions();
+
+  const toItem = async (name: string, installed: string): Promise<UpdateItem> => {
+    const latest = await fetchLatestVersion(name);
+    return {
+      name,
+      installed,
+      latest,
+      hasUpdate: latest !== null && installed !== "unknown" && isNewerVersion(installed, latest),
+    };
+  };
+
+  const [piItem, ...extItems] = await Promise.all([
+    piVersion ? toItem(PI_CORE_PACKAGE, piVersion) : Promise.resolve(null),
+    ...extensions.map((e) => toItem(e.name, e.installed)),
+  ]);
+
+  return { pi: piItem as UpdateItem | null, extensions: extItems as UpdateItem[], checkedAt: Date.now() };
+}
+
+export interface ApplyUpdateResult {
+  name: string;
+  success: boolean;
+  message?: string;
+}
+
+/**
+ * One-click update: npm install <name>@latest inside ~/.pi/agent/npm.
+ * Only packages already installed there are accepted (pi core is excluded —
+ * its install method is unknown, so it must be updated via its installer).
+ */
+export function applyExtensionUpdates(names: string[]): ApplyUpdateResult[] {
+  const dir = join(PI_DIR, "npm");
+  const installed = new Set(listInstalledExtensions().map((e) => e.name));
+
+  return names.map((name) => {
+    if (!installed.has(name)) {
+      return { name, success: false, message: "not an installed extension" };
+    }
+    try {
+      // --legacy-peer-deps: peer deps (e.g. pi core) are provided by the pi host,
+      // not installed here — strict resolution would fail with ERESOLVE.
+      const out = spawnSync(
+        "npm",
+        ["install", `${name}@latest`, "--no-audit", "--no-fund", "--legacy-peer-deps"],
+        {
+          cwd: dir,
+          encoding: "utf8",
+          timeout: 120000,
+        }
+      );
+      if (out.status === 0) return { name, success: true };
+      const stderr = (out.stderr || "").trim().split("\n").slice(-3).join(" ");
+      return { name, success: false, message: stderr || `npm exited with ${out.status}` };
+    } catch (e) {
+      return { name, success: false, message: String(e) };
+    }
+  });
+}
+
+// ─── Provider Connection Test ────────────────────────────
+
+export interface ProviderTestResult {
+  success: boolean;
+  status?: number;
+  latencyMs?: number;
+  message?: string;
+}
+
+/**
+ * Test connectivity of a provider endpoint server-side (avoids browser CORS).
+ * Requests GET {baseUrl}/models with an optional Bearer key; any HTTP response
+ * counts as reachable — 2xx additionally means the key was accepted.
+ */
+export async function testProviderConnection(
+  baseUrl: string,
+  apiKey?: string
+): Promise<ProviderTestResult> {
+  let url: URL;
+  try {
+    url = new URL(baseUrl.replace(/\/+$/, "") + "/models");
+  } catch {
+    return { success: false, message: "invalid URL" };
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    return { success: false, message: "invalid URL" };
+  }
+
+  // Resolve $ENV_VAR style keys the same way pi does
+  let key = apiKey ?? "";
+  if (key.startsWith("$")) key = process.env[key.slice(1)] ?? "";
+
+  const headers: Record<string, string> = {};
+  if (key) headers["Authorization"] = `Bearer ${key}`;
+
+  const started = Date.now();
+  try {
+    const res = await fetch(url, {
+      headers,
+      signal: AbortSignal.timeout(10000),
+    });
+    const latencyMs = Date.now() - started;
+    if (res.ok) return { success: true, status: res.status, latencyMs };
+    return { success: false, status: res.status, latencyMs, message: `HTTP ${res.status}` };
+  } catch (e: any) {
+    const latencyMs = Date.now() - started;
+    const msg = e?.name === "TimeoutError" ? "timeout" : e?.cause?.code || e?.message || String(e);
+    return { success: false, latencyMs, message: msg };
   }
 }

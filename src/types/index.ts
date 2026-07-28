@@ -136,6 +136,20 @@ export interface PiConfig {
   modelsJson: PiModelsJson | null;
 }
 
+// pi core / extension update check (server queries the npm registry)
+export interface UpdateItem {
+  name: string;
+  installed: string;
+  latest: string | null; // null → registry lookup failed
+  hasUpdate: boolean;
+}
+
+export interface UpdateCheckResult {
+  pi: UpdateItem | null; // null → pi version unknown
+  extensions: UpdateItem[];
+  checkedAt: number;
+}
+
 // ─── Usage / Dashboard Types ──────────────────────────────
 
 export interface UsageRecord {

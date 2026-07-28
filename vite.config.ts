@@ -87,6 +87,116 @@ function piApiPlugin(): Plugin {
           res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify(memory));
         },
+        "POST /api/pi/memory/delete-entry"(req, res) {
+          let body = "";
+          req.on("data", (chunk: string) => (body += chunk));
+          req.on("end", () => {
+            try {
+              const { filename, text } = JSON.parse(body) as { filename: string; text: string };
+              const ok = pi.deleteMemoryEntry(filename, text);
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ success: ok }));
+            } catch {
+              res.statusCode = 400;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ success: false, error: "Invalid request body" }));
+            }
+          });
+        },
+        "GET /api/pi/trash"(_, res) {
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify(pi.listTrash()));
+        },
+        "POST /api/pi/session/trash"(req, res) {
+          let body = "";
+          req.on("data", (chunk: string) => (body += chunk));
+          req.on("end", () => {
+            try {
+              const { path: p } = JSON.parse(body) as { path: string };
+              const ok = pi.trashSessionFile(p);
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ success: ok }));
+            } catch {
+              res.statusCode = 400;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ success: false, error: "Invalid request body" }));
+            }
+          });
+        },
+        "POST /api/pi/session/restore"(req, res) {
+          let body = "";
+          req.on("data", (chunk: string) => (body += chunk));
+          req.on("end", () => {
+            try {
+              const { trashPath } = JSON.parse(body) as { trashPath: string };
+              const ok = pi.restoreFromTrash(trashPath);
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ success: ok }));
+            } catch {
+              res.statusCode = 400;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ success: false, error: "Invalid request body" }));
+            }
+          });
+        },
+        "GET /api/pi/session-preview"(req, res) {
+          const parsedUrl = new URL(req.url!, "http://localhost");
+          const p = parsedUrl.searchParams.get("path") || "";
+          const preview = pi.readSessionPreview(decodeURIComponent(p));
+          if (!preview) {
+            res.statusCode = 404;
+            res.setHeader("Content-Type", "application/json");
+            return res.end(JSON.stringify({ error: "Session not found" }));
+          }
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify(preview));
+        },
+        "GET /api/pi/check-updates"(_, res) {
+          pi.checkUpdates()
+            .then((result) => {
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify(result));
+            })
+            .catch(() => {
+              res.statusCode = 500;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ error: "Update check failed" }));
+            });
+        },
+        "POST /api/pi/apply-updates"(req, res) {
+          let body = "";
+          req.on("data", (chunk: string) => (body += chunk));
+          req.on("end", () => {
+            try {
+              const { names } = JSON.parse(body) as { names: string[] };
+              const results = pi.applyExtensionUpdates(Array.isArray(names) ? names : []);
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ results }));
+            } catch {
+              res.statusCode = 400;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ error: "Invalid request body" }));
+            }
+          });
+        },
+        "POST /api/pi/provider-test"(req, res) {
+          let body = "";
+          req.on("data", (chunk: string) => (body += chunk));
+          req.on("end", () => {
+            try {
+              const { baseUrl, apiKey } = JSON.parse(body) as { baseUrl: string; apiKey?: string };
+              if (!baseUrl) throw new Error("missing baseUrl");
+              pi.testProviderConnection(baseUrl, apiKey).then((result) => {
+                res.setHeader("Content-Type", "application/json");
+                res.end(JSON.stringify(result));
+              });
+            } catch {
+              res.statusCode = 400;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ success: false, message: "Invalid request body" }));
+            }
+          });
+        },
       };
 
       // Middleware: match API routes
@@ -99,8 +209,8 @@ function piApiPlugin(): Plugin {
         // Strip query string
         const pathOnly = url.split("?")[0];
 
-        // Handle DELETE /api/pi/session?path=...
-        if (method === "DELETE" && pathOnly === "/api/pi/session") {
+        // Handle DELETE /api/pi/session?path=... (move to trash) and /api/pi/trash?path=... (permanent)
+        if (method === "DELETE" && (pathOnly === "/api/pi/session" || pathOnly === "/api/pi/trash")) {
           const parsedUrl = new URL(url, "http://localhost");
           const filePath = parsedUrl.searchParams.get("path");
           if (!filePath) {
@@ -109,7 +219,9 @@ function piApiPlugin(): Plugin {
             return res.end(JSON.stringify({ success: false, error: "Missing path" }));
           }
           const decodedPath = decodeURIComponent(filePath);
-          const ok = pi.deleteSessionFile(decodedPath);
+          const ok = pathOnly === "/api/pi/session"
+            ? pi.trashSessionFile(decodedPath)
+            : pi.permanentlyDeleteTrash(decodedPath);
           res.setHeader("Content-Type", "application/json");
           return res.end(JSON.stringify({ success: ok }));
         }

@@ -116,7 +116,7 @@ interface ConfigState {
   refreshUsage: () => Promise<void>;
 
   // Settings
-  updateSettings: (settings: Partial<PiSettings>) => Promise<void>;
+  updateSettings: (settings: Partial<PiSettings>) => Promise<boolean>;
   setDefaultProvider: (provider: string) => Promise<void>;
   setDefaultModel: (model: string) => Promise<void>;
   setTheme: (theme: PiSettings["theme"]) => Promise<void>;
@@ -126,8 +126,8 @@ interface ConfigState {
   removePackage: (pkg: string) => Promise<void>;
 
   // Auth
-  setProviderAuth: (providerId: string, key: string) => Promise<void>;
-  removeProviderAuth: (providerId: string) => Promise<void>;
+  setProviderAuth: (providerId: string, key: string) => Promise<boolean>;
+  removeProviderAuth: (providerId: string) => Promise<boolean>;
 
   // Model CRUD (for custom providers)
   toggleModel: (providerId: string, modelId: string) => void;
@@ -136,9 +136,9 @@ interface ConfigState {
   removeModel: (providerId: string, modelId: string) => void;
 
   // Custom provider CRUD
-  addCustomProvider: (id: string, cfg: CustomProviderConfig) => Promise<void>;
-  updateCustomProvider: (id: string, cfg: Partial<CustomProviderConfig>) => Promise<void>;
-  removeCustomProvider: (id: string) => Promise<void>;
+  addCustomProvider: (id: string, cfg: CustomProviderConfig) => Promise<boolean>;
+  updateCustomProvider: (id: string, cfg: Partial<CustomProviderConfig>) => Promise<boolean>;
+  removeCustomProvider: (id: string) => Promise<boolean>;
 
   // Import/Export (to localStorage for backup, writes back to pi files)
   importConfig: (config: PiConfig) => Promise<void>;
@@ -211,10 +211,11 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
 
   updateSettings: async (partial) => {
     const { settings } = get();
-    if (!settings) return;
+    if (!settings) return false;
     const updated = { ...settings, ...partial };
     const ok = await apiPost("/settings", updated);
     if (ok) set({ settings: updated });
+    return ok;
   },
 
   setDefaultProvider: async (provider) => {
@@ -273,11 +274,12 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
       const { modelsJson } = get();
       set({ allProviders: mergeProviders(updated, modelsJson) });
     }
+    return ok;
   },
 
   removeProviderAuth: async (providerId) => {
     const { auth } = get();
-    if (!auth) return;
+    if (!auth) return false;
     const { [providerId]: _, ...rest } = auth;
     const ok = await apiPost("/auth", rest);
     if (ok) {
@@ -285,6 +287,7 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
       const { modelsJson } = get();
       set({ allProviders: mergeProviders(rest, modelsJson) });
     }
+    return ok;
   },
 
   // ─── Model CRUD (client-side only, stored in modelsJson) ─
@@ -383,7 +386,7 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
 
   addCustomProvider: async (id, cfg) => {
     const { modelsJson } = get();
-    if (!modelsJson) return;
+    if (!modelsJson) return false;
     const newProviders = { ...modelsJson.providers, [id]: cfg };
     const updated = { providers: newProviders };
     const ok = await apiPost("/models", updated);
@@ -392,13 +395,14 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
       const { auth } = get();
       set({ allProviders: mergeProviders(auth ?? {}, updated) });
     }
+    return ok;
   },
 
   updateCustomProvider: async (id, cfg) => {
     const { modelsJson } = get();
-    if (!modelsJson) return;
+    if (!modelsJson) return false;
     const existing = modelsJson.providers[id];
-    if (!existing) return;
+    if (!existing) return false;
     const newProviders = {
       ...modelsJson.providers,
       [id]: { ...existing, ...cfg },
@@ -410,11 +414,12 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
       const { auth } = get();
       set({ allProviders: mergeProviders(auth ?? {}, updated) });
     }
+    return ok;
   },
 
   removeCustomProvider: async (id) => {
     const { modelsJson } = get();
-    if (!modelsJson) return;
+    if (!modelsJson) return false;
     const { [id]: _, ...rest } = modelsJson.providers;
     const updated = { providers: rest };
     const ok = await apiPost("/models", updated);
@@ -427,6 +432,7 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
       );
       set({ allProviders: newAllProviders, allModels: newAllModels });
     }
+    return ok;
   },
 
   // ─── Import/Export ─────────────────────────────────────
