@@ -61,27 +61,38 @@ function mergeProviders(
   // (e.g. models imported onto a builtin) — merge them into the builtin
   // instead of listing a duplicate custom provider.
   const builtinIds = new Set(builtinProviders.map((p) => p.id));
-  const overrides = new Map(customs.filter((c) => builtinIds.has(c.id)).map((c) => [c.id, c]));
-  const builtins = builtinProviders.map((p) => {
-    const override = overrides.get(p.id);
-    let models = p.models;
-    if (override) {
-      const byId = new Map(p.models.map((m) => [m.id, m]));
-      for (const m of override.models) byId.set(m.id, m);
-      models = [...byId.values()];
-    }
-    return {
-      ...p,
-      // A user-provided display name in models.json wins over the catalog name.
-      name: customModels?.providers?.[p.id]?.name ?? p.name,
-      // hasAuth = a key is actually saved (auth.json or models.json override) —
-      // the static builtin flag only means the provider supports auth.
-      hasAuth: !!auth[p.id] || !!override?.apiKey,
-      authMethod: auth[p.id] ? "file" : p.authMethod,
-      models,
-    };
-  });
-  return [...builtins, ...customs.filter((c) => !builtinIds.has(c.id))];
+  // Customs with an apiKey are standalone custom providers (e.g. user-imported
+  // ones that happen to share an id with a builtin). They should not be merged
+  // into the builtin but instead shown as a custom provider.
+  const standaloneIds = new Set(
+    customs.filter((c) => builtinIds.has(c.id) && c.apiKey).map((c) => c.id)
+  );
+  const overrides = new Map(
+    customs.filter((c) => builtinIds.has(c.id) && !c.apiKey).map((c) => [c.id, c])
+  );
+  const builtins = builtinProviders
+    .map((p) => {
+      if (standaloneIds.has(p.id)) return null; // replaced by standalone custom
+      const override = overrides.get(p.id);
+      let models = p.models;
+      if (override) {
+        const byId = new Map(p.models.map((m) => [m.id, m]));
+        for (const m of override.models) byId.set(m.id, m);
+        models = [...byId.values()];
+      }
+      return {
+        ...p,
+        // A user-provided display name in models.json wins over the catalog name.
+        name: customModels?.providers?.[p.id]?.name ?? p.name,
+        // hasAuth = a key is actually saved (auth.json or models.json override) —
+        // the static builtin flag only means the provider supports auth.
+        hasAuth: !!auth[p.id] || !!override?.apiKey,
+        authMethod: auth[p.id] ? "file" : p.authMethod,
+        models,
+      };
+    })
+    .filter(<T>(p: T): p is NonNullable<T> => p != null);
+  return [...builtins, ...customs.filter((c) => !builtinIds.has(c.id) || standaloneIds.has(c.id))];
 }
 
 // ─── State Types ─────────────────────────────────────────

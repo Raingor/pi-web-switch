@@ -167,6 +167,8 @@ const zhCN: Record<string, string> = {
 
   "providers.add_provider": "添加提供商",
   "providers.delete_provider": "删除提供商",
+  "providers_models.expand": "展开（还有 {0} 个）",
+  "providers_models.collapse": "收起",
   "providers.duplicate_provider": "复制提供商",
   "providers.custom": "自定义",
   "providers.builtin": "内置",

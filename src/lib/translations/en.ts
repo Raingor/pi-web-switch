@@ -172,6 +172,8 @@ const en: Record<string, string> = {
   // Providers
   "providers.add_provider": "Add Provider",
   "providers.delete_provider": "Delete Provider",
+  "providers_models.expand": "Expand ({0} more)",
+  "providers_models.collapse": "Collapse",
   "providers.duplicate_provider": "Duplicate Provider",
   "providers.custom": "Custom",
   "providers.builtin": "Built-in",

@@ -167,6 +167,8 @@ const ja: Record<string, string> = {
 
   "providers.add_provider": "プロバイダー追加",
   "providers.delete_provider": "プロバイダー削除",
+  "providers_models.expand": "さらに {0} 件を表示",
+  "providers_models.collapse": "折りたたむ",
   "providers.duplicate_provider": "プロバイダー複製",
   "providers.custom": "カスタム",
   "providers.builtin": "ビルトイン",

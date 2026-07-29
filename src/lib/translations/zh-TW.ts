@@ -167,6 +167,8 @@ const zhTW: Record<string, string> = {
 
   "providers.add_provider": "新增提供商",
   "providers.delete_provider": "刪除提供商",
+  "providers_models.expand": "展開（還有 {0} 個）",
+  "providers_models.collapse": "收起",
   "providers.duplicate_provider": "複製提供商",
   "providers.custom": "自訂",
   "providers.builtin": "內建",
