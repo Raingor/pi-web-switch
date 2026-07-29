@@ -2,7 +2,13 @@ import { useState, useRef, useEffect } from "react";
 import { useConfigStore } from "@/store/config-store";
 import { useTranslation } from "@/lib/i18n";
 import { Modal } from "@/components/ui/Modal";
-import { exportConfig, parseImportFile, saveLocalBackup } from "@/lib/config";
+import {
+  exportConfig,
+  exportConfigToDirectory,
+  importConfigFromFile,
+  parseImportFile,
+  saveLocalBackup,
+} from "@/lib/config";
 import type { PiConfig, UpdateCheckResult } from "@/types";
 import { cn } from "@/lib/utils";
 import {
@@ -157,30 +163,46 @@ export function SettingsPage() {
     localStorage.setItem(FONT_SIZE_KEY, String(fontSize));
   }, [fontSize]);
 
-  const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImportFromInput = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async (ev) => {
-      const result = parseImportFile(ev.target?.result as string);
-      if (result) {
-        await importConfigAction(result);
-        setImportError("");
-      } else {
-        setImportError(t("settings.import_error"));
-      }
-    };
-    reader.readAsText(file);
+    const text = await file.text();
+    const result = parseImportFile(text);
+    if (result) {
+      await importConfigAction(result);
+      setImportError("");
+    } else {
+      setImportError(t("settings.import_error"));
+    }
+    // Reset input so the same file can be selected again
+    e.target.value = "";
   };
 
-  const handleExport = () => {
+  const handleImportClick = async () => {
+    const { config, cancelled } = await importConfigFromFile();
+    if (config) {
+      await importConfigAction(config);
+      setImportError("");
+      return;
+    }
+    if (!cancelled) {
+      // API unavailable or parse failed → fallback to hidden file input
+      fileInputRef.current?.click();
+    }
+  };
+
+  const handleExport = async () => {
     const cfg: PiConfig = {
       settings: settings ?? { theme: "dark", packages: [], enabledModels: [] },
       auth: auth ?? {},
       modelsJson: modelsJson ?? { providers: {} },
     };
     saveLocalBackup(cfg);
-    exportConfig(cfg);
+    const { ok, cancelled } = await exportConfigToDirectory(cfg);
+    if (!ok && !cancelled) {
+      // API unavailable or write failed → fallback to download
+      exportConfig(cfg);
+    }
   };
 
   // ── Default model select: composite `providerId/modelId` values, but the
@@ -605,7 +627,7 @@ export function SettingsPage() {
                 {t("settings.export")}
               </button>
               <button
-                onClick={() => fileInputRef.current?.click()}
+                onClick={handleImportClick}
                 className="flex items-center gap-2 rounded-lg border border-gray-700 bg-gray-800 px-4 py-2 text-sm text-gray-300 hover:bg-gray-700"
               >
                 <Upload className="h-4 w-4" />
@@ -623,7 +645,7 @@ export function SettingsPage() {
                 type="file"
                 accept=".json"
                 className="hidden"
-                onChange={handleImport}
+                onChange={handleImportFromInput}
               />
             </div>
             {importError && <p className="mt-3 text-sm text-red-400">{importError}</p>}
