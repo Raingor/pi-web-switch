@@ -516,6 +516,9 @@ function ProviderDetail({ provider, onDelete, onDuplicate }: { provider: Provide
   const [showAddModel, setShowAddModel] = useState(false);
   const [deleteModel, setDeleteModel] = useState<Model | null>(null);
   const [modelQuery, setModelQuery] = useState("");
+  const [supportsDeveloperRole, setSupportsDeveloperRole] = useState(
+    provider.compat?.supportsDeveloperRole ?? false
+  );
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
 
   // ─── Fetch Models State ───
@@ -624,7 +627,7 @@ function ProviderDetail({ provider, onDelete, onDuplicate }: { provider: Provide
   const urlInvalid = isCustom && baseUrl.trim() !== "" && !isValidHttpUrl(baseUrl.trim());
 
   const dirty =
-    (isCustom && (providerName !== (provider.name ?? "") || baseUrl !== (provider.baseUrl ?? "") || api !== (provider.api ?? "openai-completions"))) ||
+    (isCustom && (providerName !== (provider.name ?? "") || baseUrl !== (provider.baseUrl ?? "") || api !== (provider.api ?? "openai-completions") || supportsDeveloperRole !== (provider.compat?.supportsDeveloperRole ?? true))) ||
     apiKey !== savedKey;
 
   const handleSave = async () => {
@@ -636,6 +639,7 @@ function ProviderDetail({ provider, onDelete, onDuplicate }: { provider: Provide
         baseUrl: baseUrl || undefined,
         api,
         apiKey: apiKey || undefined,
+        compat: { supportsDeveloperRole },
       });
     } else if (apiKey !== savedKey) {
       ok = apiKey
@@ -768,6 +772,21 @@ function ProviderDetail({ provider, onDelete, onDuplicate }: { provider: Provide
             {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
           </button>
         </div>
+      </div>
+
+      {/* Developer Role Support */}
+      <div className="flex items-center gap-2">
+        <input
+          id="supports-developer-role"
+          type="checkbox"
+          checked={supportsDeveloperRole}
+          onChange={(e) => setSupportsDeveloperRole(e.target.checked)}
+          className="rounded border-gray-600 bg-gray-800 text-blue-500"
+        />
+        <label htmlFor="supports-developer-role" className="text-sm text-gray-400">
+          <span>{t("compat.supports_developer_role")}</span>
+          <span className="ml-2 text-xs text-gray-500">{t("compat.supports_developer_role_desc")}</span>
+        </label>
       </div>
 
       {/* Save / Test / Feedback row */}
