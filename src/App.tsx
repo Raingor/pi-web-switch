@@ -4,6 +4,7 @@ import { DashboardPage } from "@/components/dashboard/DashboardPage";
 import { SessionsPage } from "@/components/sessions/SessionsPage";
 import { MemoryPage } from "@/components/sessions/MemoryPage";
 import { ProvidersModelsPage } from "@/components/providers/ProvidersModelsPage";
+import { SubagentsPage } from "@/components/subagents/SubagentsPage";
 import { SettingsPage } from "@/components/settings/SettingsPage";
 
 export default function App() {
@@ -16,6 +17,7 @@ export default function App() {
           <Route path="/memory" element={<MemoryPage />} />
           <Route path="/providers" element={<ProvidersModelsPage />} />
           <Route path="/models" element={<ProvidersModelsPage />} />
+          <Route path="/subagents" element={<SubagentsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Route>
       </Routes>

@@ -116,6 +116,7 @@ export interface PiAuth {
 }
 
 export interface CustomProviderConfig {
+  name?: string;
   baseUrl?: string;
   api?: ApiType;
   apiKey?: string;
@@ -190,6 +191,57 @@ export interface ProviderUsageSummary {
   totalCost: number;
   totalRequests: number;
   modelCount: number;
+}
+
+// ─── Subagents ───────────────────────────────────────────
+
+export interface AgentDef {
+  name: string;
+  fileName: string;
+  filePath: string;
+  package: string;
+  description: string;
+  model?: string;
+  tools?: string[];
+  thinking?: string;
+  systemPromptMode?: string;
+  inheritProjectContext?: boolean;
+  inheritSkills?: boolean;
+  input?: string[];
+  body: string;
+}
+
+export interface ChainStep {
+  agent: string;
+  phase?: string;
+  label?: string;
+  output?: string;
+  as?: string;
+  task?: string;
+}
+
+export interface ChainDef {
+  name: string;
+  fileName: string;
+  filePath: string;
+  description: string;
+  steps: ChainStep[];
+  body: string;
+}
+
+export interface RunRecord {
+  agent: string;
+  ts: number;
+  status: string;
+  duration?: number;
+  exit?: number;
+  taskHash?: string;
+}
+
+export interface SubagentsData {
+  agents: AgentDef[];
+  chains: ChainDef[];
+  runHistory: RunRecord[];
 }
 
 // ─── Config Import/Export ─────────────────────────────────

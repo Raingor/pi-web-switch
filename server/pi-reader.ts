@@ -933,9 +933,78 @@ function isNewerVersion(installed: string, latest: string): boolean {
   return false;
 }
 
+// ─── Outbound fetch with local proxy support ───────────
+// Node's fetch ignores the OS proxy, so requests to some provider hosts fail
+// on machines that rely on a local proxy (e.g. Clash). Detect a proxy from
+// env vars or macOS system settings and route through it via undici's
+// ProxyAgent; fall back to a direct request when no proxy or the proxy fails.
+
+let undiciPromise: Promise<typeof import("undici") | null> | null = null;
+function getUndici(): Promise<typeof import("undici") | null> {
+  // Dynamic import: require() of bare packages breaks inside Vite's bundled
+  // config (esbuild rewrites it to a throwing __require shim in ESM output).
+  if (!undiciPromise) {
+    undiciPromise = import("undici").catch(() => null);
+  }
+  return undiciPromise;
+}
+
+let proxyCache: { url: string | null; at: number } | null = null;
+
+function detectProxyUrl(): string | null {
+  if (proxyCache && Date.now() - proxyCache.at < 60000) return proxyCache.url;
+  let found: string | null =
+    process.env.https_proxy ||
+    process.env.HTTPS_PROXY ||
+    process.env.http_proxy ||
+    process.env.HTTP_PROXY ||
+    null;
+  if (found && !found.startsWith("http")) found = null; // ProxyAgent needs an HTTP proxy
+  if (!found && process.platform === "darwin") {
+    try {
+      const out = spawnSync("scutil", ["--proxy"], { encoding: "utf8", timeout: 3000 }).stdout || "";
+      const get = (k: string) => out.match(new RegExp(`${k} : (\\S+)`))?.[1];
+      if (get("HTTPSEnable") === "1" && get("HTTPSProxy")) {
+        found = `http://${get("HTTPSProxy")}:${get("HTTPSPort") ?? "80"}`;
+      } else if (get("HTTPEnable") === "1" && get("HTTPProxy")) {
+        found = `http://${get("HTTPProxy")}:${get("HTTPPort") ?? "80"}`;
+      }
+    } catch {
+      /* scutil unavailable — ignore */
+    }
+  }
+  proxyCache = { url: found, at: Date.now() };
+  return found;
+}
+
+const proxyAgents = new Map<string, import("undici").ProxyAgent>();
+
+async function fetchExternal(
+  url: string | URL,
+  init?: { method?: string; headers?: Record<string, string>; body?: string; signal?: AbortSignal }
+): Promise<Response> {
+  const target = url instanceof URL ? url.toString() : url;
+  const proxy = detectProxyUrl();
+  const undici = proxy ? await getUndici() : null;
+  if (proxy && undici) {
+    try {
+      let agent = proxyAgents.get(proxy);
+      if (!agent) {
+        agent = new undici.ProxyAgent(proxy);
+        proxyAgents.set(proxy, agent);
+      }
+      // Node's built-in fetch rejects a foreign dispatcher — use undici's fetch
+      return (await undici.fetch(target, { ...init, dispatcher: agent })) as unknown as Response;
+    } catch {
+      /* proxy failed — fall through to a direct request */
+    }
+  }
+  return await fetch(target, init);
+}
+
 async function fetchLatestVersion(pkgName: string): Promise<string | null> {
   try {
-    const res = await fetch(`https://registry.npmjs.org/${encodeURIComponent(pkgName)}/latest`, {
+    const res = await fetchExternal(`https://registry.npmjs.org/${encodeURIComponent(pkgName)}/latest`, {
       signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS),
       headers: { accept: "application/json" },
     });
@@ -1062,7 +1131,7 @@ export async function testProviderConnection(
 
   const started = Date.now();
   try {
-    const res = await fetch(url, {
+    const res = await fetchExternal(url, {
       headers,
       signal: AbortSignal.timeout(10000),
     });
@@ -1074,4 +1143,552 @@ export async function testProviderConnection(
     const msg = e?.name === "TimeoutError" ? "timeout" : e?.cause?.code || e?.message || String(e);
     return { success: false, latencyMs, message: msg };
   }
+}
+
+
+/**
+ * Fetch the model list from a provider's /models endpoint server-side.
+ * Returns { id, contextWindow, maxTokens } for each model so the frontend
+ * can create full model objects on import.
+ */
+export async function fetchProviderModels(
+  baseUrl: string,
+  apiKey?: string,
+  providerId?: string
+): Promise<{
+  models: { id: string; contextWindow?: number; maxTokens?: number; vision?: boolean }[];
+  error?: string;
+}> {
+  let url: URL;
+  try {
+    url = new URL(baseUrl.replace(/\/+$/, "") + "/models");
+  } catch {
+    return { models: [], error: "invalid URL" };
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    return { models: [], error: "invalid URL" };
+  }
+
+  let key = apiKey ?? "";
+  if (key.startsWith("$")) key = process.env[key.slice(1)] ?? "";
+
+  // Auth differs per vendor: Anthropic uses x-api-key, Google passes ?key=,
+  // everything else follows the OpenAI convention (Bearer token).
+  const host = url.hostname;
+  const headers: Record<string, string> = {};
+  if (key) {
+    if (providerId === "anthropic" || host.endsWith("api.anthropic.com")) {
+      headers["x-api-key"] = key;
+      headers["anthropic-version"] = "2023-06-01";
+    } else if (providerId === "google" || host.endsWith("generativelanguage.googleapis.com")) {
+      url.searchParams.set("key", key);
+    } else {
+      headers["Authorization"] = `Bearer ${key}`;
+    }
+  }
+
+  try {
+    const res = await fetchExternal(url, {
+      headers,
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) {
+      return { models: [], error: `HTTP ${res.status}` };
+    }
+    const data = await res.json();
+
+    // Parse a numeric value, handling K/M suffixes (e.g. "128k" → 128000)
+    const toNum = (v: any): number | undefined => {
+      if (typeof v === "number") return v;
+      if (typeof v !== "string") return undefined;
+      const m = v.match(/^([0-9]+)([KkMm]?)$/);
+      if (!m) return undefined;
+      const n = parseInt(m[1], 10);
+      const u = m[2].toUpperCase();
+      return u === "K" ? n * 1000 : u === "M" ? n * 1_000_000 : n;
+    };
+
+    // Normalize various /models response shapes into { id, contextWindow, maxTokens }
+    const seen = new Set<string>();
+    const models: { id: string; contextWindow?: number; maxTokens?: number; vision?: boolean }[] = [];
+    const pushModel = (
+      id: string,
+      contextWindow?: number,
+      maxTokens?: number,
+      vision?: boolean
+    ) => {
+      const v = (id ?? "").trim();
+      if (!v || seen.has(v)) return;
+      seen.add(v);
+      models.push({ id: v, contextWindow, maxTokens: maxTokens || undefined, vision });
+    };
+
+    // Detect image-input support from vendor metadata; undefined when unknown.
+    // Mistral: capabilities.vision · OpenRouter: architecture.input_modalities /
+    // architecture.modality ("text+image->text") · misc gateways: supports_vision
+    const visionOf = (item: any): boolean | undefined => {
+      if (!item || typeof item !== "object") return undefined;
+      if (typeof item.capabilities?.vision === "boolean") return item.capabilities.vision;
+      if (item.supports_vision === true || item.vision === true) return true;
+      const mods =
+        item.architecture?.input_modalities ?? item.input_modalities ?? item.modalities;
+      if (Array.isArray(mods)) return mods.includes("image");
+      const modality = item.architecture?.modality;
+      if (typeof modality === "string") {
+        return (modality.split("->")[0] ?? "").includes("image");
+      }
+      return undefined;
+    };
+
+    const parseItem = (item: any) => {
+      // Google returns `name: "models/gemini-2.5-pro"` — strip the prefix
+      const rawId = typeof item === "string" ? item : item?.id ?? item?.model ?? item?.name ?? "";
+      const id = typeof rawId === "string" ? rawId.replace(/^models\//, "") : "";
+      // Common context window fields: context_length, max_context, context_window
+      const cw =
+        toNum(item?.context_length) ??
+        toNum(item?.max_context) ??
+        toNum(item?.context_window) ??
+        toNum(item?.inputTokenLimit) ??
+        toNum(item?.max_tokens) ??
+        undefined;
+      // Common max output fields: max_output_tokens, max_completion_tokens
+      const mt =
+        toNum(item?.max_output_tokens) ??
+        toNum(item?.max_completion_tokens) ??
+        toNum(item?.outputTokenLimit) ??
+        toNum(item?.max_tokens) ??
+        undefined;
+      pushModel(id, cw, mt, visionOf(item));
+    };
+
+    if (Array.isArray(data)) {
+      data.forEach(parseItem);
+    } else if (data && typeof data === "object") {
+      const dataArr = data.data ?? data.models ?? data.models_list ?? null;
+      if (Array.isArray(dataArr)) {
+        dataArr.forEach(parseItem);
+      }
+    }
+
+    return { models };
+  } catch (e: any) {
+    const msg = e?.name === "TimeoutError" ? "timeout" : e?.message || String(e);
+    return { models: [], error: msg };
+  }
+}
+
+
+/**
+ * Send a minimal /chat/completions request with a specific model ID to verify
+ * the model is usable. Returns { success, latencyMs, message }.
+ */
+export async function testModel(
+  baseUrl: string,
+  modelId: string,
+  apiKey?: string,
+  apiType: string = "openai-completions"
+): Promise<ProviderTestResult> {
+  let url: URL;
+  try {
+    url = new URL(baseUrl.replace(/\/+$/, "") + "/chat/completions");
+  } catch {
+    return { success: false, message: "invalid URL" };
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    return { success: false, message: "invalid URL" };
+  }
+
+  let key = apiKey ?? "";
+  if (key.startsWith("$")) key = process.env[key.slice(1)] ?? "";
+
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (key) headers["Authorization"] = `Bearer ${key}`;
+
+  // Build a minimal, lightweight completion payload
+  const body: Record<string, any> = {
+    model: modelId,
+    messages: [{ role: "user", content: "Reply with a single word: ok" }],
+    max_tokens: 4,
+    temperature: 0,
+  };
+
+  const started = Date.now();
+  try {
+    const res = await fetchExternal(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(15000),
+    });
+    const latencyMs = Date.now() - started;
+    if (res.ok) {
+      // Validate response — accept if we got valid JSON back
+      const data = await res.json();
+      const choice = data?.choices?.[0];
+      const hasContent = choice && (choice.message?.content || choice.delta?.content);
+      if (hasContent) {
+        return { success: true, latencyMs };
+      }
+      // Got valid JSON but no choice content — check for alternative response formats
+      const hasUsage = !!data?.usage;
+      if (hasUsage) {
+        return { success: true, latencyMs, message: "response received (no content)" };
+      }
+      return { success: false, latencyMs, message: "invalid response: " + JSON.stringify(data).slice(0, 150) };
+    }
+    // Capture the status line from the body if possible
+    try {
+      const d = await res.json();
+      return { success: false, status: res.status, latencyMs, message: d?.error?.message || `HTTP ${res.status}` };
+    } catch {
+      return { success: false, status: res.status, latencyMs, message: `HTTP ${res.status}` };
+    }
+  } catch (e: any) {
+    const latencyMs = Date.now() - started;
+    const msg = e?.name === "TimeoutError" ? "timeout" : e?.message || String(e);
+    return { success: false, latencyMs, message: msg };
+  }
+}
+
+// ─── Subagents ────────────────────────────────────────────
+
+const AGENTS_DIR = join(PI_DIR, "agents");
+const CHAINS_DIR = join(PI_DIR, "chains");
+const RUN_HISTORY_PATH = join(PI_DIR, "run-history.jsonl");
+
+/** Parse YAML frontmatter from an agent/chain .md file. */
+function parseFrontmatter(raw: string): { frontmatter: Record<string, any>; body: string } {
+  const frontmatter: Record<string, any> = {};
+  const first = raw.indexOf("---");
+  if (first !== 0) return { frontmatter, body: raw };
+  const second = raw.indexOf("---", 3);
+  if (second === -1) return { frontmatter, body: raw };
+  const yamlLines = raw.slice(3, second).trim().split("\n");
+  const body = raw.slice(second + 3).trim();
+
+  for (const line of yamlLines) {
+    const colonIdx = line.indexOf(":");
+    if (colonIdx === -1) continue;
+    const key = line.slice(0, colonIdx).trim();
+    let value: any = line.slice(colonIdx + 1).trim();
+
+    // Array value: "[item1, item2]" or multiline "key:\n  - item"
+    if (value.startsWith("[") && value.endsWith("]")) {
+      value = value.slice(1, -1).split(",").map((s: string) => s.trim().replace(/^["']|["']$/g, ""));
+    } else if (value === "true" || value === "false") {
+      value = value === "true";
+    } else if (/^\d+$/.test(value)) {
+      value = parseInt(value, 10);
+    } else if (/^\d+\.\d+$/.test(value)) {
+      value = parseFloat(value);
+    } else {
+      value = value.replace(/^["']|["']$/g, "");
+    }
+
+    frontmatter[key] = value;
+  }
+
+  return { frontmatter, body };
+}
+
+export interface AgentDef {
+  name: string;
+  fileName: string;
+  filePath: string;
+  package: string;
+  description: string;
+  model?: string;
+  tools?: string[];
+  thinking?: string;
+  systemPromptMode?: string;
+  inheritProjectContext?: boolean;
+  inheritSkills?: boolean;
+  input?: string[];
+  body: string;
+}
+
+export function listAgents(): AgentDef[] {
+  try {
+    if (!existsSync(AGENTS_DIR)) return [];
+    const files = readdirSync(AGENTS_DIR).filter((f) => f.endsWith(".md"));
+    return files.map((fileName) => {
+      const filePath = join(AGENTS_DIR, fileName);
+      try {
+        const raw = readFileSync(filePath, "utf-8");
+        const { frontmatter, body } = parseFrontmatter(raw);
+        function splitMaybe(val: unknown): string[] | undefined {
+          if (Array.isArray(val)) return val.map(String);
+          if (typeof val === "string" && val.trim()) return val.split(/\s*,\s*/).filter(Boolean);
+          return undefined;
+        }
+        return {
+          name: frontmatter.name || fileName.replace(/\.md$/, ""),
+          fileName,
+          filePath,
+          package: frontmatter.package || "custom",
+          description: frontmatter.description || "",
+          model: frontmatter.model,
+          tools: splitMaybe(frontmatter.tools),
+          thinking: frontmatter.thinking,
+          systemPromptMode: frontmatter.systemPromptMode,
+          inheritProjectContext: frontmatter.inheritProjectContext,
+          inheritSkills: frontmatter.inheritSkills,
+          input: splitMaybe(frontmatter.input),
+          body: body.slice(0, 500),
+        };
+      } catch {
+        return null;
+      }
+    }).filter(Boolean) as AgentDef[];
+  } catch {
+    return [];
+  }
+}
+
+export interface ChainStep {
+  agent: string;
+  phase?: string;
+  label?: string;
+  output?: string;
+  as?: string;
+  task?: string;
+}
+
+export interface ChainDef {
+  name: string;
+  fileName: string;
+  filePath: string;
+  description: string;
+  steps: ChainStep[];
+  body: string;
+}
+
+export function listChains(): ChainDef[] {
+  try {
+    if (!existsSync(CHAINS_DIR)) return [];
+    const files = readdirSync(CHAINS_DIR).filter((f) => f.endsWith(".chain.md"));
+    return files.map((fileName) => {
+      const filePath = join(CHAINS_DIR, fileName);
+      try {
+        const raw = readFileSync(filePath, "utf-8");
+        const { frontmatter, body } = parseFrontmatter(raw);
+        const steps: ChainStep[] = [];
+
+        // Parse chain steps: "## agent-name" blocks
+        const stepRegex = /##\s+(\([^)]+\)\s*\|[^\n]+|[^\n]+)/g;
+        let match;
+        while ((match = stepRegex.exec(body)) !== null) {
+          const header = match[1]!.trim();
+          // "## (web-agents.前端 | web-agents.后端)" parallel steps
+          // "## web-agents.需求" single step
+          // "## web-agents.测试" single step
+          // Extract agent name(s) from header
+          const parallelMatch = header.match(/^\(([^)]+)\)/);
+          if (parallelMatch) {
+            const agents = parallelMatch[1]!.split("|").map((s) => s.trim());
+            agents.forEach((agent) => steps.push({ agent }));
+          } else {
+            steps.push({ agent: header });
+          }
+        }
+
+        return {
+          name: frontmatter.name || fileName.replace(/\.chain\.md$/, ""),
+          fileName,
+          filePath,
+          description: frontmatter.description || "",
+          steps,
+          body: raw.slice(0, 300),
+        };
+      } catch {
+        return null;
+      }
+    }).filter(Boolean) as ChainDef[];
+  } catch {
+    return [];
+  }
+}
+
+export interface RunRecord {
+  agent: string;
+  ts: number;
+  status: string;
+  duration?: number;
+  exit?: number;
+  taskHash?: string;
+}
+
+export function readRunHistory(limit = 100): RunRecord[] {
+  try {
+    if (!existsSync(RUN_HISTORY_PATH)) return [];
+    const raw = readFileSync(RUN_HISTORY_PATH, "utf-8");
+    const lines = raw.split("\n").filter(Boolean);
+    return lines
+      .slice(-limit)
+      .map((line) => {
+        try {
+          return JSON.parse(line) as RunRecord;
+        } catch {
+          return null;
+        }
+      })
+      .filter((r): r is RunRecord => r !== null)
+      .reverse();
+  } catch {
+    return [];
+  }
+}
+
+export interface SubagentsData {
+  agents: AgentDef[];
+  chains: ChainDef[];
+  runHistory: RunRecord[];
+}
+
+export function readSubagents(): SubagentsData {
+  return {
+    agents: listAgents(),
+    chains: listChains(),
+    runHistory: readRunHistory(),
+  };
+}
+
+// ─── Built-in Provider Catalog (from the local pi install) ───
+// pi ships its full model catalog (same source as pi.dev/models) inside
+// @earendil-works/pi-ai as dist/providers/data/*.json. Reading it locally
+// keeps the builtin provider list in sync with the installed pi version
+// instead of maintaining a hand-written copy.
+
+interface CatalogModel {
+  id: string;
+  name?: string;
+  reasoning?: boolean;
+  input?: string[];
+  contextWindow?: number;
+  maxTokens?: number;
+  cost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
+}
+
+interface CatalogProvider {
+  id: string;
+  name: string;
+  type: "builtin";
+  api?: string;
+  baseUrl?: string;
+  hasAuth: boolean;
+  authMethod: "env";
+  models: CatalogModel[];
+}
+
+/** Locate @earendil-works/pi-ai's dist/providers directory of the active pi install. */
+function findPiAiProvidersDir(): string | null {
+  const home = homedir();
+  const roots: string[] = [];
+
+  // Resolve the pi binary symlink → .../pi-coding-agent/dist/cli.js
+  const which = spawnSync("which", ["pi"], { encoding: "utf8", timeout: 5000 });
+  const bin = which.status === 0 ? which.stdout.trim() : "";
+  if (bin) {
+    const real = spawnSync("readlink", ["-f", bin], { encoding: "utf8", timeout: 5000 });
+    const cli = real.status === 0 ? real.stdout.trim() : "";
+    if (cli) roots.push(resolve(dirname(cli), "..")); // package root
+  }
+
+  // Known install locations as fallback
+  const piNode = join(home, ".local", "share", "pi-node");
+  try {
+    for (const v of readdirSync(piNode)) {
+      roots.push(join(piNode, v, "lib", "node_modules", PI_CORE_PACKAGE));
+    }
+  } catch {
+    // pi-node dir absent
+  }
+
+  for (const root of roots) {
+    const dir = join(root, "node_modules", "@earendil-works", "pi-ai", "dist", "providers");
+    if (existsSync(join(dir, "data"))) return dir;
+  }
+  return null;
+}
+
+let catalogCache: { providers: CatalogProvider[]; at: number } | null = null;
+
+export function readBuiltinCatalog(): CatalogProvider[] | null {
+  if (catalogCache && Date.now() - catalogCache.at < 300000) return catalogCache.providers;
+  const dir = findPiAiProvidersDir();
+  if (!dir) return null;
+
+  const providers: CatalogProvider[] = [];
+  let files: string[];
+  try {
+    files = readdirSync(join(dir, "data")).filter(
+      (f) => f.endsWith(".json") && !f.startsWith(".")
+    );
+  } catch {
+    return null;
+  }
+
+  for (const file of files) {
+    const id = file.replace(/\.json$/, "");
+    const data = readJsonFile<Record<string, Record<string, any>>>(join(dir, "data", file));
+    if (!data) continue;
+
+    const models: CatalogModel[] = [];
+    let baseUrl: string | undefined;
+    let api: string | undefined;
+    for (const apiKey of Object.keys(data)) {
+      for (const m of Object.values(data[apiKey] ?? {})) {
+        if (!m?.id) continue;
+        baseUrl = baseUrl ?? m.baseUrl;
+        api = api ?? m.api;
+        models.push({
+          id: m.id,
+          name: m.name,
+          reasoning: !!m.reasoning,
+          input: Array.isArray(m.input) ? m.input : ["text"],
+          contextWindow: m.contextWindow,
+          maxTokens: m.maxTokens,
+          cost: m.cost,
+        });
+      }
+    }
+    if (models.length === 0) continue;
+
+    // Display name lives in dist/providers/<id>.js: createProvider({ id: "…", name: "…" }).
+    // Anchor on the id to avoid matching auth-method names like "Anthropic API key".
+    let name = "";
+    try {
+      const src = readFileSync(join(dir, `${id}.js`), "utf-8");
+      const esc = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      name =
+        src.match(new RegExp(`id:\\s*"${esc}",\\s*name:\\s*"([^"]+)"`))?.[1] ??
+        src.match(/createProvider\(\{[^}]*?name:\s*"([^"]+)"/)?.[1] ??
+        "";
+    } catch {
+      // provider module absent — derive from id
+    }
+    if (!name) {
+      name = id
+        .split("-")
+        .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
+        .join(" ");
+    }
+
+    providers.push({
+      id,
+      name,
+      type: "builtin",
+      api,
+      baseUrl,
+      hasAuth: false,
+      authMethod: "env",
+      models: models.sort((a, b) => a.id.localeCompare(b.id)),
+    });
+  }
+
+  if (providers.length === 0) return null;
+  providers.sort((a, b) => a.id.localeCompare(b.id));
+  catalogCache = { providers, at: Date.now() };
+  return providers;
 }

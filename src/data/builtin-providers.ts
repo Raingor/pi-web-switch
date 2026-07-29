@@ -10,6 +10,7 @@ export const BUILTIN_PROVIDERS: Provider[] = [
     name: "Anthropic",
     type: "builtin",
     api: "anthropic-messages",
+    baseUrl: "https://api.anthropic.com/v1",
     hasAuth: true,
     authMethod: "env",
     models: [
@@ -24,6 +25,7 @@ export const BUILTIN_PROVIDERS: Provider[] = [
     name: "OpenAI",
     type: "builtin",
     api: "openai-completions",
+    baseUrl: "https://api.openai.com/v1",
     hasAuth: true,
     authMethod: "env",
     models: [
@@ -38,6 +40,7 @@ export const BUILTIN_PROVIDERS: Provider[] = [
     name: "DeepSeek",
     type: "builtin",
     api: "openai-completions",
+    baseUrl: "https://api.deepseek.com/v1",
     hasAuth: true,
     authMethod: "env",
     models: [
@@ -77,6 +80,7 @@ export const BUILTIN_PROVIDERS: Provider[] = [
     name: "Google Gemini",
     type: "builtin",
     api: "google-generative-ai",
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta",
     hasAuth: true,
     authMethod: "env",
     models: [
@@ -89,6 +93,7 @@ export const BUILTIN_PROVIDERS: Provider[] = [
     name: "OpenRouter",
     type: "builtin",
     api: "openai-completions",
+    baseUrl: "https://openrouter.ai/api/v1",
     hasAuth: false,
     authMethod: "none",
     models: [
@@ -101,6 +106,7 @@ export const BUILTIN_PROVIDERS: Provider[] = [
     name: "Mistral",
     type: "builtin",
     api: "mistral-conversations",
+    baseUrl: "https://api.mistral.ai/v1",
     hasAuth: false,
     authMethod: "none",
     models: [
@@ -112,6 +118,7 @@ export const BUILTIN_PROVIDERS: Provider[] = [
     name: "GitHub Copilot",
     type: "builtin",
     api: "openai-completions",
+    baseUrl: "https://api.githubcopilot.com",
     hasAuth: false,
     authMethod: "none",
     models: [
@@ -123,6 +130,7 @@ export const BUILTIN_PROVIDERS: Provider[] = [
     name: "Groq",
     type: "builtin",
     api: "openai-completions",
+    baseUrl: "https://api.groq.com/openai/v1",
     hasAuth: false,
     authMethod: "none",
     models: [

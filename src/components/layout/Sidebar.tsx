@@ -7,6 +7,7 @@ import {
   Brain,
   Globe,
   Plug,
+  Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTranslation, LANGUAGES } from "@/lib/i18n";
@@ -17,6 +18,7 @@ const navItems = [
   { to: "/sessions", icon: History, key: "nav.sessions" },
   { to: "/memory", icon: Brain, key: "nav.memory" },
   { to: "/providers", icon: Plug, key: "nav.providers_models" },
+  { to: "/subagents", icon: Users, key: "nav.subagents" },
   { to: "/settings", icon: Settings, key: "nav.settings" },
 ];
 

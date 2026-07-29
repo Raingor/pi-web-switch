@@ -63,7 +63,10 @@ function piApiPlugin(): Plugin {
         },
         "GET /api/pi/builtin-providers"(_, res) {
           res.setHeader("Content-Type", "application/json");
-          res.end(JSON.stringify(builtins.getBuiltinProviders()));
+          // Prefer the live catalog from the local pi install; fall back to
+          // the hand-written static list when pi isn't found on this machine.
+          const catalog = pi.readBuiltinCatalog();
+          res.end(JSON.stringify(catalog ?? builtins.getBuiltinProviders()));
         },
         "GET /api/pi/usage"(_, res) {
           const records = pi.readAllUsage();
@@ -86,6 +89,11 @@ function piApiPlugin(): Plugin {
           const memory = pi.readMemoryFiles();
           res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify(memory));
+        },
+        "GET /api/pi/subagents"(_, res) {
+          const data = pi.readSubagents();
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify(data));
         },
         "POST /api/pi/memory/delete-entry"(req, res) {
           let body = "";
@@ -176,6 +184,46 @@ function piApiPlugin(): Plugin {
               res.statusCode = 400;
               res.setHeader("Content-Type", "application/json");
               res.end(JSON.stringify({ error: "Invalid request body" }));
+            }
+          });
+        },
+        "POST /api/pi/provider-models"(req, res) {
+          let body = "";
+          req.on("data", (chunk: string) => (body += chunk));
+          req.on("end", () => {
+            try {
+              const { baseUrl, apiKey, providerId } = JSON.parse(body) as {
+                baseUrl: string;
+                apiKey?: string;
+                providerId?: string;
+              };
+              if (!baseUrl) throw new Error("missing baseUrl");
+              pi.fetchProviderModels(baseUrl, apiKey, providerId).then((result) => {
+                res.setHeader("Content-Type", "application/json");
+                res.end(JSON.stringify(result));
+              });
+            } catch {
+              res.statusCode = 400;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ models: [], error: "Invalid request body" }));
+            }
+          });
+        },
+        "POST /api/pi/model-test"(req, res) {
+          let body = "";
+          req.on("data", (chunk: string) => (body += chunk));
+          req.on("end", () => {
+            try {
+              const { baseUrl, modelId, apiKey, apiType } = JSON.parse(body) as { baseUrl: string; modelId: string; apiKey?: string; apiType?: string };
+              if (!baseUrl || !modelId) throw new Error("missing baseUrl or modelId");
+              pi.testModel(baseUrl, modelId, apiKey, apiType ?? "openai-completions").then((result) => {
+                res.setHeader("Content-Type", "application/json");
+                res.end(JSON.stringify(result));
+              });
+            } catch {
+              res.statusCode = 400;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ success: false, message: "Invalid request body" }));
             }
           });
         },

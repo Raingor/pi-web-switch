@@ -37,7 +37,7 @@ function getCustomProviders(modelsJson: PiModelsJson | null): Provider[] {
   if (!modelsJson) return [];
   return Object.entries(modelsJson.providers).map(([id, cfg]) => ({
     id,
-    name: id.charAt(0).toUpperCase() + id.slice(1),
+    name: cfg.name ?? (id.charAt(0).toUpperCase() + id.slice(1)),
     type: "custom" as const,
     baseUrl: cfg.baseUrl,
     api: cfg.api,
@@ -51,14 +51,37 @@ function getCustomProviders(modelsJson: PiModelsJson | null): Provider[] {
   }));
 }
 
-function mergeProviders(auth: PiAuth, customModels: PiModelsJson | null): Provider[] {
-  const builtins = BUILTIN_PROVIDERS.map((p) => ({
-    ...p,
-    hasAuth: p.hasAuth || !!auth[p.id],
-    authMethod: auth[p.id] ? "file" : p.authMethod,
-  }));
+function mergeProviders(
+  builtinProviders: Provider[],
+  auth: PiAuth,
+  customModels: PiModelsJson | null
+): Provider[] {
   const customs = getCustomProviders(customModels);
-  return [...builtins, ...customs];
+  // models.json entries whose id matches a builtin provider are overrides
+  // (e.g. models imported onto a builtin) — merge them into the builtin
+  // instead of listing a duplicate custom provider.
+  const builtinIds = new Set(builtinProviders.map((p) => p.id));
+  const overrides = new Map(customs.filter((c) => builtinIds.has(c.id)).map((c) => [c.id, c]));
+  const builtins = builtinProviders.map((p) => {
+    const override = overrides.get(p.id);
+    let models = p.models;
+    if (override) {
+      const byId = new Map(p.models.map((m) => [m.id, m]));
+      for (const m of override.models) byId.set(m.id, m);
+      models = [...byId.values()];
+    }
+    return {
+      ...p,
+      // A user-provided display name in models.json wins over the catalog name.
+      name: customModels?.providers?.[p.id]?.name ?? p.name,
+      // hasAuth = a key is actually saved (auth.json or models.json override) —
+      // the static builtin flag only means the provider supports auth.
+      hasAuth: !!auth[p.id] || !!override?.apiKey,
+      authMethod: auth[p.id] ? "file" : p.authMethod,
+      models,
+    };
+  });
+  return [...builtins, ...customs.filter((c) => !builtinIds.has(c.id))];
 }
 
 // ─── State Types ─────────────────────────────────────────
@@ -98,6 +121,9 @@ interface ConfigState {
   settings: PiSettings | null;
   auth: PiAuth | null;
   modelsJson: PiModelsJson | null;
+
+  // Builtin provider catalog (live from the pi install, static fallback)
+  builtinProviders: Provider[];
 
   // Derived
   allProviders: Provider[];
@@ -149,6 +175,7 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
   settings: null,
   auth: null,
   modelsJson: null,
+  builtinProviders: BUILTIN_PROVIDERS,
   allProviders: [],
   allModels: [],
   usage: null,
@@ -161,14 +188,17 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
   init: async () => {
     set({ loading: true, error: null });
     try {
-      const [settings, auth, modelsJson, usage] = await Promise.all([
+      const [settings, auth, modelsJson, usage, builtinsRes] = await Promise.all([
         apiGet<PiSettings>("/settings"),
         apiGet<PiAuth>("/auth"),
         apiGet<PiModelsJson>("/models"),
         apiGet<UsageData>("/usage"),
+        apiGet<Provider[]>("/builtin-providers").catch(() => null),
       ]);
 
-      const allProviders = mergeProviders(auth ?? {}, modelsJson);
+      const builtinProviders =
+        builtinsRes && builtinsRes.length > 0 ? builtinsRes : BUILTIN_PROVIDERS;
+      const allProviders = mergeProviders(builtinProviders, auth ?? {}, modelsJson);
       const allModels = allProviders.flatMap((p) =>
         p.models.map((m) => ({
           ...m,
@@ -181,6 +211,7 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
         settings,
         auth,
         modelsJson,
+        builtinProviders,
         allProviders,
         allModels,
         usage,
@@ -271,8 +302,8 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
     if (ok) {
       set({ auth: updated });
       // Recompute providers with updated auth state
-      const { modelsJson } = get();
-      set({ allProviders: mergeProviders(updated, modelsJson) });
+      const { modelsJson, builtinProviders } = get();
+      set({ allProviders: mergeProviders(builtinProviders, updated, modelsJson) });
     }
     return ok;
   },
@@ -284,8 +315,8 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
     const ok = await apiPost("/auth", rest);
     if (ok) {
       set({ auth: rest });
-      const { modelsJson } = get();
-      set({ allProviders: mergeProviders(rest, modelsJson) });
+      const { modelsJson, builtinProviders } = get();
+      set({ allProviders: mergeProviders(builtinProviders, rest, modelsJson) });
     }
     return ok;
   },
@@ -309,8 +340,8 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
     // Persist
     apiPost("/models", updated);
     // Recompute providers
-    const { auth } = get();
-    set({ allProviders: mergeProviders(auth ?? {}, updated) });
+    const { auth, builtinProviders } = get();
+    set({ allProviders: mergeProviders(builtinProviders, auth ?? {}, updated) });
   },
 
   updateModel: (providerId, modelId, updates) => {
@@ -339,8 +370,8 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
     const updated = { providers: newProviders };
     set({ modelsJson: updated });
     apiPost("/models", updated);
-    const { auth } = get();
-    set({ allProviders: mergeProviders(auth ?? {}, updated) });
+    const { auth, builtinProviders } = get();
+    set({ allProviders: mergeProviders(builtinProviders, auth ?? {}, updated) });
   },
 
   addModel: (providerId, model) => {
@@ -357,8 +388,8 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
     const updated = { providers: newProviders };
     set({ modelsJson: updated });
     apiPost("/models", updated);
-    const { auth } = get();
-    const newAllProviders = mergeProviders(auth ?? {}, updated);
+    const { auth, builtinProviders } = get();
+    const newAllProviders = mergeProviders(builtinProviders, auth ?? {}, updated);
     const newAllModels = newAllProviders.flatMap((p) =>
       p.models.map((m) => ({ ...m, providerId: p.id, providerName: p.name }))
     );
@@ -378,8 +409,8 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
     const updated = { providers: newProviders };
     set({ modelsJson: updated });
     apiPost("/models", updated);
-    const { auth } = get();
-    set({ allProviders: mergeProviders(auth ?? {}, updated) });
+    const { auth, builtinProviders } = get();
+    set({ allProviders: mergeProviders(builtinProviders, auth ?? {}, updated) });
   },
 
   // ─── Custom Provider CRUD ──────────────────────────────
@@ -392,8 +423,8 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
     const ok = await apiPost("/models", updated);
     if (ok) {
       set({ modelsJson: updated });
-      const { auth } = get();
-      set({ allProviders: mergeProviders(auth ?? {}, updated) });
+      const { auth, builtinProviders } = get();
+      set({ allProviders: mergeProviders(builtinProviders, auth ?? {}, updated) });
     }
     return ok;
   },
@@ -411,8 +442,8 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
     const ok = await apiPost("/models", updated);
     if (ok) {
       set({ modelsJson: updated });
-      const { auth } = get();
-      set({ allProviders: mergeProviders(auth ?? {}, updated) });
+      const { auth, builtinProviders } = get();
+      set({ allProviders: mergeProviders(builtinProviders, auth ?? {}, updated) });
     }
     return ok;
   },
@@ -425,8 +456,8 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
     const ok = await apiPost("/models", updated);
     if (ok) {
       set({ modelsJson: updated });
-      const { auth } = get();
-      const newAllProviders = mergeProviders(auth ?? {}, updated);
+      const { auth, builtinProviders } = get();
+      const newAllProviders = mergeProviders(builtinProviders, auth ?? {}, updated);
       const newAllModels = newAllProviders.flatMap((p) =>
         p.models.map((m) => ({ ...m, providerId: p.id, providerName: p.name }))
       );
