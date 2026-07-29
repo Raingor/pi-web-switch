@@ -1147,91 +1147,174 @@ export async function testProviderConnection(
 
 
 /**
- * Fetch the model list from a provider's /models endpoint server-side.
- * Returns { id, contextWindow, maxTokens } for each model so the frontend
- * can create full model objects on import.
+ * Fetch the model list from a provider's endpoint server-side.
+ * Supports multiple source types:
+ *   - OpenAI-compatible /models (default)
+ *   - OpenRouter /models (returns pricing, modality, context_length, top_provider.max_completion_tokens)
+ *   - Ollama /api/tags (returns model names + capabilities via /api/show)
+ *
+ * Returns full model metadata so the frontend can prefill the add-model form:
+ *   { id, name, contextWindow, maxTokens, reasoning, vision, cost }
+ *
+ * Reasoning / vision / contextWindow are also heuristically inferred from
+ * the model id when the endpoint doesn't report them.
  */
+export interface FetchedModel {
+  id: string;
+  name?: string;
+  contextWindow?: number;
+  maxTokens?: number;
+  reasoning?: boolean;
+  vision?: boolean;
+  audio?: boolean;
+  cost?: { input: number; output: number; cacheRead?: number; cacheWrite?: number };
+  source: string; // "openai" | "openrouter" | "ollama" | "heuristic"
+}
+
+// Parse a numeric value, handling K/M suffixes (e.g. "128k" → 128000)
+function toNum(v: any): number | undefined {
+  if (typeof v === "number") return v;
+  if (typeof v !== "string") return undefined;
+  const m = v.match(/^([0-9]+)([KkMm]?)$/);
+  if (!m) return undefined;
+  const n = parseInt(m[1], 10);
+  const u = m[2].toUpperCase();
+  return u === "K" ? n * 1000 : u === "M" ? n * 1_000_000 : n;
+}
+
+// Heuristic reasoning detection (server-side; mirrors client guessModelMeta)
+const REASONING_RE = /(^|[/_\-])(r1|o1|o3|o4|z1|reasoner|reasoning|qwq|deepseek-r|think)([/_\-:]|$)/i;
+const VISION_RE = /(vision|[-_]vl\b|multimodal|gpt-4o|gpt-5|claude-(sonnet|opus)|gemini|llama-.*vision|qwen.*vl|glm-.*v\b)/i;
+const AUDIO_RE = /(audio|whisper|tts|speech)/i;
+function heuristicFlags(id: string): { reasoning?: boolean; vision?: boolean; audio?: boolean; contextWindow?: number } {
+  const k = id.toLowerCase();
+  const reasoning = REASONING_RE.test(k);
+  const vision = VISION_RE.test(k);
+  const audio = AUDIO_RE.test(k);
+  let contextWindow: number | undefined;
+  if (/[-_](1m|1024k|1048576)\b/i.test(k)) contextWindow = 1_048_576;
+  else if (/[-_](256k)\b/i.test(k)) contextWindow = 262_144;
+  else if (/[-_](128k)\b/i.test(k)) contextWindow = 131_072;
+  else if (/[-_](64k)\b/i.test(k)) contextWindow = 65_536;
+  else if (/[-_](32k)\b/i.test(k)) contextWindow = 32_768;
+  else if (/[-_](16k)\b/i.test(k)) contextWindow = 16_384;
+  else if (/[-_](8k)\b/i.test(k)) contextWindow = 8192;
+  return { reasoning, vision, audio, contextWindow };
+}
+
+function isOpenRouter(baseUrl: string, host: string): boolean {
+  return host === "openrouter.ai" || host.endsWith(".openrouter.ai") ||
+    baseUrl.includes("openrouter.ai");
+}
+
+async function fetchJson(url: URL, headers: Record<string, string>, timeoutMs = 15000) {
+  const res = await fetchExternal(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return await res.json();
+}
+
+function makeHeaders(key: string, providerId?: string, host?: string): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (!key) return headers;
+  if (providerId === "anthropic" || (host && host.endsWith("api.anthropic.com"))) {
+    headers["x-api-key"] = key;
+    headers["anthropic-version"] = "2023-06-01";
+  } else if (providerId === "google" || (host && host.endsWith("generativelanguage.googleapis.com"))) {
+    // Google uses query param; caller handles it
+  } else {
+    headers["Authorization"] = `Bearer ${key}`;
+  }
+  return headers;
+}
+
 export async function fetchProviderModels(
   baseUrl: string,
   apiKey?: string,
   providerId?: string
-): Promise<{
-  models: { id: string; contextWindow?: number; maxTokens?: number; vision?: boolean }[];
-  error?: string;
-}> {
-  let url: URL;
-  try {
-    url = new URL(baseUrl.replace(/\/+$/, "") + "/models");
-  } catch {
-    return { models: [], error: "invalid URL" };
-  }
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    return { models: [], error: "invalid URL" };
-  }
-
+): Promise<{ models: FetchedModel[]; error?: string }> {
   let key = apiKey ?? "";
   if (key.startsWith("$")) key = process.env[key.slice(1)] ?? "";
 
-  // Auth differs per vendor: Anthropic uses x-api-key, Google passes ?key=,
-  // everything else follows the OpenAI convention (Bearer token).
-  const host = url.hostname;
-  const headers: Record<string, string> = {};
-  if (key) {
-    if (providerId === "anthropic" || host.endsWith("api.anthropic.com")) {
-      headers["x-api-key"] = key;
-      headers["anthropic-version"] = "2023-06-01";
-    } else if (providerId === "google" || host.endsWith("generativelanguage.googleapis.com")) {
-      url.searchParams.set("key", key);
-    } else {
-      headers["Authorization"] = `Bearer ${key}`;
-    }
+  let base: URL;
+  try {
+    base = new URL(baseUrl.replace(/\/+$/, ""));
+  } catch {
+    return { models: [], error: "invalid URL" };
   }
+  if (base.protocol !== "http:" && base.protocol !== "https:") {
+    return { models: [], error: "invalid URL" };
+  }
+  const host = base.hostname;
 
   try {
-    const res = await fetchExternal(url, {
-      headers,
-      signal: AbortSignal.timeout(15000),
-    });
-    if (!res.ok) {
-      return { models: [], error: `HTTP ${res.status}` };
+    // ── Ollama: /api/tags (no /models) ──────────────────
+    // Heuristic: local port 11434 or hostname "localhost" + path includes ollama
+    const isOllama = host === "localhost" && base.port === "11434";
+    if (isOllama) {
+      const tagsUrl = new URL("/api/tags", base);
+      const data = await fetchJson(tagsUrl, {});
+      const models: FetchedModel[] = [];
+      const models_ = data?.models ?? [];
+      for (const m of models_) {
+        const id = typeof m === "string" ? m : m.name ?? m.model ?? "";
+        if (!id) continue;
+        const flags = heuristicFlags(id);
+        // Ollama details: try /api/show for richer info (best-effort, ignore errors)
+        let cw: number | undefined = flags.contextWindow;
+        let mt: number | undefined;
+        try {
+          const showUrl = new URL("/api/show", base);
+          const show = await fetch(showUrl.toString(), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: id }),
+            signal: AbortSignal.timeout(5000),
+          }).then((r) => r.json());
+          cw = toNum(show?.model_info?.[`${show?.modelfile?.split("\n").find((l: string) => l.startsWith("FROM")) ?? ""}`]) ?? cw;
+          if (show?.context_length) cw = toNum(show.context_length) ?? cw;
+        } catch { /* ignore */ }
+        models.push({
+          id,
+          contextWindow: cw,
+          maxTokens: mt,
+          reasoning: flags.reasoning,
+          vision: flags.vision,
+          audio: flags.audio,
+          source: "ollama",
+        });
+      }
+      return { models };
     }
-    const data = await res.json();
 
-    // Parse a numeric value, handling K/M suffixes (e.g. "128k" → 128000)
-    const toNum = (v: any): number | undefined => {
-      if (typeof v === "number") return v;
-      if (typeof v !== "string") return undefined;
-      const m = v.match(/^([0-9]+)([KkMm]?)$/);
-      if (!m) return undefined;
-      const n = parseInt(m[1], 10);
-      const u = m[2].toUpperCase();
-      return u === "K" ? n * 1000 : u === "M" ? n * 1_000_000 : n;
-    };
+    // ── OpenRouter /models returns rich metadata ────────
+    const modelsUrl = new URL("/models", base);
+    if (providerId === "google" || host.endsWith("generativelanguage.googleapis.com")) {
+      if (key) modelsUrl.searchParams.set("key", key);
+    }
+    const headers = makeHeaders(key, providerId, host);
+    const data = await fetchJson(modelsUrl, headers, isOpenRouter(baseUrl, host) ? 20000 : 15000);
 
-    // Normalize various /models response shapes into { id, contextWindow, maxTokens }
     const seen = new Set<string>();
-    const models: { id: string; contextWindow?: number; maxTokens?: number; vision?: boolean }[] = [];
-    const pushModel = (
-      id: string,
-      contextWindow?: number,
-      maxTokens?: number,
-      vision?: boolean
-    ) => {
-      const v = (id ?? "").trim();
+    const models: FetchedModel[] = [];
+    const pushModel = (m: FetchedModel) => {
+      const v = (m.id ?? "").trim();
       if (!v || seen.has(v)) return;
       seen.add(v);
-      models.push({ id: v, contextWindow, maxTokens: maxTokens || undefined, vision });
+      // Apply heuristic defaults for fields the endpoint didn't provide
+      const flags = heuristicFlags(v);
+      m.reasoning = m.reasoning ?? flags.reasoning;
+      m.vision = m.vision ?? flags.vision;
+      m.audio = m.audio ?? flags.audio;
+      m.contextWindow = m.contextWindow ?? flags.contextWindow;
+      models.push(m);
     };
 
-    // Detect image-input support from vendor metadata; undefined when unknown.
-    // Mistral: capabilities.vision · OpenRouter: architecture.input_modalities /
-    // architecture.modality ("text+image->text") · misc gateways: supports_vision
+    // Vision / modality detectors (vendor-specific shapes)
     const visionOf = (item: any): boolean | undefined => {
       if (!item || typeof item !== "object") return undefined;
       if (typeof item.capabilities?.vision === "boolean") return item.capabilities.vision;
       if (item.supports_vision === true || item.vision === true) return true;
-      const mods =
-        item.architecture?.input_modalities ?? item.input_modalities ?? item.modalities;
+      const mods = item.architecture?.input_modalities ?? item.input_modalities ?? item.modalities;
       if (Array.isArray(mods)) return mods.includes("image");
       const modality = item.architecture?.modality;
       if (typeof modality === "string") {
@@ -1239,12 +1322,35 @@ export async function fetchProviderModels(
       }
       return undefined;
     };
+    const audioOf = (item: any): boolean | undefined => {
+      const mods = item.architecture?.input_modalities ?? item.input_modalities ?? item.modalities;
+      if (Array.isArray(mods)) return mods.includes("audio");
+      return undefined;
+    };
+    const reasoningOf = (item: any): boolean | undefined => {
+      // OpenRouter doesn't directly expose a reasoning flag, but some providers
+      // indicate it via architecture or the id contains reasoner/r1/o1/o3.
+      if (item?.reasoning === true || item?.supports_reasoning === true) return true;
+      return undefined;
+    };
+    const parseCost = (pricing: any): FetchedModel["cost"] | undefined => {
+      if (!pricing) return undefined;
+      // OpenRouter: pricing.prompt, pricing.completion, pricing.cache_read, pricing.cache_write
+      // Values are per-token; multiply by 1e6 for $/M.
+      const toDollar = (v: any) => typeof v === "string" ? parseFloat(v) * 1_000_000 : (typeof v === "number" ? v * 1_000_000 : undefined);
+      const input = toDollar(pricing.prompt ?? pricing.input);
+      const output = toDollar(pricing.completion ?? pricing.output);
+      const cacheRead = toDollar(pricing.cache_read ?? pricing.cacheRead);
+      const cacheWrite = toDollar(pricing.cache_write ?? pricing.cacheWrite);
+      if (input === undefined && output === undefined) return undefined;
+      return { input: input ?? 0, output: output ?? 0, cacheRead, cacheWrite };
+    };
 
     const parseItem = (item: any) => {
-      // Google returns `name: "models/gemini-2.5-pro"` — strip the prefix
       const rawId = typeof item === "string" ? item : item?.id ?? item?.model ?? item?.name ?? "";
       const id = typeof rawId === "string" ? rawId.replace(/^models\//, "") : "";
-      // Common context window fields: context_length, max_context, context_window
+      if (!id) return;
+      const name = typeof item?.name === "string" ? item.name : undefined;
       const cw =
         toNum(item?.context_length) ??
         toNum(item?.max_context) ??
@@ -1252,28 +1358,37 @@ export async function fetchProviderModels(
         toNum(item?.inputTokenLimit) ??
         toNum(item?.max_tokens) ??
         undefined;
-      // Common max output fields: max_output_tokens, max_completion_tokens
       const mt =
         toNum(item?.max_output_tokens) ??
+        toNum(item?.top_provider?.max_completion_tokens) ??
         toNum(item?.max_completion_tokens) ??
         toNum(item?.outputTokenLimit) ??
         toNum(item?.max_tokens) ??
         undefined;
-      pushModel(id, cw, mt, visionOf(item));
+      const isOR = isOpenRouter(baseUrl, host);
+      pushModel({
+        id,
+        name: name !== id ? name : undefined,
+        contextWindow: cw,
+        maxTokens: mt,
+        reasoning: reasoningOf(item),
+        vision: visionOf(item),
+        audio: audioOf(item),
+        cost: isOR ? parseCost(item.pricing) : undefined,
+        source: isOR ? "openrouter" : "openai",
+      });
     };
 
     if (Array.isArray(data)) {
       data.forEach(parseItem);
     } else if (data && typeof data === "object") {
       const dataArr = data.data ?? data.models ?? data.models_list ?? null;
-      if (Array.isArray(dataArr)) {
-        dataArr.forEach(parseItem);
-      }
+      if (Array.isArray(dataArr)) dataArr.forEach(parseItem);
     }
 
     return { models };
   } catch (e: any) {
-    const msg = e?.name === "TimeoutError" ? "timeout" : e?.message || String(e);
+    const msg = e?.name === "TimeoutError" ? "timeout" : e?.cause?.code || e?.message || String(e);
     return { models: [], error: msg };
   }
 }

@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useConfigStore } from "@/store/config-store";
 import { useTranslation } from "@/lib/i18n";
 import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
 import { formatTokens, cn } from "@/lib/utils";
 import type { ApiType, CustomProviderConfig, Model, Provider } from "@/types";
+import { searchCatalog, catalogToModel, guessModelMeta } from "@/data/model-catalog";
 import {
   Plus,
   Trash2,
@@ -27,6 +28,9 @@ import {
   Copy,
   ChevronDown,
   ChevronUp,
+  Sparkles,
+  Mic,
+  Wand2,
 } from "lucide-react";
 
 const API_TYPES: { value: ApiType; label: string }[] = [
@@ -38,6 +42,19 @@ const API_TYPES: { value: ApiType; label: string }[] = [
   { value: "bedrock-converse-stream", label: "AWS Bedrock" },
   { value: "mistral-conversations", label: "Mistral" },
 ];
+
+// Shape returned by /api/pi/provider-models (see server/pi-reader.ts FetchedModel)
+interface FetchedModel {
+  id: string;
+  name?: string;
+  contextWindow?: number;
+  maxTokens?: number;
+  reasoning?: boolean;
+  vision?: boolean;
+  audio?: boolean;
+  cost?: { input: number; output: number; cacheRead?: number; cacheWrite?: number };
+  source?: string;
+}
 
 function isValidHttpUrl(value: string): boolean {
   try {
@@ -500,8 +517,6 @@ function ProviderDetail({ provider, onDelete, onDuplicate }: { provider: Provide
     addModel,
     updateModel,
     removeModel,
-    addEnabledModel,
-    removeEnabledModel,
   } = useConfigStore();
 
   const isCustom = provider.type === "custom";
@@ -521,11 +536,16 @@ function ProviderDetail({ provider, onDelete, onDuplicate }: { provider: Provide
   );
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
 
+  // ─── Quick add (inline, one-liner) ───
+  const [quickId, setQuickId] = useState("");
+  const [quickHint, setQuickHint] = useState<string | null>(null);
+  const [copiedParams, setCopiedParams] = useState<string | null>(null);
+
   // ─── Fetch Models State ───
   const [fetchOpen, setFetchOpen] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
-  const [fetchedModels, setFetchedModels] = useState<{ id: string; contextWindow?: number; maxTokens?: number; vision?: boolean }[]>([]);
+  const [fetchedModels, setFetchedModels] = useState<FetchedModel[]>([]);
   const [fetchSelected, setFetchSelected] = useState<Set<string>>(new Set());
   const [fetchImported, setFetchImported] = useState<number | null>(null);
 
@@ -580,7 +600,18 @@ function ProviderDetail({ provider, onDelete, onDuplicate }: { provider: Provide
     const selected = availableModels.filter((m) => isSelected(m.id));
     if (selected.length === 0) return;
     selected.forEach((m) => {
-      addModel(provider.id, { id: m.id, contextWindow: m.contextWindow ?? DEFAULT_CONTEXT_WINDOW, maxTokens: m.maxTokens ?? DEFAULT_MAX_TOKENS, input: m.vision ? ["text", "image"] : ["text"] } as Model);
+      const input: Model["input"] = ["text"];
+      if (m.vision) input.push("image");
+      if (m.audio) input.push("audio");
+      addModel(provider.id, {
+        id: m.id,
+        name: m.name,
+        reasoning: m.reasoning ?? false,
+        input,
+        contextWindow: m.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
+        maxTokens: m.maxTokens ?? DEFAULT_MAX_TOKENS,
+        cost: m.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      } as Model);
     });
     // Enable in a single batched write — per-model addEnabledModel calls race
     // on the same settings snapshot and overwrite each other.
@@ -624,6 +655,74 @@ function ProviderDetail({ provider, onDelete, onDuplicate }: { provider: Provide
     }
   };
 
+  // Quick-add id changes → live hint
+  useEffect(() => {
+    const id = quickId.trim();
+    if (!id) { setQuickHint(null); return; }
+    const g = guessModelMeta(id);
+    setQuickHint(
+      g.source === "catalog" && g.matched
+        ? t("models.detected_catalog", g.matched)
+        : g.source === "heuristic"
+          ? t("models.detected_heuristic")
+          : null
+    );
+  }, [quickId, t]);
+
+  const handleQuickAdd = async () => {
+    const id = quickId.trim();
+    if (!id) return;
+    // Don't duplicate
+    if (provider.models.some((m) => m.id === id)) {
+      setQuickId("");
+      setQuickHint(null);
+      return;
+    }
+    const g = guessModelMeta(id);
+    const cw = g.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
+    const mt = g.contextWindow
+      ? (g.contextWindow >= 1_000_000 ? 65536 : g.contextWindow >= 200_000 ? 32768 : 8192)
+      : DEFAULT_MAX_TOKENS;
+    // Pull full cost/name from catalog if available
+    const entries = searchCatalog(id, 5);
+    const match = g.source === "catalog"
+      ? entries.find((e) => e.patterns.some((p) => id.toLowerCase().includes(p.toLowerCase())))
+      : undefined;
+    const model: Model = {
+      id,
+      name: match?.name,
+      reasoning: g.reasoning ?? false,
+      input: g.input ?? ["text"],
+      contextWindow: match?.contextWindow ?? cw,
+      maxTokens: match?.maxTokens ?? mt,
+      cost: match?.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      enabled: true,
+    };
+    addModel(provider.id, model);
+    // Enable
+    const list = settings?.enabledModels ?? [];
+    await updateSettings({ enabledModels: Array.from(new Set([...list, `${provider.id}/${id}`])) });
+    setQuickId("");
+    setQuickHint(null);
+  };
+
+  const handleCopyParams = async (m: Model) => {
+    const payload = {
+      reasoning: m.reasoning,
+      input: m.input,
+      contextWindow: m.contextWindow,
+      maxTokens: m.maxTokens,
+      cost: m.cost,
+    };
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+      setCopiedParams(m.id);
+      setTimeout(() => setCopiedParams(null), 1500);
+    } catch {
+      // ignore
+    }
+  };
+
   const urlInvalid = isCustom && baseUrl.trim() !== "" && !isValidHttpUrl(baseUrl.trim());
 
   const dirty =
@@ -648,26 +747,6 @@ function ProviderDetail({ provider, onDelete, onDuplicate }: { provider: Provide
     }
     setSaveState(ok ? "saved" : "error");
     if (ok) setTimeout(() => setSaveState("idle"), 2500);
-  };
-
-  // Enabled state lives in settings.enabledModels ("provider/model" refs) —
-  // the same source pi reads, so toggling here matches the CLI behavior.
-  const isEnabled = (modelId: string) =>
-    settings?.enabledModels?.includes(`${provider.id}/${modelId}`) ?? false;
-
-  const handleToggle = (modelId: string) => {
-    const ref = `${provider.id}/${modelId}`;
-    if (isEnabled(modelId)) removeEnabledModel(ref);
-    else addEnabledModel(ref);
-  };
-
-  const setAllEnabled = (enable: boolean) => {
-    const list = settings?.enabledModels ?? [];
-    const refs = provider.models.map((m) => `${provider.id}/${m.id}`);
-    const next = enable
-      ? Array.from(new Set([...list, ...refs]))
-      : list.filter((r) => !refs.includes(r));
-    updateSettings({ enabledModels: next });
   };
 
   const q = modelQuery.trim().toLowerCase();
@@ -823,22 +902,6 @@ function ProviderDetail({ provider, onDelete, onDuplicate }: { provider: Provide
       <div>
         <div className="flex items-center justify-between gap-3">
           <label className="block text-sm text-gray-400">{t("providers_models.model_list")}</label>
-          {provider.models.length > 0 && (
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setAllEnabled(true)}
-                className="rounded-md px-2 py-1 text-xs text-emerald-400 transition-colors hover:bg-emerald-500/10"
-              >
-                {t("providers_models.enable_all")}
-              </button>
-              <button
-                onClick={() => setAllEnabled(false)}
-                className="rounded-md px-2 py-1 text-xs text-gray-400 transition-colors hover:bg-gray-800"
-              >
-                {t("providers_models.disable_all")}
-              </button>
-            </div>
-          )}
         </div>
 
         {provider.models.length > 5 && (
@@ -864,10 +927,7 @@ function ProviderDetail({ provider, onDelete, onDuplicate }: { provider: Provide
           {visibleModels.map((m) => (
             <div
               key={m.id}
-              className={cn(
-                "flex items-center gap-2 rounded-lg border border-gray-700 bg-gray-900/70 px-3 py-2.5",
-                !isEnabled(m.id) && "opacity-50"
-              )}
+              className="flex items-center gap-2 rounded-lg border border-gray-700 bg-gray-900/70 px-3 py-2.5"
             >
               <Box className="h-4 w-4 shrink-0 text-gray-500" />
               <span className="min-w-0 flex-1 truncate font-mono text-sm text-gray-200">
@@ -883,6 +943,11 @@ function ProviderDetail({ provider, onDelete, onDuplicate }: { provider: Provide
                   <ImageIcon className="h-3.5 w-3.5 text-blue-400" />
                 </span>
               )}
+              {m.input?.includes("audio") && (
+                <span title={t("models.audio_input")} className="flex shrink-0">
+                  <Mic className="h-3.5 w-3.5 text-emerald-400" />
+                </span>
+              )}
               <span className="rounded-md border border-gray-600 bg-gray-800/50 px-2 py-0.5 text-xs text-gray-400">
                 {m.cost && (m.cost.input || m.cost.output)
                   ? `$${m.cost.input}/${m.cost.output}`
@@ -891,17 +956,6 @@ function ProviderDetail({ provider, onDelete, onDuplicate }: { provider: Provide
               <span className="rounded-md border border-gray-600 bg-gray-800/50 px-2 py-0.5 text-xs text-gray-400">
                 {m.contextWindow ? formatTokens(m.contextWindow) : "—"}
               </span>
-              <button
-                onClick={() => handleToggle(m.id)}
-                className={cn(
-                  "rounded-md px-2 py-1 text-xs transition-colors",
-                  isEnabled(m.id)
-                    ? "text-emerald-400 hover:bg-emerald-500/10"
-                    : "text-gray-500 hover:bg-gray-700"
-                )}
-              >
-                {isEnabled(m.id) ? t("models.enabled") : t("models.disabled")}
-              </button>
               {/* Test model */}
               {(() => {
                 const test = getModelTest(m.id);
@@ -939,6 +993,19 @@ function ProviderDetail({ provider, onDelete, onDuplicate }: { provider: Provide
                 );
                 return null;
               })()}
+              {copiedParams === m.id ? (
+                <span className="flex items-center gap-1 px-1 text-xs text-emerald-400">
+                  <Check className="h-3.5 w-3.5" />
+                </span>
+              ) : (
+                <button
+                  onClick={() => handleCopyParams(m)}
+                  className="rounded-md p-1.5 text-gray-500 transition-colors hover:bg-gray-700 hover:text-gray-200"
+                  title={t("models.copy_params")}
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                </button>
+              )}
               <button
                 onClick={() => setEditModel(m)}
                 className="rounded-md p-1.5 text-gray-500 transition-colors hover:bg-gray-700 hover:text-gray-200"
@@ -956,6 +1023,45 @@ function ProviderDetail({ provider, onDelete, onDuplicate }: { provider: Provide
             </div>
           ))}
         </div>
+        {/* Quick-add input */}
+        <div className="mt-3">
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Wand2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-emerald-400" />
+              <input
+                type="text"
+                value={quickId}
+                onChange={(e) => setQuickId(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") { e.preventDefault(); handleQuickAdd(); }
+                }}
+                placeholder={t("models.quick_add_placeholder")}
+                className="w-full rounded-lg border border-gray-700 bg-gray-800 py-2 pl-9 pr-3 text-sm text-white"
+              />
+            </div>
+            <button
+              onClick={handleQuickAdd}
+              disabled={!quickId.trim()}
+              className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-white transition-colors disabled:opacity-50"
+              style={{ backgroundColor: "#10b981" }}
+            >
+              <Plus className="h-4 w-4" />
+              {t("models.quick_add")}
+            </button>
+            <button
+              onClick={() => setShowAddModel(true)}
+              className="flex items-center gap-1.5 rounded-lg border border-gray-700 px-3 py-2 text-sm text-gray-300 transition-colors hover:bg-gray-800"
+            >
+              {t("models.add_model")}
+            </button>
+          </div>
+          {quickHint && (
+            <p className="mt-1.5 flex items-center gap-1 text-[11px] text-emerald-400">
+              <Wand2 className="h-3 w-3" /> {quickHint}
+            </p>
+          )}
+        </div>
+
         <div className="flex flex-wrap gap-2 mt-3">
           <button
             onClick={fetchModels}
@@ -969,13 +1075,6 @@ function ProviderDetail({ provider, onDelete, onDuplicate }: { provider: Provide
           >
             {fetching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
             {fetching ? t("providers_models.fetching") : t("providers_models.fetch_models")}
-          </button>
-          <button
-            onClick={() => setShowAddModel(true)}
-            className="flex items-center gap-2 rounded-lg border border-gray-700 px-4 py-2 text-sm text-gray-300 transition-colors hover:bg-gray-800"
-          >
-            <Plus className="h-4 w-4" />
-            {t("models.add_model")}
           </button>
         </div>
       </div>
@@ -1028,12 +1127,25 @@ function ProviderDetail({ provider, onDelete, onDuplicate }: { provider: Provide
                     </div>
                     <input type="checkbox" checked={isSelected(m.id)} onChange={() => toggleSelect(m.id)} className="sr-only" />
                     <span className="min-w-0 flex-1 truncate font-mono text-sm text-gray-200">{m.id}</span>
-                    <span className={`flex shrink-0 items-center gap-1 rounded border px-1.5 py-0.5 text-xs ${m.vision ? "border-blue-500/40 bg-blue-500/10 text-blue-400" : "border-gray-700 bg-gray-800 text-gray-500"}`}>
-                      {m.vision && <ImageIcon className="h-3 w-3" />}
+                    {m.reasoning && (
+                      <span className="flex shrink-0 items-center rounded border border-purple-500/40 bg-purple-500/10 px-1.5 py-0.5 text-[10px] text-purple-400">
+                        <Brain className="h-3 w-3" />
+                      </span>
+                    )}
+                    <span className={`flex shrink-0 items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] ${m.vision ? "border-blue-500/40 bg-blue-500/10 text-blue-400" : "border-gray-700 bg-gray-800 text-gray-500"}`}>
+                      {m.vision ? <ImageIcon className="h-3 w-3" /> : <span className="h-3 w-3 inline-block" />}
                       {m.vision ? t("providers_models.modality_vision") : t("providers_models.modality_text")}
                     </span>
-                    {m.contextWindow && <span className="rounded border border-gray-700 bg-gray-800 px-1.5 py-0.5 text-xs text-gray-500 font-mono">{formatTokens(m.contextWindow)}</span>}
-                    {m.maxTokens && <span className="rounded border border-gray-700 bg-gray-800 px-1.5 py-0.5 text-xs text-gray-500 font-mono">{formatTokens(m.maxTokens)}</span>}
+                    {m.audio && (
+                      <span className="flex shrink-0 items-center rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-400">
+                        <Mic className="h-3 w-3" />
+                      </span>
+                    )}
+                    {m.contextWindow && <span className="rounded border border-gray-700 bg-gray-800 px-1.5 py-0.5 text-[10px] text-gray-500 font-mono">{formatTokens(m.contextWindow)}</span>}
+                    {m.maxTokens && <span className="rounded border border-gray-700 bg-gray-800 px-1.5 py-0.5 text-[10px] text-gray-500 font-mono">{formatTokens(m.maxTokens)}</span>}
+                    {m.cost && (m.cost.input || m.cost.output) ? (
+                      <span className="rounded border border-gray-700 bg-gray-800 px-1.5 py-0.5 text-[10px] text-gray-500 font-mono">${m.cost.input}/${m.cost.output}</span>
+                    ) : null}
                   </label>
                 ))}
               </div>
@@ -1139,16 +1251,16 @@ function ProviderDetail({ provider, onDelete, onDuplicate }: { provider: Provide
 
 // ─── Model Form (add & edit) ──────────────────────────────
 
-function ModelForm({
-  initial,
-  onSubmit,
-  onCancel,
-}: {
+interface ModelFormProps {
   initial?: Model;
   onSubmit: (form: Partial<Model>) => void;
   onCancel: () => void;
-}) {
+}
+
+function ModelForm({ initial, onSubmit, onCancel }: ModelFormProps) {
   const { t } = useTranslation();
+  const isEdit = !!initial;
+
   const [form, setForm] = useState<Partial<Model>>(
     initial
       ? { ...initial }
@@ -1162,10 +1274,191 @@ function ModelForm({
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
         }
   );
-  const isEdit = !!initial;
+
+  // Which fields the user has manually changed (so auto-detect doesn't clobber them)
+  const touchedRef = useRef<Set<string>>(new Set());
+  const touch = (field: string) => { touchedRef.current.add(field); };
+  const wasTouched = (field: string) => touchedRef.current.has(field);
+
+  // Auto-detect from model id when not editing and id changes
+  const [detectHint, setDetectHint] = useState<string | null>(null);
+  useEffect(() => {
+    if (isEdit) return;
+    const id = (form.id ?? "").trim();
+    if (!id) { setDetectHint(null); return; }
+
+    const guess = guessModelMeta(id);
+    if (guess.source === "default") { setDetectHint(null); return; }
+
+    setForm((prev) => {
+      const next = { ...prev };
+      if (guess.contextWindow && !wasTouched("contextWindow")) next.contextWindow = guess.contextWindow;
+      if (!wasTouched("maxTokens")) {
+        // Use reasonable maxTokens per context family when detected
+        next.maxTokens = guess.contextWindow
+          ? (guess.contextWindow >= 1_000_000 ? 65536 : guess.contextWindow >= 200_000 ? 32768 : 8192)
+          : DEFAULT_MAX_TOKENS;
+      }
+      if (guess.reasoning !== undefined && !wasTouched("reasoning")) next.reasoning = guess.reasoning;
+      if (guess.input && !wasTouched("input")) next.input = [...guess.input];
+      // Catalog match → also set name + cost
+      if (guess.source === "catalog") {
+        // Find the matched catalog entry for name + cost
+        const entries = searchCatalog(id, 5);
+        const match = entries.find((e) => e.patterns.some((p) => id.toLowerCase().includes(p.toLowerCase())));
+        if (match) {
+          if (!wasTouched("name")) next.name = match.name;
+          if (match.cost && !wasTouched("cost")) next.cost = { ...match.cost };
+        }
+      }
+      return next;
+    });
+
+    setDetectHint(
+      guess.source === "catalog" && guess.matched
+        ? t("models.detected_catalog", guess.matched)
+        : t("models.detected_heuristic")
+    );
+  }, [form.id, isEdit, t]);
+
+  // ── Catalog picker (add-mode only) ──
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerQuery, setPickerQuery] = useState("");
+  const pickerResults = useMemo(
+    () => searchCatalog(pickerQuery, 30),
+    [pickerQuery]
+  );
+  const applyPreset = (entry: ReturnType<typeof searchCatalog>[number]) => {
+    const preset = catalogToModel(entry);
+    // Apply all fields as if they were default (no touch-marking)
+    touchedRef.current = new Set();
+    setForm((prev) => ({ ...prev, ...preset }));
+    setPickerOpen(false);
+    setDetectHint(t("models.detected_catalog", entry.name ?? entry.patterns[0] ?? ""));
+  };
+
+  // Apply a quick template (Claude-style, GPT-style, Reasoning, Local small)
+  const applyTemplate = (kind: "claude" | "gpt" | "reasoning" | "small") => {
+    touchedRef.current = new Set();
+    setForm((prev) => {
+      switch (kind) {
+        case "claude":
+          return { ...prev, reasoning: true, input: ["text", "image"], contextWindow: 200_000, maxTokens: 8192 };
+        case "gpt":
+          return { ...prev, reasoning: false, input: ["text", "image"], contextWindow: 128_000, maxTokens: 16_384 };
+        case "reasoning":
+          return { ...prev, reasoning: true, input: ["text"], contextWindow: 128_000, maxTokens: 65_536 };
+        case "small":
+          return { ...prev, reasoning: false, input: ["text"], contextWindow: 32_768, maxTokens: 4096 };
+      }
+    });
+  };
+
+  const setId = (v: string) => { touch("id"); setForm((p) => ({ ...p, id: v })); };
+  const setName = (v: string) => { touch("name"); setForm((p) => ({ ...p, name: v })); };
+  const setContextWindow = (v: number) => { touch("contextWindow"); setForm((p) => ({ ...p, contextWindow: v })); };
+  const setMaxTokens = (v: number) => { touch("maxTokens"); setForm((p) => ({ ...p, maxTokens: v })); };
+  const setReasoning = (v: boolean) => { touch("reasoning"); setForm((p) => ({ ...p, reasoning: v })); };
+  const setImage = (v: boolean) => {
+    touch("input");
+    setForm((p) => ({ ...p, input: v ? ["text", "image"] : ["text"] }));
+  };
+  const setAudio = (v: boolean) => {
+    touch("input");
+    setForm((p) => {
+      const hasText = p.input?.includes("text") ?? true;
+      const hasImage = p.input?.includes("image") ?? false;
+      const next: ("text" | "image" | "audio")[] = [];
+      if (hasText) next.push("text");
+      if (hasImage) next.push("image");
+      if (v) next.push("audio");
+      return { ...p, input: next };
+    });
+  };
+  const setCostField = (field: keyof NonNullable<Model["cost"]>, v: number) => {
+    touch("cost");
+    setForm((p) => ({
+      ...p,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, ...p.cost, [field]: v },
+    }));
+  };
 
   return (
     <div className="space-y-4">
+      {/* ── Catalog picker / templates (add-mode) ── */}
+      {!isEdit && (
+        <div className="rounded-lg border border-gray-800 bg-gray-900/40 p-3">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={() => setPickerOpen((o) => !o)}
+              className="flex items-center gap-1.5 rounded-md border border-gray-700 bg-gray-800 px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-700"
+            >
+              <Sparkles className="h-3.5 w-3.5 text-amber-400" />
+              {t("models.pick_preset")}
+            </button>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[10px] uppercase tracking-wide text-gray-500 mr-1">{t("models.manual_fill")}:</span>
+              {([
+                ["claude", "models.preset_claude"],
+                ["gpt", "models.preset_gpt"],
+                ["reasoning", "models.preset_reasoning"],
+                ["small", "models.preset_small_local"],
+              ] as const).map(([kind, key]) => (
+                <button
+                  key={kind}
+                  type="button"
+                  onClick={() => applyTemplate(kind)}
+                  className="rounded-md border border-gray-700 bg-gray-800/70 px-2 py-1 text-[11px] text-gray-400 hover:bg-gray-700 hover:text-gray-200"
+                >
+                  {t(key)}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {pickerOpen && (
+            <div className="mt-3 space-y-2">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
+                <input
+                  autoFocus
+                  type="text"
+                  value={pickerQuery}
+                  onChange={(e) => setPickerQuery(e.target.value)}
+                  placeholder={t("models.pick_preset_placeholder")}
+                  className="w-full rounded-lg border border-gray-700 bg-gray-800 py-2 pl-9 pr-3 text-sm text-white"
+                />
+              </div>
+              <div className="max-h-56 overflow-y-auto rounded-lg border border-gray-800">
+                {pickerResults.length === 0 && (
+                  <p className="px-3 py-4 text-center text-xs text-gray-500">—</p>
+                )}
+                {pickerResults.map((e) => (
+                  <button
+                    key={e.patterns[0]}
+                    type="button"
+                    onClick={() => applyPreset(e)}
+                    className="flex w-full items-center gap-3 border-b border-gray-800 px-3 py-2 text-left hover:bg-gray-800 last:border-0"
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm text-gray-200">{e.name}</span>
+                      <span className="block truncate font-mono text-[11px] text-gray-500">{e.patterns[0]}</span>
+                    </span>
+                    {e.reasoning && <Brain className="h-3.5 w-3.5 shrink-0 text-purple-400" aria-label="reasoning" />}
+                    {e.input?.includes("image") && <ImageIcon className="h-3.5 w-3.5 shrink-0 text-blue-400" aria-label="vision" />}
+                    <span className="shrink-0 rounded border border-gray-700 bg-gray-800 px-1.5 py-0.5 text-[10px] font-mono text-gray-500">
+                      {formatTokens(e.contextWindow)}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Core fields ── */}
       <div className="grid grid-cols-2 gap-4">
         <div>
           <label className="block text-xs font-medium text-gray-400">{t("models.model_id")} *</label>
@@ -1173,17 +1466,23 @@ function ModelForm({
             type="text"
             value={form.id ?? ""}
             disabled={isEdit}
-            onChange={(e) => setForm({ ...form, id: e.target.value })}
+            onChange={(e) => setId(e.target.value)}
             placeholder="my-model-id"
             className="mt-1 w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white disabled:opacity-50"
           />
+          {!isEdit && detectHint && (
+            <p className="mt-1 flex items-center gap-1 text-[11px] text-emerald-400">
+              <Wand2 className="h-3 w-3" />
+              {detectHint}
+            </p>
+          )}
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-400">{t("models.display_name")}</label>
           <input
             type="text"
             value={form.name ?? ""}
-            onChange={(e) => setForm({ ...form, name: e.target.value })}
+            onChange={(e) => setName(e.target.value)}
             placeholder="My Custom Model"
             className="mt-1 w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white"
           />
@@ -1193,7 +1492,7 @@ function ModelForm({
           <input
             type="number"
             value={form.contextWindow ?? DEFAULT_CONTEXT_WINDOW}
-            onChange={(e) => setForm({ ...form, contextWindow: parseInt(e.target.value) || DEFAULT_CONTEXT_WINDOW })}
+            onChange={(e) => setContextWindow(parseInt(e.target.value) || DEFAULT_CONTEXT_WINDOW)}
             className="mt-1 w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white"
           />
         </div>
@@ -1202,33 +1501,43 @@ function ModelForm({
           <input
             type="number"
             value={form.maxTokens ?? DEFAULT_MAX_TOKENS}
-            onChange={(e) => setForm({ ...form, maxTokens: parseInt(e.target.value) || DEFAULT_MAX_TOKENS })}
+            onChange={(e) => setMaxTokens(parseInt(e.target.value) || DEFAULT_MAX_TOKENS)}
             className="mt-1 w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white"
           />
         </div>
       </div>
 
       {/* Capabilities */}
-      <div className="flex flex-wrap gap-3">
+      <div className="flex flex-wrap gap-4">
         <label className="flex items-center gap-2 text-sm text-gray-300">
           <input
             type="checkbox"
             checked={form.reasoning ?? false}
-            onChange={(e) => setForm({ ...form, reasoning: e.target.checked })}
+            onChange={(e) => setReasoning(e.target.checked)}
             className="rounded border-gray-600 bg-gray-800 text-blue-500"
           />
+          <Brain className="h-3.5 w-3.5 text-purple-400" />
           {t("models.reasoning")}
         </label>
         <label className="flex items-center gap-2 text-sm text-gray-300">
           <input
             type="checkbox"
             checked={form.input?.includes("image") ?? false}
-            onChange={(e) =>
-              setForm({ ...form, input: e.target.checked ? ["text", "image"] : ["text"] })
-            }
+            onChange={(e) => setImage(e.target.checked)}
             className="rounded border-gray-600 bg-gray-800 text-blue-500"
           />
+          <ImageIcon className="h-3.5 w-3.5 text-blue-400" />
           {t("models.image_input")}
+        </label>
+        <label className="flex items-center gap-2 text-sm text-gray-300">
+          <input
+            type="checkbox"
+            checked={form.input?.includes("audio") ?? false}
+            onChange={(e) => setAudio(e.target.checked)}
+            className="rounded border-gray-600 bg-gray-800 text-blue-500"
+          />
+          <Mic className="h-3.5 w-3.5 text-emerald-400" />
+          {t("models.audio_input")}
         </label>
       </div>
 
@@ -1248,21 +1557,16 @@ function ModelForm({
               type="number"
               step="0.01"
               value={form.cost?.[field] ?? 0}
-              onChange={(e) =>
-                setForm({
-                  ...form,
-                  cost: {
-                    input: 0, output: 0, cacheRead: 0, cacheWrite: 0,
-                    ...form.cost,
-                    [field]: parseFloat(e.target.value) || 0,
-                  },
-                })
-              }
+              onChange={(e) => setCostField(field, parseFloat(e.target.value) || 0)}
               className="mt-1 w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white"
             />
           </div>
         ))}
       </div>
+
+      {!isEdit && (
+        <p className="text-[11px] text-gray-500">{t("models.catalog_hint")}</p>
+      )}
 
       <div className="flex justify-end gap-3 pt-2">
         <button onClick={onCancel} className="rounded-lg px-4 py-2 text-sm text-gray-400 hover:bg-gray-800">
@@ -1508,7 +1812,7 @@ function ImportProviderModal({
   const [fetching, setFetching] = useState(false);
   const [fetchErr, setFetchErr] = useState<string | null>(null);
   const [fetchDone, setFetchDone] = useState(false);
-  const [fetchedModels, setFetchedModels] = useState<{ id: string; contextWindow?: number; maxTokens?: number; vision?: boolean }[]>([]);
+  const [fetchedModels, setFetchedModels] = useState<FetchedModel[]>([]);
   const [fetchSel, setFetchSel] = useState<Set<string>>(new Set());
 
   // Re-parse on every paste/edit of the raw text; fields below stay editable
@@ -1567,7 +1871,7 @@ function ImportProviderModal({
       if (data.error) {
         setFetchErr(data.error);
       } else {
-        const models = (data.models ?? []) as { id: string; contextWindow?: number; maxTokens?: number; vision?: boolean }[];
+        const models = (data.models ?? []) as FetchedModel[];
         setFetchedModels(models);
         // Select everything by default so import is a single click
         setFetchSel(new Set(models.map((m) => m.id)));
@@ -1609,15 +1913,30 @@ function ImportProviderModal({
         maxTokens: DEFAULT_MAX_TOKENS,
         ...defaults,
       })),
-      // Fetched models carry real context/output limits when the endpoint provides them
-      ...selectedFetched.map((m) => ({
-        id: m.id,
-        name: m.id.split("/").pop() || m.id,
-        contextWindow: m.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
-        maxTokens: m.maxTokens ?? DEFAULT_MAX_TOKENS,
-        ...defaults,
-        input: (m.vision ? ["text", "image"] : ["text"]) as Model["input"],
-      })),
+      // Fetched models carry real context/output/reasoning/cost when the endpoint provides them
+      ...selectedFetched.map((m) => {
+        const input: Model["input"] = ["text"];
+        if (m.vision) input.push("image");
+        if (m.audio) input.push("audio");
+        const cost = m.cost
+          ? {
+              input: m.cost.input ?? 0,
+              output: m.cost.output ?? 0,
+              cacheRead: m.cost.cacheRead ?? 0,
+              cacheWrite: m.cost.cacheWrite ?? 0,
+            }
+          : defaults.cost;
+        return {
+          ...defaults,
+          id: m.id,
+          name: m.name ?? (m.id.split("/").pop() || m.id),
+          reasoning: m.reasoning ?? false,
+          input,
+          contextWindow: m.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
+          maxTokens: m.maxTokens ?? DEFAULT_MAX_TOKENS,
+          cost,
+        };
+      }),
     ];
     const newIds = newModels.map((m) => m.id);
 
@@ -1834,15 +2153,22 @@ function ImportProviderModal({
                       className="h-3.5 w-3.5 accent-blue-500"
                     />
                     <span className="truncate font-mono text-xs text-gray-200">{m.id}</span>
-                    <span className={`ml-auto flex shrink-0 items-center gap-1 rounded border px-1 py-px text-[10px] ${m.vision ? "border-blue-500/40 bg-blue-500/10 text-blue-400" : "border-gray-700 bg-gray-800 text-gray-500"}`}>
-                      {m.vision && <ImageIcon className="h-2.5 w-2.5" />}
-                      {m.vision ? t("providers_models.modality_vision") : t("providers_models.modality_text")}
-                    </span>
-                    {m.contextWindow && (
-                      <span className="shrink-0 text-[10px] text-gray-500">
-                        {formatTokens(m.contextWindow)}
+                    <span className="ml-auto flex shrink-0 items-center gap-1">
+                      {m.reasoning && <Brain className="h-3 w-3 text-purple-400" />}
+                      {m.audio && <Mic className="h-3 w-3 text-emerald-400" />}
+                      <span className={`flex items-center gap-1 rounded border px-1 py-px text-[10px] ${m.vision ? "border-blue-500/40 bg-blue-500/10 text-blue-400" : "border-gray-700 bg-gray-800 text-gray-500"}`}>
+                        {m.vision && <ImageIcon className="h-2.5 w-2.5" />}
+                        {m.vision ? t("providers_models.modality_vision") : t("providers_models.modality_text")}
                       </span>
-                    )}
+                      {m.contextWindow && (
+                        <span className="shrink-0 text-[10px] text-gray-500 font-mono">
+                          {formatTokens(m.contextWindow)}
+                        </span>
+                      )}
+                      {m.cost && (m.cost.input || m.cost.output) ? (
+                        <span className="shrink-0 text-[10px] text-gray-500 font-mono">${m.cost.input}/${m.cost.output}</span>
+                      ) : null}
+                    </span>
                   </label>
                 ))}
               </div>
