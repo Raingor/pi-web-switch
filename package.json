@@ -27,9 +27,9 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "electron:dev": "vite",
-    "electron:build": "tsc -b && vite build && electron-builder",
-    "electron:preview": "vite build && electron ."
+    "electron:dev": "node scripts/electron-dev.mjs",
+    "electron:build": "tsc -b && vite build && vite build --config vite.electron.config.ts && vite build --config vite.preload.config.ts && electron-builder",
+    "electron:preview": "vite build && vite build --config vite.electron.config.ts && vite build --config vite.preload.config.ts && env -u ELECTRON_RUN_AS_NODE npx electron ."
   },
   "pi": {
     "extensions": [

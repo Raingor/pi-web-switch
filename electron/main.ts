@@ -1,4 +1,6 @@
-import { app, BrowserWindow, ipcMain, Menu } from 'electron';
+// Electron main process
+// Use process.mainModule.require to access electron module within Electron
+const { app, BrowserWindow, Menu, ipcMain } = (process as any).mainModule?.require('electron') || require('electron');
 import path from 'path';
 import { fileURLToPath } from 'url';
 import * as piReader from '../server/pi-reader';
@@ -17,7 +19,7 @@ function createWindow() {
     title: 'pi-web-switch',
     icon: path.join(__dirname, '../public/pi.svg'),
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
     },

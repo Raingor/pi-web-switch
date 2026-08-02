@@ -3,7 +3,6 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 import type { Connect } from "vite";
-import electron from "vite-plugin-electron";
 
 // ─── Pi Config API Plugin ───────────────────────────────
 
@@ -328,33 +327,6 @@ export default defineConfig({
     react(),
     tailwindcss(),
     piApiPlugin(),
-    electron([
-      {
-        entry: "electron/main.ts",
-        vite: {
-          build: {
-            outDir: "dist-electron",
-            rollupOptions: {
-              external: ["electron"],
-            },
-          },
-        },
-      },
-      {
-        entry: "electron/preload.ts",
-        onstart({ startup }) {
-          startup();
-        },
-        vite: {
-          build: {
-            outDir: "dist-electron",
-            rollupOptions: {
-              external: ["electron"],
-            },
-          },
-        },
-      },
-    ]),
   ],
   resolve: {
     alias: {
