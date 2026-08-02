@@ -68,3 +68,10 @@
 - 构建命令：`npm run electron:build`
 - 输出目录：`release/mac-arm64/`
 - 产物：`pi-web-switch-0.3.3-arm64.dmg`
+
+## Electron 开发模式（已修复并运行）
+- 命令：`npm run electron:dev`
+- 新增 `scripts/electron-dev.mjs`：启动 Vite → 构建 main/preload → 启动 Electron 窗口
+- **关键修复**：本机全局设置了 `ELECTRON_RUN_AS_NODE=1`，会让 Electron 退化为纯 Node 模式导致 `require('electron')` 解析到 npm 包而非内置模块。脚本启动 Electron 前显式清除该环境变量。
+- main/preload 拆分独立构建目录 `dist-electron/main` 与 `dist-electron/preload`，避免构建互相覆盖；构建后将 preload.cjs 拷贝至主进程目录。
+- 已验证：Electron 窗口正常打开，Renderer 进程连接 Vite dev server（5176）成功。
