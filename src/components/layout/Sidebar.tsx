@@ -2,7 +2,6 @@ import { NavLink } from "react-router-dom";
 import {
   LayoutDashboard,
   Settings,
-  Pi,
   History,
   Brain,
   Globe,
@@ -39,10 +38,7 @@ export function Sidebar() {
         className="flex items-center gap-3 border-b px-6 py-5"
         style={{ borderColor: "var(--sidebar-border)" }}
       >
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg"
-          style={{ backgroundColor: "#3b82f6" }}>
-          <Pi className="h-5 w-5" style={{ color: "#ffffff" }} />
-        </div>
+        <img src="/pi.svg" alt="pi-switch" className="h-9 w-9 rounded-lg" />
         <div>
           <h1 className="text-base font-semibold" style={{ color: "var(--page-text)" }}>pi-switch</h1>
           <p className="text-xs" style={{ color: "var(--subtle-text)" }}>{t("app.subtitle")}</p>
