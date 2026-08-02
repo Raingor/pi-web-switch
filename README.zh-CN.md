@@ -55,6 +55,8 @@
 - **自定义提供商** — 添加 Ollama、vLLM、LM Studio 或任意 OpenAI 兼容提供商
 - **API Key 管理** — 为每个提供商设置/删除 API Key（保存到 `auth.json`）
 - **提供商配置** — baseUrl、API 类型、自定义请求头、认证方式
+- **已启用模型面板** — 跨提供商汇总所有已启用模型，支持一键禁用/全部禁用，并与各提供商内的模型开关实时同步
+- **在线获取模型** — 从提供商的 `/models` 端点拉取实时模型列表，一键导入
 
 ### 💬 会话浏览
 - **项目分组** — 自动将会话目录名解码为项目路径
@@ -79,7 +81,7 @@
 ### ⚙️ 设置
 - **默认值** — 默认提供商、模型、思考级别、项目信任级别
 - **主题** — 浅色 / 深色 / 跟随系统，即时切换（CSS 变量双主题）
-- **已启用模型** — 查看和管理完整的启用模型列表
+- **界面缩放** — 按百分比缩放整个界面（50%–200%），并提供字体大小调节
 - **扩展与包** — 管理 pi 的 packages 列表
 - **导入/导出** — 下载完整配置为 JSON，从备份恢复
 - **重置** — 恢复空白默认配置
@@ -121,6 +123,20 @@ npm run dev    # 启动开发服务器（自动读取 ~/.pi/agent/）
 npm run build  # 构建生产版本
 npm run preview # 预览生产构建
 ```
+
+## 🖥️ 桌面应用（Electron）
+
+pi-web-switch 同样提供桌面应用（macOS / Windows / Linux），并带有专属品牌图标。
+
+```bash
+# 开发模式运行（Vite 开发服务器 + Electron，支持 HMR）
+npm run electron:dev
+
+# 构建安装包（DMG / NSIS / AppImage）到 release/
+npm run electron:build
+```
+
+应用图标位于 `build/`（`icon.icns` / `icon.ico` / `icon.png`），已按平台接入 electron-builder；开发模式下会在运行时设置 macOS 程序坞图标。
 
 ## 🏗️ 技术栈
 

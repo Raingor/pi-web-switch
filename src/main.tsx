@@ -108,6 +108,15 @@ function applySavedFontSize() {
   }
 }
 
+// ─── UI zoom: apply saved percentage before first paint ─
+applySavedZoom();
+function applySavedZoom() {
+  const saved = Number(localStorage.getItem("pi-ui-zoom"));
+  if (saved >= 50 && saved <= 200) {
+    document.documentElement.style.zoom = `${saved}%`;
+  }
+}
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <Root />

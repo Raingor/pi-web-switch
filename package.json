@@ -1,7 +1,7 @@
 {
   "name": "@raingor/pi-web-switch",
   "private": false,
-  "version": "0.3.3",
+  "version": "0.4.0",
   "type": "module",
   "main": "dist-electron/main.js",
   "description": "Web UI for pi coding agent — live configuration management, session browser, and memory viewer",
@@ -31,6 +31,18 @@
     "electron:build": "tsc -b && vite build && vite build --config vite.electron.config.ts && vite build --config vite.preload.config.ts && electron-builder",
     "electron:preview": "vite build && vite build --config vite.electron.config.ts && vite build --config vite.preload.config.ts && env -u ELECTRON_RUN_AS_NODE npx electron ."
   },
+  "files": [
+    "pi-package",
+    "server",
+    "src",
+    "public",
+    "index.html",
+    "vite.config.ts",
+    "tsconfig.json",
+    "README.md",
+    "README.zh-CN.md",
+    "README.ja.md"
+  ],
   "pi": {
     "extensions": [
       "./pi-package/index.ts"
@@ -73,13 +85,16 @@
       "dist-electron/**/*"
     ],
     "mac": {
-      "target": "dmg"
+      "target": "dmg",
+      "icon": "build/icon.icns"
     },
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "build/icon.ico"
     },
     "linux": {
-      "target": "AppImage"
+      "target": "AppImage",
+      "icon": "build/icon.png"
     }
   }
 }

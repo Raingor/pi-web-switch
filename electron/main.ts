@@ -1,9 +1,10 @@
 // Electron main process
 // Use process.mainModule.require to access electron module within Electron
-const { app, BrowserWindow, Menu, ipcMain } = (process as any).mainModule?.require('electron') || require('electron');
+const { app, BrowserWindow, Menu, ipcMain, nativeImage } = (process as any).mainModule?.require('electron') || require('electron');
 // Type-only import (erased at compile time) — does not affect the runtime require workaround above.
 import type { BrowserWindow as BrowserWindowType, IpcMainInvokeEvent } from 'electron';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import * as piReader from '../server/pi-reader';
 
@@ -19,7 +20,7 @@ function createWindow() {
     minWidth: 800,
     minHeight: 600,
     title: 'pi-web-switch',
-    icon: path.join(__dirname, '../public/pi.svg'),
+    icon: path.join(__dirname, '../../public/icon-512.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -104,7 +105,23 @@ function setupIPC() {
   });
 }
 
+// Set the macOS dock icon while running from source. In packaged builds the
+// .icns embedded by electron-builder (build/icon.icns) provides the dock icon,
+// so this is guarded to only act when the dev PNG actually exists.
+function setDockIcon() {
+  if (process.platform !== 'darwin' || !app.dock) return;
+  const iconPath = path.join(__dirname, '../../public/icon-512.png');
+  if (fs.existsSync(iconPath)) {
+    try {
+      app.dock.setIcon(nativeImage.createFromPath(iconPath));
+    } catch {
+      /* dock icon is cosmetic — ignore failures */
+    }
+  }
+}
+
 app.whenReady().then(() => {
+  setDockIcon();
   createMenu();
   setupIPC();
   createWindow();

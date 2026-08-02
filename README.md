@@ -56,6 +56,8 @@
 - **Custom Providers** — Add Ollama, vLLM, LM Studio, or any OpenAI-compatible provider
 - **API Key Management** — Set/remove API keys per provider (saved to `auth.json`)
 - **Provider Configuration** — baseUrl, API type, custom headers, auth method
+- **Enabled Models Panel** — Cross-provider list of every enabled model with one-click disable / disable-all, kept in sync with each provider's per-model toggles
+- **Fetch Models Online** — Pull a provider's live model list from its `/models` endpoint and import with one click
 
 ### 💬 Sessions
 - **Project Grouping** — Auto-decodes session directory names into project paths
@@ -80,7 +82,7 @@
 ### ⚙️ Settings
 - **Defaults** — Default provider, model, thinking level, project trust
 - **Theme** — Light / Dark / System with immediate toggle (CSS variables for both modes)
-- **Enabled Models** — View and manage the full enabled models list
+- **Interface Zoom** — Scale the entire UI by percentage (50%–200%), plus a font-size slider
 - **Extensions & Packages** — Manage pi packages list
 - **Import/Export** — Download full config as JSON, restore from backup
 - **Reset** — Factory reset to blank configuration
@@ -134,6 +136,20 @@ npm run preview
 ```
 
 The dev server automatically serves pi configuration via Vite middleware at `/api/pi/*` — no separate backend process needed.
+
+## 🖥️ Desktop App (Electron)
+
+pi-web-switch also runs as a desktop app (macOS / Windows / Linux) with its own branded app icon.
+
+```bash
+# Run in development (Vite dev server + Electron with HMR)
+npm run electron:dev
+
+# Build installers (DMG / NSIS / AppImage) into release/
+npm run electron:build
+```
+
+App icons live in `build/` (`icon.icns` / `icon.ico` / `icon.png`) and are wired into electron-builder per platform; in development the macOS dock icon is set at runtime.
 
 ## 🏗️ Tech Stack
 

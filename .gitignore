@@ -8,3 +8,6 @@ release/
 .pi-subagents/
 tsconfig.tsbuildinfo
 electron/vite-env.d.ts
+
+# Local secrets — never commit
+secret.md

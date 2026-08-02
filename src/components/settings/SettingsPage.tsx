@@ -26,6 +26,7 @@ import {
   Settings as SettingsIcon,
   CloudDownload,
   RefreshCw,
+  ZoomIn,
 } from "lucide-react";
 
 type SettingsTab = "appearance" | "models" | "advanced";
@@ -43,6 +44,7 @@ const THEME_SWATCHES: {
 ];
 
 const FONT_SIZE_KEY = "pi-font-size";
+const UI_ZOOM_KEY = "pi-ui-zoom";
 
 function Card({
   icon: Icon,
@@ -104,6 +106,10 @@ export function SettingsPage() {
     const saved = Number(localStorage.getItem(FONT_SIZE_KEY));
     return saved >= 12 && saved <= 24 ? saved : 16;
   });
+  const [uiZoom, setUiZoom] = useState(() => {
+    const saved = Number(localStorage.getItem(UI_ZOOM_KEY));
+    return saved >= 50 && saved <= 200 ? saved : 100;
+  });
   // pi core / extensions update check (Advanced tab).
   const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null);
   const [checkingUpdates, setCheckingUpdates] = useState(false);
@@ -159,6 +165,12 @@ export function SettingsPage() {
     document.documentElement.style.fontSize = `${fontSize}px`;
     localStorage.setItem(FONT_SIZE_KEY, String(fontSize));
   }, [fontSize]);
+
+  // Apply + persist UI zoom (whole-interface percentage scaling).
+  useEffect(() => {
+    document.documentElement.style.zoom = `${uiZoom}%`;
+    localStorage.setItem(UI_ZOOM_KEY, String(uiZoom));
+  }, [uiZoom]);
 
   const handleImportFromInput = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -372,6 +384,29 @@ export function SettingsPage() {
               <span className="w-12 rounded-lg border border-gray-700 bg-gray-800 px-2 py-1 text-center text-xs text-gray-300">
                 {fontSize}px
               </span>
+            </div>
+          </Card>
+
+          <Card icon={ZoomIn} title={t("settings.ui_zoom")} desc={t("settings.ui_zoom_desc")}>
+            <div className="flex max-w-xl items-center gap-4">
+              <input
+                type="range"
+                min={50}
+                max={200}
+                step={5}
+                value={uiZoom}
+                onChange={(e) => setUiZoom(Number(e.target.value))}
+                className="flex-1 accent-blue-500"
+              />
+              <span className="w-14 rounded-lg border border-gray-700 bg-gray-800 px-2 py-1 text-center text-xs text-gray-300">
+                {uiZoom}%
+              </span>
+              <button
+                onClick={() => setUiZoom(100)}
+                className="rounded-lg border border-gray-700 px-3 py-1 text-xs text-gray-300 transition-colors hover:bg-gray-800"
+              >
+                {t("settings.ui_zoom_reset")}
+              </button>
             </div>
           </Card>
         </div>
