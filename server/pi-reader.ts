@@ -1210,7 +1210,19 @@ function isOpenRouter(baseUrl: string, host: string): boolean {
 async function fetchJson(url: URL, headers: Record<string, string>, timeoutMs = 15000) {
   const res = await fetchExternal(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return await res.json();
+  const text = await res.text();
+  const trimmed = text.trimStart();
+  const ctype = res.headers.get("content-type") ?? "";
+  if (trimmed.startsWith("<") || ctype.includes("text/html")) {
+    // The endpoint returned an HTML page (often a site root / 404 served as 200)
+    // instead of JSON — almost always a wrong base URL (missing /v1 prefix, etc.).
+    throw new Error(`endpoint returned HTML, not JSON (check base URL): ${url.toString()}`);
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`invalid JSON from ${url.toString()}`);
+  }
 }
 
 function makeHeaders(key: string, providerId?: string, host?: string): Record<string, string> {
@@ -1287,7 +1299,9 @@ export async function fetchProviderModels(
     }
 
     // ── OpenRouter /models returns rich metadata ────────
-    const modelsUrl = new URL("/models", base);
+    // Append to the full base path (preserve prefixes like /v1 or /v1beta).
+    // Using new URL("/models", base) would resolve against the origin and drop the prefix.
+    const modelsUrl = new URL(base.toString().replace(/\/+$/, "") + "/models");
     if (providerId === "google" || host.endsWith("generativelanguage.googleapis.com")) {
       if (key) modelsUrl.searchParams.set("key", key);
     }

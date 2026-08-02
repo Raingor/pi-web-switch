@@ -188,7 +188,11 @@ body {
 .light .bg-amber-500\/10 {
   background-color: #fffbeb;
 }
-.light .hover\:bg-gray-800 {
+.light .hover\:bg-gray-800,
+.light .hover\:bg-gray-800\/70,
+.light .hover\:bg-gray-800\/60,
+.light .hover\:bg-gray-800\/40,
+.light .hover\:bg-gray-800\/30 {
   &:hover {
     background-color: #e5e7eb;
   }

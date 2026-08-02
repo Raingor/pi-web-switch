@@ -1,6 +1,8 @@
 // Electron main process
 // Use process.mainModule.require to access electron module within Electron
 const { app, BrowserWindow, Menu, ipcMain } = (process as any).mainModule?.require('electron') || require('electron');
+// Type-only import (erased at compile time) — does not affect the runtime require workaround above.
+import type { BrowserWindow as BrowserWindowType, IpcMainInvokeEvent } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import * as piReader from '../server/pi-reader';
@@ -8,10 +10,10 @@ import * as piReader from '../server/pi-reader';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Keep a global reference of the window object to prevent garbage collection
-let mainWindow: BrowserWindow | null = null;
+let mainWindow: BrowserWindowType | null = null;
 
 function createWindow() {
-  mainWindow = new BrowserWindow({
+  const win = new BrowserWindow({
     width: 1280,
     height: 800,
     minWidth: 800,
@@ -24,21 +26,22 @@ function createWindow() {
       nodeIntegration: false,
     },
   });
+  mainWindow = win;
 
   // In development, load the Vite dev server
   // In production, load the built files
   if (process.env.VITE_DEV_SERVER_URL) {
-    mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
+    win.loadURL(process.env.VITE_DEV_SERVER_URL);
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+    win.loadFile(path.join(__dirname, '../dist/index.html'));
   }
 
   // Open DevTools in development
   if (process.env.NODE_ENV === 'development') {
-    mainWindow.webContents.openDevTools();
+    win.webContents.openDevTools();
   }
 
-  mainWindow.on('closed', () => {
+  win.on('closed', () => {
     mainWindow = null;
   });
 }
@@ -78,7 +81,7 @@ function setupIPC() {
     return piReader.readSettings();
   });
 
-  ipcMain.handle('pi:settings:set', (_event, data: any) => {
+  ipcMain.handle('pi:settings:set', (_event: IpcMainInvokeEvent, data: any) => {
     return piReader.writeSettings(data);
   });
 
@@ -87,7 +90,7 @@ function setupIPC() {
     return piReader.readAuth();
   });
 
-  ipcMain.handle('pi:auth:set', (_event, data: any) => {
+  ipcMain.handle('pi:auth:set', (_event: IpcMainInvokeEvent, data: any) => {
     return piReader.writeAuth(data);
   });
 
@@ -96,7 +99,7 @@ function setupIPC() {
     return piReader.readModels();
   });
 
-  ipcMain.handle('pi:models:set', (_event, data: any) => {
+  ipcMain.handle('pi:models:set', (_event: IpcMainInvokeEvent, data: any) => {
     return piReader.writeModels(data);
   });
 }
