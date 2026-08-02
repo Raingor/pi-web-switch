@@ -24,7 +24,6 @@ import {
   LayoutGrid,
   Wrench,
   Settings as SettingsIcon,
-  Zap,
   CloudDownload,
   RefreshCw,
 } from "lucide-react";
@@ -91,8 +90,6 @@ export function SettingsPage() {
     allModels,
     updateSettings,
     setTheme,
-    addEnabledModel,
-    removeEnabledModel,
     addPackage,
     removePackage,
     importConfig: importConfigAction,
@@ -247,18 +244,6 @@ export function SettingsPage() {
       }
     }
     updateSettings(clearModel ? { defaultProvider: v, defaultModel: undefined } : { defaultProvider: v || undefined });
-  };
-
-  // Display names that appear under several providers need the provider name
-  // appended to stay distinguishable.
-  const modelNameCounts = allModels.reduce<Record<string, number>>((acc, m) => {
-    const name = m.name || m.id;
-    acc[name] = (acc[name] ?? 0) + 1;
-    return acc;
-  }, {});
-  const modelTagLabel = (m: (typeof allModels)[number]) => {
-    const name = m.name || m.id;
-    return (modelNameCounts[name] ?? 0) > 1 ? `${name} · ${m.providerName}` : name;
   };
 
   const enabledModels = settings?.enabledModels ?? [];
@@ -448,29 +433,6 @@ export function SettingsPage() {
                 ))}
               </select>
             </SettingRow>
-          </Card>
-
-          <Card icon={Zap} title={t("settings.enabled_models")} desc={t("settings.enabled_models_desc")}>
-            <div className="flex flex-wrap gap-1.5">
-              {allModels.map((m) => {
-                const ref = `${m.providerId}/${m.id}`;
-                const on = enabledModels.includes(ref);
-                return (
-                  <button
-                    key={ref}
-                    onClick={() => (on ? removeEnabledModel(ref) : addEnabledModel(ref))}
-                    className={cn(
-                      "rounded-md border px-2.5 py-1 text-xs transition-colors",
-                      on
-                        ? "border-blue-500/50 bg-blue-500/10 text-blue-400"
-                        : "border-gray-700 bg-gray-800 text-gray-400 hover:border-gray-600"
-                    )}
-                  >
-                    {modelTagLabel(m)}
-                  </button>
-                );
-              })}
-            </div>
           </Card>
         </div>
       )}

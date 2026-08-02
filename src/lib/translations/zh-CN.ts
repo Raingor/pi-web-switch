@@ -30,6 +30,8 @@ const zhCN: Record<string, string> = {
   "providers_models.sort_price_asc": "价格升序",
   "providers_models.sort_price_desc": "价格降序",
   "providers_models.disable_all": "全部禁用",
+  "providers_models.enabled_models_title": "已启用模型",
+  "providers_models.no_enabled_models": "暂无启用的模型。在供应商的模型列表中开启模型后，会显示在这里。",
   "providers_models.api_key_env": "将以环境变量 {0} 的值作为密钥（不会明文写入）",
   "providers_models.test_all": "测试全部",
   "providers_models.id_exists": "ID “{0}” 已存在，请换一个名称",

@@ -166,6 +166,75 @@ function parseProviderImport(raw: string): ParsedImport {
   return out;
 }
 
+// ─── Enabled Models Panel (cross-provider) ────────────────
+// Lists every enabled model across all providers. Shares settings.enabledModels
+// as the single source of truth with the per-provider model rows, so toggling
+// here stays in sync with the enable/disable state inside each provider.
+
+function EnabledModelsPanel() {
+  const { t } = useTranslation();
+  const { allModels, settings, removeEnabledModel, updateSettings } = useConfigStore();
+  const enabledSet = new Set(settings?.enabledModels ?? []);
+  const enabledModels = allModels.filter((m) => enabledSet.has(`${m.providerId}/${m.id}`));
+
+  const disableAll = () => updateSettings({ enabledModels: [] });
+
+  return (
+    <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Zap className="h-4 w-4 text-emerald-400" />
+          <h2 className="text-sm font-semibold" style={{ color: "var(--page-text)" }}>
+            {t("providers_models.enabled_models_title")}
+          </h2>
+          <span className="rounded-full border border-gray-700 bg-gray-800 px-2 py-0.5 text-xs text-gray-400">
+            {enabledModels.length}
+          </span>
+        </div>
+        {enabledModels.length > 0 && (
+          <button
+            onClick={disableAll}
+            className="rounded-lg border border-gray-700 px-3 py-1 text-xs text-gray-300 transition-colors hover:bg-gray-800 hover:text-white"
+          >
+            {t("providers_models.disable_all")}
+          </button>
+        )}
+      </div>
+
+      {enabledModels.length === 0 ? (
+        <p className="mt-3 text-sm text-gray-500">{t("providers_models.no_enabled_models")}</p>
+      ) : (
+        <div className="mt-3 grid max-h-72 gap-1.5 overflow-y-auto pr-1 lg:grid-cols-2">
+          {enabledModels.map((m) => {
+            const ref = `${m.providerId}/${m.id}`;
+            return (
+              <div
+                key={ref}
+                className="flex items-center gap-2 rounded-lg border border-gray-700 bg-gray-900/70 px-3 py-2"
+              >
+                <button
+                  onClick={() => removeEnabledModel(ref)}
+                  title={t("models.enabled")}
+                  className="relative inline-flex h-4 w-7 shrink-0 items-center rounded-full bg-emerald-500 transition-colors"
+                >
+                  <span className="inline-block h-3 w-3 transform translate-x-3.5 rounded-full bg-white transition-transform" />
+                </button>
+                <Box className="h-4 w-4 shrink-0 text-gray-500" />
+                <span className="min-w-0 flex-1 truncate font-mono text-sm text-gray-200">
+                  {m.name || m.id}
+                </span>
+                <span className="shrink-0 rounded-md border border-gray-600 bg-gray-800/50 px-2 py-0.5 text-xs text-gray-400">
+                  {m.providerName}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ProvidersModelsPage() {
   const { t } = useTranslation();
   const { allProviders, auth, modelsJson, removeCustomProvider } = useConfigStore();
@@ -263,6 +332,8 @@ export function ProvidersModelsPage() {
           {t("providers_models.subtitle")}
         </p>
       </div>
+
+      <EnabledModelsPanel />
 
       <div className="flex overflow-hidden rounded-xl border border-gray-800 bg-gray-900/50">
         {/* ─── Left: Provider List ─────────────────────── */}

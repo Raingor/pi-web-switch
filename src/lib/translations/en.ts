@@ -32,6 +32,8 @@ const en: Record<string, string> = {
   "providers_models.sort_price_asc": "Price ↑",
   "providers_models.sort_price_desc": "Price ↓",
   "providers_models.disable_all": "Disable All",
+  "providers_models.enabled_models_title": "Enabled Models",
+  "providers_models.no_enabled_models": "No enabled models yet. Enable models in a provider's model list and they'll appear here.",
   "providers_models.api_key_env": "Uses the value of environment variable {0} as the key (not stored in plaintext)",
   "providers_models.test_all": "Test All",
   "providers_models.id_exists": "ID “{0}” already exists, pick another name",

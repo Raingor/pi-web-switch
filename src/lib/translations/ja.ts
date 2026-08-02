@@ -30,6 +30,8 @@ const ja: Record<string, string> = {
   "providers_models.sort_price_asc": "価格昇順",
   "providers_models.sort_price_desc": "価格降順",
   "providers_models.disable_all": "すべて無効化",
+  "providers_models.enabled_models_title": "有効なモデル",
+  "providers_models.no_enabled_models": "有効なモデルはまだありません。プロバイダーのモデルリストでモデルを有効にすると、ここに表示されます。",
   "providers_models.api_key_env": "環境変数 {0} の値をキーとして使用します（平文保存されません）",
   "providers_models.test_all": "すべてテスト",
   "providers_models.id_exists": "ID “{0}” は既に存在します。別の名前を使用してください",

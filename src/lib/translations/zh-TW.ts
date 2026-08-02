@@ -30,6 +30,8 @@ const zhTW: Record<string, string> = {
   "providers_models.sort_price_asc": "價格升序",
   "providers_models.sort_price_desc": "價格降序",
   "providers_models.disable_all": "全部停用",
+  "providers_models.enabled_models_title": "已啟用模型",
+  "providers_models.no_enabled_models": "尚無啟用的模型。在供應商的模型清單中開啟模型後，會顯示在這裡。",
   "providers_models.api_key_env": "將以環境變數 {0} 的值作為密鑰（不會明碼寫入）",
   "providers_models.test_all": "測試全部",
   "providers_models.id_exists": "ID “{0}” 已存在，請換一個名稱",
