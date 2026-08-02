@@ -14,9 +14,9 @@ export const BUILTIN_PROVIDERS: Provider[] = [
     hasAuth: true,
     authMethod: "env",
     models: [
-      { id: "claude-sonnet-4", name: "Claude 4 Sonnet", reasoning: true, input: ["text", "image"], contextWindow: 200000, maxTokens: 8192, cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 }, enabled: true },
-      { id: "claude-sonnet-4-5", name: "Claude 4.5 Sonnet", reasoning: true, input: ["text", "image"], contextWindow: 200000, maxTokens: 8192, cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 }, enabled: true },
-      { id: "claude-opus-4", name: "Claude 4 Opus", reasoning: true, input: ["text", "image"], contextWindow: 200000, maxTokens: 8192, cost: { input: 15, output: 75, cacheRead: 1.5, cacheWrite: 18.75 }, enabled: false },
+      { id: "claude-sonnet-4", name: "Claude 4 Sonnet", reasoning: true, input: ["text", "image"], contextWindow: 200000, maxTokens: 16384, cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 }, enabled: true },
+      { id: "claude-sonnet-4-5", name: "Claude 4.5 Sonnet", reasoning: true, input: ["text", "image"], contextWindow: 200000, maxTokens: 16384, cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 }, enabled: false },
+      { id: "claude-opus-4", name: "Claude 4 Opus", reasoning: true, input: ["text", "image"], contextWindow: 200000, maxTokens: 32000, cost: { input: 15, output: 75, cacheRead: 1.5, cacheWrite: 18.75 }, enabled: false },
       { id: "claude-haiku-3-5", name: "Claude 3.5 Haiku", reasoning: false, input: ["text", "image"], contextWindow: 200000, maxTokens: 8192, cost: { input: 0.8, output: 4, cacheRead: 0.08, cacheWrite: 1 }, enabled: true },
     ],
   },
@@ -84,8 +84,8 @@ export const BUILTIN_PROVIDERS: Provider[] = [
     hasAuth: true,
     authMethod: "env",
     models: [
-      { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", reasoning: false, input: ["text", "image"], contextWindow: 1048576, maxTokens: 8192, cost: { input: 0.15, output: 0.6, cacheRead: 0.075, cacheWrite: 0.15 }, enabled: true },
-      { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", reasoning: true, input: ["text", "image"], contextWindow: 1048576, maxTokens: 8192, cost: { input: 1.25, output: 10, cacheRead: 0.625, cacheWrite: 1.25 }, enabled: false },
+      { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", reasoning: false, input: ["text", "image"], contextWindow: 1048576, maxTokens: 65536, cost: { input: 0.15, output: 0.6, cacheRead: 0.075, cacheWrite: 0.15 }, enabled: true },
+      { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", reasoning: true, input: ["text", "image"], contextWindow: 1048576, maxTokens: 65536, cost: { input: 1.25, output: 10, cacheRead: 0.625, cacheWrite: 1.25 }, enabled: false },
     ],
   },
   {
@@ -97,7 +97,7 @@ export const BUILTIN_PROVIDERS: Provider[] = [
     hasAuth: false,
     authMethod: "none",
     models: [
-      { id: "openrouter/anthropic/claude-sonnet-4", name: "Claude 4 Sonnet (OpenRouter)", reasoning: true, input: ["text", "image"], contextWindow: 200000, maxTokens: 8192, cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 }, enabled: false },
+      { id: "openrouter/anthropic/claude-sonnet-4", name: "Claude 4 Sonnet (OpenRouter)", reasoning: true, input: ["text", "image"], contextWindow: 200000, maxTokens: 16384, cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 }, enabled: false },
       { id: "openrouter/deepseek/deepseek-r1", name: "DeepSeek R1 (OpenRouter)", reasoning: true, input: ["text"], contextWindow: 128000, maxTokens: 8192, cost: { input: 0.55, output: 2.19, cacheRead: 0.14, cacheWrite: 0.55 }, enabled: false },
     ],
   },
@@ -134,7 +134,7 @@ export const BUILTIN_PROVIDERS: Provider[] = [
     hasAuth: false,
     authMethod: "none",
     models: [
-      { id: "llama-3.3-70b", name: "Llama 3.3 70B", reasoning: false, input: ["text"], contextWindow: 128000, maxTokens: 8192, cost: { input: 0.59, output: 0.79, cacheRead: 0, cacheWrite: 0 }, enabled: false },
+      { id: "llama-3.3-70b", name: "Llama 3.3 70B", reasoning: false, input: ["text"], contextWindow: 128000, maxTokens: 4096, cost: { input: 0.59, output: 0.79, cacheRead: 0, cacheWrite: 0 }, enabled: false },
     ],
   },
 ];

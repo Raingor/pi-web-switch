@@ -3,7 +3,8 @@ import { useConfigStore } from "@/store/config-store";
 import { useTranslation } from "@/lib/i18n";
 import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
-import { formatTokens, cn } from "@/lib/utils";
+import { formatTokens, cn, formatCost, USD_TO_CNY } from "@/lib/utils";
+import { useCurrency } from "@/lib/currency";
 import type { ApiType, CustomProviderConfig, Model, Provider } from "@/types";
 import { searchCatalog, catalogToModel, guessModelMeta } from "@/data/model-catalog";
 import {
@@ -36,6 +37,8 @@ import {
 const API_TYPES: { value: ApiType; label: string }[] = [
   { value: "openai-completions", label: "Chat Completions (/chat/completions)" },
   { value: "openai-responses", label: "OpenAI Responses" },
+  { value: "openai-codex-responses", label: "OpenAI Codex Responses" },
+  { value: "azure-openai-responses", label: "Azure OpenAI Responses" },
   { value: "anthropic-messages", label: "Anthropic Messages" },
   { value: "google-generative-ai", label: "Google Generative AI" },
   { value: "google-vertex", label: "Google Vertex AI" },
@@ -218,18 +221,36 @@ export function ProvidersModelsPage() {
 
   const handleDuplicateProvider = async (id: string) => {
     const existing = modelsJson?.providers[id];
-    if (!existing) return;
+    // Resolve the source models: prefer models.json override, else the
+    // builtin provider's model list so duplicates keep their models.
+    const sourceProvider = allProviders.find((p) => p.id === id);
+    const sourceModels = existing?.models ?? sourceProvider?.models ?? [];
     const suffix = "-copy";
-    const newId = sanitizeProviderId(id + suffix);
-    // Copy config but clear apiKey, authHeader, and models
+    let newId = sanitizeProviderId(id + suffix);
+    // Ensure uniqueness against existing provider ids
+    const taken = new Set(allProviders.map((p) => p.id));
+    let i = 2;
+    while (taken.has(newId)) newId = sanitizeProviderId(`${id}-copy${i++}`);
+    // Copy config but clear apiKey; carry models + headers + overrides
     const cfg: CustomProviderConfig = {
-      baseUrl: existing.baseUrl,
-      api: existing.api,
-      headers: existing.headers,
-      modelOverrides: existing.modelOverrides,
+      name: `${sourceProvider?.name ?? id} (copy)`,
+      baseUrl: existing?.baseUrl ?? sourceProvider?.baseUrl,
+      api: existing?.api ?? sourceProvider?.api,
+      headers: existing?.headers,
+      compat: existing?.compat,
+      modelOverrides: existing?.modelOverrides,
+      models: sourceModels.map((m) => ({ ...m, enabled: true })),
     };
     const ok = await useConfigStore.getState().addCustomProvider(newId, cfg);
-    if (ok) setSelectedId(newId);
+    if (ok) {
+      // Enable the carried models in settings.enabledModels
+      const list = useConfigStore.getState().settings?.enabledModels ?? [];
+      const refs = sourceModels.map((m) => `${newId}/${m.id}`);
+      await useConfigStore.getState().updateSettings({
+        enabledModels: Array.from(new Set([...list, ...refs])),
+      });
+      setSelectedId(newId);
+    }
   };
 
   return (
@@ -507,6 +528,7 @@ function TestConnectionButton({ baseUrl, apiKey }: { baseUrl: string; apiKey?: s
 
 function ProviderDetail({ provider, onDelete, onDuplicate }: { provider: Provider; onDelete: () => void; onDuplicate: () => void }) {
   const { t } = useTranslation();
+  const { currency } = useCurrency();
   const {
     auth,
     settings,
@@ -517,7 +539,30 @@ function ProviderDetail({ provider, onDelete, onDuplicate }: { provider: Provide
     addModel,
     updateModel,
     removeModel,
+    addEnabledModel,
+    removeEnabledModel,
   } = useConfigStore();
+
+  // Whether a model is currently enabled (source of truth: settings.enabledModels)
+  const enabledRefs = new Set(settings?.enabledModels ?? []);
+  const isModelEnabled = (modelId: string) => enabledRefs.has(`${provider.id}/${modelId}`);
+
+  // Toggle a single model's enabled state
+  const toggleModelEnabled = (modelId: string) => {
+    const ref = `${provider.id}/${modelId}`;
+    if (enabledRefs.has(ref)) removeEnabledModel(ref);
+    else addEnabledModel(ref);
+  };
+
+  // Enable/disable all models of this provider at once (batched)
+  const setAllModelsEnabled = async (on: boolean) => {
+    const list = settings?.enabledModels ?? [];
+    const refs = provider.models.map((m) => `${provider.id}/${m.id}`);
+    const set = new Set(list);
+    if (on) refs.forEach((r) => set.add(r));
+    else refs.forEach((r) => set.delete(r));
+    await updateSettings({ enabledModels: Array.from(set) });
+  };
 
   const isCustom = provider.type === "custom";
   const savedKey = provider.apiKey ?? auth?.[provider.id]?.key ?? "";
@@ -531,6 +576,7 @@ function ProviderDetail({ provider, onDelete, onDuplicate }: { provider: Provide
   const [showAddModel, setShowAddModel] = useState(false);
   const [deleteModel, setDeleteModel] = useState<Model | null>(null);
   const [modelQuery, setModelQuery] = useState("");
+  const [modelSort, setModelSort] = useState<"default" | "family" | "price-asc" | "price-desc">("default");
   const [supportsDeveloperRole, setSupportsDeveloperRole] = useState(
     provider.compat?.supportsDeveloperRole ?? false
   );
@@ -655,6 +701,13 @@ function ProviderDetail({ provider, onDelete, onDuplicate }: { provider: Provide
     }
   };
 
+  // Test every model of the provider sequentially (reuses /api/pi/model-test).
+  const handleTestAll = async () => {
+    for (const m of provider.models) {
+      await handleTestModel(m);
+    }
+  };
+
   // Quick-add id changes → live hint
   useEffect(() => {
     const id = quickId.trim();
@@ -723,10 +776,11 @@ function ProviderDetail({ provider, onDelete, onDuplicate }: { provider: Provide
     }
   };
 
-  const urlInvalid = isCustom && baseUrl.trim() !== "" && !isValidHttpUrl(baseUrl.trim());
+  const urlInvalid = baseUrl.trim() !== "" && !isValidHttpUrl(baseUrl.trim());
 
   const dirty =
     (isCustom && (providerName !== (provider.name ?? "") || baseUrl !== (provider.baseUrl ?? "") || api !== (provider.api ?? "openai-completions") || supportsDeveloperRole !== (provider.compat?.supportsDeveloperRole ?? true))) ||
+    (!isCustom && (baseUrl !== (provider.baseUrl ?? "") || api !== (provider.api ?? "openai-completions"))) ||
     apiKey !== savedKey;
 
   const handleSave = async () => {
@@ -740,21 +794,54 @@ function ProviderDetail({ provider, onDelete, onDuplicate }: { provider: Provide
         apiKey: apiKey || undefined,
         compat: { supportsDeveloperRole },
       });
-    } else if (apiKey !== savedKey) {
-      ok = apiKey
-        ? await setProviderAuth(provider.id, apiKey)
-        : await removeProviderAuth(provider.id);
+    } else {
+      // Builtin providers: baseUrl / api are persisted as a models.json
+      // override (so the user can point them at a proxy/gateway), while the
+      // API key stays in auth.json (the original behavior) to avoid creating a
+      // duplicate standalone custom-provider card.
+      const cfgPatch: Partial<CustomProviderConfig> = {};
+      if (baseUrl !== (provider.baseUrl ?? "")) cfgPatch.baseUrl = baseUrl || undefined;
+      if (api !== (provider.api ?? "openai-completions")) cfgPatch.api = api;
+      if (Object.keys(cfgPatch).length > 0) {
+        ok = await updateCustomProvider(provider.id, cfgPatch);
+      }
+      if (apiKey !== savedKey) {
+        const authOk = apiKey
+          ? await setProviderAuth(provider.id, apiKey)
+          : await removeProviderAuth(provider.id);
+        ok = ok && authOk;
+      }
+      if (Object.keys(cfgPatch).length === 0 && apiKey === savedKey) ok = true;
     }
     setSaveState(ok ? "saved" : "error");
     if (ok) setTimeout(() => setSaveState("idle"), 2500);
   };
 
   const q = modelQuery.trim().toLowerCase();
-  const visibleModels = q
+  const baseModels = q
     ? provider.models.filter(
         (m) => m.id.toLowerCase().includes(q) || (m.name ?? "").toLowerCase().includes(q)
       )
     : provider.models;
+
+  // Look up the catalog family for a model id (for sorting/grouping)
+  const familyOf = (id: string): string => {
+    const hit = searchCatalog(id, 1)[0];
+    return hit?.family ?? "—";
+  };
+
+  const visibleModels = useMemo(() => {
+    const arr = [...baseModels];
+    if (modelSort === "family") {
+      arr.sort((a, b) => familyOf(a.id).localeCompare(familyOf(b.id)));
+    } else if (modelSort === "price-asc" || modelSort === "price-desc") {
+      const price = (m: typeof arr[number]) => m.cost?.input ?? 0;
+      arr.sort((a, b) => price(a) - price(b));
+      if (modelSort === "price-desc") arr.reverse();
+    }
+    return arr;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [baseModels, modelSort]);
 
   return (
     <div className="space-y-5">
@@ -805,16 +892,18 @@ function ProviderDetail({ provider, onDelete, onDuplicate }: { provider: Provide
         <input
           type="text"
           value={baseUrl}
-          disabled={!isCustom}
           onChange={(e) => setBaseUrl(e.target.value)}
           placeholder="https://api.example.com/v1"
           className={cn(
-            "mt-1.5 w-full rounded-lg border bg-gray-800 px-3 py-2.5 text-sm text-white disabled:opacity-50",
+            "mt-1.5 w-full rounded-lg border bg-gray-800 px-3 py-2.5 text-sm text-white",
             urlInvalid ? "border-red-500" : "border-gray-700"
           )}
         />
         {urlInvalid && (
           <p className="mt-1 text-xs text-red-400">{t("providers_models.invalid_url")}</p>
+        )}
+        {!isCustom && !urlInvalid && baseUrl !== (provider.baseUrl ?? "") && (
+          <p className="mt-1 text-xs text-amber-400">{t("providers_models.baseurl_override")}</p>
         )}
       </div>
 
@@ -823,9 +912,8 @@ function ProviderDetail({ provider, onDelete, onDuplicate }: { provider: Provide
         <label className="block text-sm text-gray-400">{t("providers.api_type")}</label>
         <select
           value={api}
-          disabled={!isCustom}
           onChange={(e) => setApi(e.target.value as ApiType)}
-          className="mt-1.5 w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2.5 text-sm text-white disabled:opacity-50"
+          className="mt-1.5 w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2.5 text-sm text-white"
         >
           {API_TYPES.map((a) => (
             <option key={a.value} value={a.value}>{a.label}</option>
@@ -851,6 +939,11 @@ function ProviderDetail({ provider, onDelete, onDuplicate }: { provider: Provide
             {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
           </button>
         </div>
+        {apiKey.trim().startsWith("$") && (
+          <p className="mt-1 text-xs text-sky-400">
+            {t("providers_models.api_key_env", apiKey.trim())}
+          </p>
+        )}
       </div>
 
       {/* Developer Role Support */}
@@ -902,6 +995,30 @@ function ProviderDetail({ provider, onDelete, onDuplicate }: { provider: Provide
       <div>
         <div className="flex items-center justify-between gap-3">
           <label className="block text-sm text-gray-400">{t("providers_models.model_list")}</label>
+          {provider.models.length > 0 && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setAllModelsEnabled(true)}
+                className="rounded-md border border-gray-700 px-2.5 py-1 text-xs text-gray-300 transition-colors hover:bg-gray-800 hover:text-white"
+              >
+                {t("providers_models.enable_all")}
+              </button>
+              <button
+                onClick={() => setAllModelsEnabled(false)}
+                className="rounded-md border border-gray-700 px-2.5 py-1 text-xs text-gray-300 transition-colors hover:bg-gray-800 hover:text-white"
+              >
+                {t("providers_models.disable_all")}
+              </button>
+              <button
+                onClick={handleTestAll}
+                title={t("providers_models.test_all")}
+                className="rounded-md border border-gray-700 px-2.5 py-1 text-xs text-gray-300 transition-colors hover:bg-gray-800 hover:text-white"
+              >
+                <Zap className="mr-1 inline h-3 w-3" />
+                {t("providers_models.test_all")}
+              </button>
+            </div>
+          )}
         </div>
 
         {provider.models.length > 5 && (
@@ -917,6 +1034,22 @@ function ProviderDetail({ provider, onDelete, onDuplicate }: { provider: Provide
           </div>
         )}
 
+        {provider.models.length > 1 && (
+          <div className="mt-1.5 flex items-center gap-2">
+            <label className="text-xs text-gray-500">{t("providers_models.sort_by")}</label>
+            <select
+              value={modelSort}
+              onChange={(e) => setModelSort(e.target.value as typeof modelSort)}
+              className="rounded-lg border border-gray-700 bg-gray-800 px-2 py-1.5 text-xs text-gray-200"
+            >
+              <option value="default">{t("providers_models.sort_default")}</option>
+              <option value="family">{t("providers_models.sort_family")}</option>
+              <option value="price-asc">{t("providers_models.sort_price_asc")}</option>
+              <option value="price-desc">{t("providers_models.sort_price_desc")}</option>
+            </select>
+          </div>
+        )}
+
         <div className="mt-1.5 space-y-2 rounded-lg border border-gray-800 p-3">
           {provider.models.length === 0 && (
             <p className="px-1 py-2 text-sm text-gray-500">{t("models.no_models")}</p>
@@ -924,11 +1057,28 @@ function ProviderDetail({ provider, onDelete, onDuplicate }: { provider: Provide
           {provider.models.length > 0 && visibleModels.length === 0 && (
             <p className="px-1 py-2 text-sm text-gray-500">{t("models.no_models")}</p>
           )}
-          {visibleModels.map((m) => (
+          {visibleModels.map((m) => {
+            const enabled = isModelEnabled(m.id);
+            return (
             <div
               key={m.id}
               className="flex items-center gap-2 rounded-lg border border-gray-700 bg-gray-900/70 px-3 py-2.5"
             >
+              <button
+                onClick={() => toggleModelEnabled(m.id)}
+                title={enabled ? t("models.enabled") : t("models.disabled")}
+                className={cn(
+                  "relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors",
+                  enabled ? "bg-emerald-500" : "bg-gray-600"
+                )}
+              >
+                <span
+                  className={cn(
+                    "inline-block h-3 w-3 transform rounded-full bg-white transition-transform",
+                    enabled ? "translate-x-3.5" : "translate-x-0.5"
+                  )}
+                />
+              </button>
               <Box className="h-4 w-4 shrink-0 text-gray-500" />
               <span className="min-w-0 flex-1 truncate font-mono text-sm text-gray-200">
                 {m.id}
@@ -948,9 +1098,16 @@ function ProviderDetail({ provider, onDelete, onDuplicate }: { provider: Provide
                   <Mic className="h-3.5 w-3.5 text-emerald-400" />
                 </span>
               )}
-              <span className="rounded-md border border-gray-600 bg-gray-800/50 px-2 py-0.5 text-xs text-gray-400">
+              <span
+                className="rounded-md border border-gray-600 bg-gray-800/50 px-2 py-0.5 text-xs text-gray-400"
+                title={
+                  m.cost
+                    ? `In ${formatCost(m.cost.input, currency)} / Out ${formatCost(m.cost.output, currency)} · CacheR ${formatCost(m.cost.cacheRead ?? 0, currency)} / CacheW ${formatCost(m.cost.cacheWrite ?? 0, currency)}`
+                    : undefined
+                }
+              >
                 {m.cost && (m.cost.input || m.cost.output)
-                  ? `$${m.cost.input}/${m.cost.output}`
+                  ? `${formatCost(m.cost.input, currency)}/${formatCost(m.cost.output, currency)}`
                   : t("models.free")}
               </span>
               <span className="rounded-md border border-gray-600 bg-gray-800/50 px-2 py-0.5 text-xs text-gray-400">
@@ -1021,7 +1178,8 @@ function ProviderDetail({ provider, onDelete, onDuplicate }: { provider: Provide
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
             </div>
-          ))}
+          );
+          })}
         </div>
         {/* Quick-add input */}
         <div className="mt-3">

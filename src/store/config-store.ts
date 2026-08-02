@@ -84,6 +84,11 @@ function mergeProviders(
         ...p,
         // A user-provided display name in models.json wins over the catalog name.
         name: customModels?.providers?.[p.id]?.name ?? p.name,
+        // Apply baseUrl / api overrides so builtins can target a proxy/gateway
+        // while keeping their builtin model catalog.
+        baseUrl: override?.baseUrl ?? p.baseUrl,
+        api: override?.api ?? p.api,
+        headers: override?.headers ?? p.headers,
         // hasAuth = a key is actually saved (auth.json or models.json override) —
         // the static builtin flag only means the provider supports auth.
         hasAuth: !!auth[p.id] || !!override?.apiKey,
