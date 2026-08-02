@@ -1,7 +1,10 @@
 node_modules/
 dist/
+dist-electron/
+release/
 .DS_Store
 *.log
 .pi/
 .pi-subagents/
 tsconfig.tsbuildinfo
+electron/vite-env.d.ts
