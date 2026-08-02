@@ -19,7 +19,7 @@
   - 已实现：模型行增加启用开关 + 顶部"全部启用/禁用"，读写 `settings.enabledModels`（`provider.id/model.id` 引用）。
 - [x] **#3 统一 maxTokens 数据矛盾**
   - 现象：`claude-sonnet-4` 在 `builtin-providers.ts` 为 `8192`，在 `model-catalog.ts` 为 `16384`。
-  - 已实现：以 `model-catalog.ts` 为单一事实来源，修正 `builtin-providers.ts` 中 7 处（claude-sonnet-4、claude-sonnet-4-5、claude-opus-4、gemini-2.5-flash、gemini-2.5-pro、openrouter/anthropic/claude-sonnet-4、llama-3.3-70b）。
+  - 已实现：以 `model-catalog.ts` 为单一事实来源，修正 `builtin-providers.ts` 中 7 处。
 
 ### 🟡 中优先级 · 体验 / 数据
 - [ ] **#4 模型目录价格易过期**
@@ -27,7 +27,7 @@
   - 状态：**本次暂不实现**（需 OpenRouter 定价刷新能力，工作量较大）。
 - [x] **#5 代理/网关覆盖 + 复制携带模型**
   - 现象：内置提供商 `baseUrl` 被 disabled；`handleDuplicateProvider` 未携带模型列表。
-  - 已实现：内置 baseUrl/api 可编辑并写入 models.json 覆盖（mergeProviders 同步应用）；复制提供商时携带源模型并自动启用。
+  - 已实现：内置 baseUrl/api 可编辑并写入 models.json 覆盖；复制提供商时携带源模型并自动启用。
 - [x] **#6 模型行价格补全 + 跟随币种**
   - 现象：模型行仅显 `$in/$out`，不含 cache 价，不跟随 USD/CNY 切换。
   - 已实现：复用 `src/lib/currency.ts` 与 `formatCost`，行内显示换算后价格，hover 显示完整 In/Out/CacheR/CacheW 价。
@@ -57,3 +57,14 @@
 - `src/data/builtin-providers.ts`（maxTokens 统一）
 - `src/store/config-store.ts`（mergeProviders 应用 baseUrl/api/headers 覆盖）
 - `src/lib/translations/{zh-CN,en,zh-TW,ja}.ts`（新增 baseurl_override / test_all / api_key_env / sort_* 文案）
+- `server/pi-reader.ts`（TypeScript 类型修复）
+- `vite.config.ts`（添加 Electron 插件配置）
+- `package.json`（添加 Electron 脚本和构建配置）
+- `electron/main.ts`（Electron 主进程）
+- `electron/preload.ts`（Electron preload 脚本）
+- `electron/vite-env.d.ts`（TypeScript 类型声明）
+
+## Electron 打包
+- 构建命令：`npm run electron:build`
+- 输出目录：`release/mac-arm64/`
+- 产物：`pi-web-switch-0.3.3-arm64.dmg`

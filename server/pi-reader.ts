@@ -550,7 +550,7 @@ function decodeProjectName(dirName: string): { projectPath: string; projectName:
   }
   // Use the last 1-2 path segments as the project name
   const segments = displayName.split("/").filter(Boolean);
-  const projectName = segments.length > 0 ? segments[segments.length - 1] : dirName;
+  const projectName = segments.length > 0 ? (segments[segments.length - 1] ?? dirName) : dirName;
   return { projectPath: decoded, projectName };
 }
 
@@ -588,7 +588,7 @@ export function listSessions(): ProjectGroup[] {
 
     group.totalSessions = group.sessions.length;
     if (group.sessions.length > 0) {
-      group.lastActive = group.sessions[0].timestamp; // already sorted newest-first
+      group.lastActive = group.sessions[0]?.timestamp ?? ""; // already sorted newest-first
     }
   }
 
@@ -1177,8 +1177,8 @@ function toNum(v: any): number | undefined {
   if (typeof v !== "string") return undefined;
   const m = v.match(/^([0-9]+)([KkMm]?)$/);
   if (!m) return undefined;
-  const n = parseInt(m[1], 10);
-  const u = m[2].toUpperCase();
+  const n = parseInt(m[1] ?? "0", 10);
+  const u = (m[2] ?? "").toUpperCase();
   return u === "K" ? n * 1000 : u === "M" ? n * 1_000_000 : n;
 }
 
