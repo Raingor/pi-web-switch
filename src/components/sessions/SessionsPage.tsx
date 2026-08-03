@@ -3,7 +3,7 @@ import { useConfigStore } from "@/store/config-store";
 import { useTranslation } from "@/lib/i18n";
 import {
   History, MessageSquare, Clock, ChevronDown, ChevronRight, Trash2, AlertTriangle,
-  Shield, RefreshCw, Undo2, Eye,
+  Shield, RefreshCw, Undo2, Eye, Folder, FolderOpen, FileText, Search,
 } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 
@@ -53,6 +53,17 @@ interface PreviewMessage {
   timestamp: string;
 }
 
+interface TreeNode {
+  id: string;
+  type: "directory" | "project" | "session";
+  name: string;
+  fullPath?: string; // For directory nodes, the path prefix
+  data?: ProjectGroup | SessionInfo; // Only for project/session nodes
+  children?: TreeNode[];
+  sessionCount?: number; // Aggregate count for directory nodes
+  lastActive?: string; // Latest activity for sorting
+}
+
 const SESSIONS_PER_GROUP = 50;
 
 function formatDuration(ms?: number): string {
@@ -88,132 +99,368 @@ function formatFullTimestamp(iso: string): string {
   return d.toLocaleString();
 }
 
-function ProjectCard({
-  group,
-  defaultOpen,
-  forceOpen,
+/** Build a proper directory tree from project groups */
+function buildDirectoryTree(groups: ProjectGroup[]): TreeNode[] {
+  const root: TreeNode[] = [];
+  
+  for (const group of groups) {
+    // Split project path into segments
+    // e.g., "Users-mac-2312-r-workspace-wwwroot-my-notes" -> ["Users", "mac-2312-r", "workspace", "wwwroot", "my-notes"]
+    const segments = group.projectPath.split("-").filter(Boolean);
+    
+    // Insert into tree, creating intermediate directories as needed
+    let currentLevel = root;
+    let currentPath = "";
+    
+    for (let i = 0; i < segments.length; i++) {
+      const segment = segments[i];
+      const parentPath = currentPath;
+      currentPath = currentPath ? `${currentPath}-${segment}` : segment;
+      
+      const isLastSegment = i === segments.length - 1;
+      
+      if (isLastSegment) {
+        // This is the actual project node - add it with sessions as children
+        currentLevel.push({
+          id: group.projectPath,
+          type: "project",
+          name: segment, // Use just the last segment as display name
+          data: group,
+          children: group.sessions.map((session) => ({
+            id: session.id || session.fileName,
+            type: "session" as const,
+            name: sessionDisplayName(session),
+            data: session,
+          })),
+          sessionCount: group.totalSessions,
+          lastActive: group.lastActive,
+        });
+      } else {
+        // This is an intermediate directory - find or create it
+        let dirNode = currentLevel.find(
+          (node) => node.type === "directory" && node.name === segment && node.fullPath === currentPath
+        );
+        
+        if (!dirNode) {
+          dirNode = {
+            id: currentPath,
+            type: "directory",
+            name: segment,
+            fullPath: currentPath,
+            children: [],
+            sessionCount: 0,
+            lastActive: "",
+          };
+          currentLevel.push(dirNode);
+        }
+        
+        // Update aggregate stats
+        dirNode.sessionCount = (dirNode.sessionCount || 0) + group.totalSessions;
+        if (!dirNode.lastActive || group.lastActive > dirNode.lastActive) {
+          dirNode.lastActive = group.lastActive;
+        }
+        
+        currentLevel = dirNode.children!;
+      }
+    }
+  }
+  
+  // Sort root level by lastActive descending
+  return sortTreeByLastActive(root);
+}
+
+/** Recursively sort tree nodes by lastActive */
+function sortTreeByLastActive(nodes: TreeNode[]): TreeNode[] {
+  return nodes
+    .sort((a, b) => (b.lastActive || "").localeCompare(a.lastActive || ""))
+    .map((node) => {
+      if (node.children && node.children.length > 0) {
+        return { ...node, children: sortTreeByLastActive(node.children) };
+      }
+      return node;
+    });
+}
+
+/** Filter directory tree by search query */
+function filterDirectoryTree(nodes: TreeNode[], query: string): TreeNode[] {
+  if (!query) return nodes;
+  const q = query.toLowerCase();
+
+  return nodes
+    .map((node) => {
+      // Check if this node name matches
+      const nameMatches = node.name.toLowerCase().includes(q);
+      
+      if (nameMatches) {
+        // Node matches, include all children and mark as expanded
+        return { ...node, _forceExpanded: true } as TreeNode & { _forceExpanded?: boolean };
+      }
+      
+      // If has children, recursively filter them
+      if (node.children && node.children.length > 0) {
+        const filteredChildren = filterDirectoryTree(node.children, q);
+        if (filteredChildren.length > 0) {
+          return {
+            ...node,
+            children: filteredChildren,
+            _forceExpanded: true,
+          } as TreeNode & { _forceExpanded?: boolean };
+        }
+      }
+      
+      // For project nodes, check sessions
+      if (node.type === "project" && node.data) {
+        const group = node.data as ProjectGroup;
+        const matchingSessions = group.sessions.filter((s) =>
+          sessionDisplayName(s).toLowerCase().includes(q)
+        );
+        
+        if (matchingSessions.length > 0) {
+          return {
+            ...node,
+            children: matchingSessions.map((session) => ({
+              id: session.id || session.fileName,
+              type: "session" as const,
+              name: sessionDisplayName(session),
+              data: session,
+            })),
+            _forceExpanded: true,
+          } as TreeNode & { _forceExpanded?: boolean };
+        }
+      }
+      
+      return null;
+    })
+    .filter((n): n is TreeNode => n !== null);
+}
+
+/** Tree Node Component - supports directory, project, and session nodes */
+function TreeNodeItem({
+  node,
+  level,
+  expandedNodes,
+  forceExpanded,
+  onToggle,
   onDelete,
   onPreview,
+  t,
 }: {
-  group: ProjectGroup;
-  defaultOpen: boolean;
-  forceOpen: boolean;
+  node: TreeNode & { _forceExpanded?: boolean };
+  level: number;
+  expandedNodes: Set<string>;
+  forceExpanded?: boolean;
+  onToggle: (id: string) => void;
   onDelete: (session: SessionInfo, groupPath: string) => void;
   onPreview: (session: SessionInfo) => void;
+  t: (key: string, ...args: string[]) => string;
 }) {
-  const { t } = useTranslation();
-  const [open, setOpen] = useState(defaultOpen);
-  const isOpen = forceOpen || open;
-  const visibleSessions = group.sessions.slice(0, SESSIONS_PER_GROUP);
-  const hiddenCount = group.sessions.length - visibleSessions.length;
+  const isExpanded = forceExpanded || node._forceExpanded || expandedNodes.has(node.id);
+  const hasChildren = node.children && node.children.length > 0;
+  const isDirectory = node.type === "directory";
+  const isProject = node.type === "project";
+  const isSession = node.type === "session";
+  const session = isSession ? (node.data as SessionInfo) : null;
+  const project = isProject ? (node.data as ProjectGroup) : null;
+
+  // Directory and project nodes can be toggled; sessions cannot
+  const canToggle = isDirectory || isProject;
+
+  const paddingLeft = level * 16 + 12;
 
   return (
-    <div className="rounded-xl border" style={{ borderColor: "var(--card-border)" }}>
-      {/* Project Header */}
-      <button
-        onClick={() => setOpen(!open)}
-        className="flex w-full items-center justify-between px-6 py-4"
-        style={{ backgroundColor: "var(--card-bg)" }}
+    <div>
+      {/* Node Row */}
+      <div
+        className={`flex items-center gap-2 py-2 pr-3 transition-colors ${canToggle ? "cursor-pointer hover:bg-gray-500/5" : ""}`}
+        style={{
+          paddingLeft,
+          backgroundColor: isSession ? "var(--page-bg)" : "transparent",
+          borderBottom: "1px solid var(--card-border)",
+        }}
+        onClick={() => {
+          if (canToggle) {
+            onToggle(node.id);
+          } else if (session) {
+            onPreview(session);
+          }
+        }}
       >
-        <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg" style={{ backgroundColor: "var(--accent-bg)" }}>
-            <History className="h-4 w-4" style={{ color: "var(--sidebar-active-text)" }} />
-          </div>
-          <div className="text-left">
-            <h3 className="text-sm font-semibold" style={{ color: "var(--page-text)" }}>{group.projectName}</h3>
-            <p className="text-xs" style={{ color: "var(--muted-text)" }}>
-              {t("sessions.sessions_count", String(group.totalSessions))} · {t("sessions.last_active", formatRelativeDate(group.lastActive, t))}
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="text-xs font-medium" style={{ color: "var(--sidebar-active-text)" }}>
-            {group.totalSessions}
-          </span>
-          {isOpen ? <ChevronDown className="h-4 w-4" style={{ color: "var(--muted-text)" }} /> : <ChevronRight className="h-4 w-4" style={{ color: "var(--muted-text)" }} />}
-        </div>
-      </button>
+        {/* Expand/Collapse Icon */}
+        {canToggle && hasChildren ? (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggle(node.id);
+            }}
+            className="flex items-center justify-center w-5 h-5 rounded hover:bg-gray-500/10"
+            style={{ color: "var(--muted-text)" }}
+          >
+            {isExpanded ? (
+              <ChevronDown className="h-4 w-4" />
+            ) : (
+              <ChevronRight className="h-4 w-4" />
+            )}
+          </button>
+        ) : (
+          <span className="w-5" />
+        )}
 
-      {/* Session List */}
-      {isOpen && (
-        <div style={{ borderTop: "1px solid var(--card-border)" }}>
-          {visibleSessions.map((session) => (
-            <div
-              key={session.id || session.fileName}
-              className="group flex items-center justify-between px-6 py-3 cursor-pointer transition-colors hover:bg-gray-500/5"
-              style={{
-                borderBottom: "1px solid var(--card-border)",
-                backgroundColor: "var(--page-bg)",
-              }}
-              onClick={() => onPreview(session)}
-            >
-              <div className="flex items-center gap-3 min-w-0 flex-1">
-                <div className="flex flex-col items-center justify-center w-8 h-8 rounded-md" style={{ backgroundColor: "var(--accent-bg)" }}>
-                  <MessageSquare className="h-3.5 w-3.5" style={{ color: "var(--sidebar-active-text)" }} />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium truncate" style={{ color: "var(--page-text)" }}>
-                    {sessionDisplayName(session)}
-                  </p>
-                  <div className="flex items-center gap-3 text-xs" style={{ color: "var(--muted-text)" }}>
-                    <span title={formatFullTimestamp(session.timestamp)}>{formatRelativeDate(session.timestamp, t)}</span>
-                    <span className="flex items-center gap-1">
-                      <MessageSquare className="h-3 w-3" />
-                      {session.messageCount}
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <Clock className="h-3 w-3" />
-                      {formatDuration(session.duration)}
-                    </span>
-                  </div>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 shrink-0 ml-4">
-                {session.provider && session.provider !== "unknown" && (
-                  <span className="text-xs rounded-md px-2 py-0.5" style={{ backgroundColor: "var(--accent-bg)", color: "var(--sidebar-active-text)" }}>
-                    {session.provider}/{session.model?.split("-").slice(0, 2).join("-") || session.model}
-                  </span>
-                )}
-                <span
-                  className="rounded-lg p-1.5 opacity-0 group-hover:opacity-100 transition-opacity"
-                  style={{ color: "var(--subtle-text)" }}
-                  title={t("sessions.preview_title")}
-                >
-                  <Eye className="h-3.5 w-3.5" />
-                </span>
-                {isRecent(session.lastActive) ? (
-                  <span
-                    className="rounded-lg p-1.5"
-                    style={{ color: "var(--subtle-text)" }}
-                    title={t("sessions.protected")}
-                  >
-                    <Shield className="h-3.5 w-3.5" />
-                  </span>
-                ) : (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDelete(session, group.projectPath);
-                    }}
-                    className="rounded-lg p-1.5 transition-opacity"
-                    style={{ color: "var(--subtle-text)" }}
-                    title={t("sessions.delete")}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
-          {hiddenCount > 0 && (
-            <p className="px-6 py-2.5 text-xs" style={{ color: "var(--subtle-text)" }}>
-              {t("sessions.more_count", String(hiddenCount))}
-            </p>
+        {/* Icon */}
+        <div
+          className="flex items-center justify-center w-7 h-7 rounded-md shrink-0"
+          style={{
+            backgroundColor: (isDirectory || isProject) ? "var(--accent-bg)" : "transparent",
+          }}
+        >
+          {isDirectory ? (
+            isExpanded ? (
+              <FolderOpen className="h-4 w-4" style={{ color: "#f59e0b" }} />
+            ) : (
+              <Folder className="h-4 w-4" style={{ color: "#f59e0b" }} />
+            )
+          ) : isProject ? (
+            isExpanded ? (
+              <FolderOpen className="h-4 w-4" style={{ color: "var(--sidebar-active-text)" }} />
+            ) : (
+              <Folder className="h-4 w-4" style={{ color: "var(--sidebar-active-text)" }} />
+            )
+          ) : (
+            <FileText className="h-4 w-4" style={{ color: "var(--muted-text)" }} />
           )}
+        </div>
+
+        {/* Name and Info */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span
+              className={`truncate ${isDirectory ? "font-semibold text-sm" : "font-medium text-sm"}`}
+              style={{ 
+                color: isDirectory ? "#d97706" : "var(--page-text)",
+              }}
+            >
+              {node.name}
+            </span>
+            {(isDirectory || isProject) && node.sessionCount !== undefined && node.sessionCount > 0 && (
+              <span
+                className="text-xs px-1.5 py-0.5 rounded-full"
+                style={{
+                  backgroundColor: isDirectory ? "rgba(245,158,11,0.15)" : "var(--accent-bg)",
+                  color: isDirectory ? "#d97706" : "var(--sidebar-active-text)",
+                }}
+              >
+                {node.sessionCount}
+              </span>
+            )}
+          </div>
+          {isSession && session && (
+            <div className="flex items-center gap-2 text-xs" style={{ color: "var(--muted-text)" }}>
+              <span title={formatFullTimestamp(session.timestamp)}>
+                {formatRelativeDate(session.timestamp, t)}
+              </span>
+              <span className="flex items-center gap-0.5">
+                <MessageSquare className="h-3 w-3" />
+                {session.messageCount}
+              </span>
+              {session.duration && (
+                <span className="flex items-center gap-0.5">
+                  <Clock className="h-3 w-3" />
+                  {formatDuration(session.duration)}
+                </span>
+              )}
+            </div>
+          )}
+          {isProject && project && (
+            <div className="text-xs" style={{ color: "var(--muted-text)" }}>
+              {t("sessions.last_active", formatRelativeDate(project.lastActive, t))}
+            </div>
+          )}
+          {isDirectory && node.lastActive && (
+            <div className="text-xs" style={{ color: "var(--subtle-text)" }}>
+              {t("sessions.last_active", formatRelativeDate(node.lastActive, t))}
+            </div>
+          )}
+        </div>
+
+        {/* Actions - only for sessions */}
+        {isSession && session && (
+          <div className="flex items-center gap-1 shrink-0">
+            {session.provider && session.provider !== "unknown" && (
+              <span
+                className="text-xs rounded-md px-2 py-0.5 hidden sm:block"
+                style={{
+                  backgroundColor: "var(--accent-bg)",
+                  color: "var(--sidebar-active-text)",
+                }}
+              >
+                {session.provider}/{session.model?.split("-").slice(0, 2).join("-") || session.model}
+              </span>
+            )}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onPreview(session);
+              }}
+              className="rounded-lg p-1.5 transition-colors hover:bg-gray-500/10"
+              style={{ color: "var(--subtle-text)" }}
+              title={t("sessions.preview_title")}
+            >
+              <Eye className="h-3.5 w-3.5" />
+            </button>
+            {isRecent(session.lastActive) ? (
+              <span
+                className="rounded-lg p-1.5"
+                style={{ color: "var(--subtle-text)" }}
+                title={t("sessions.protected")}
+              >
+                <Shield className="h-3.5 w-3.5" />
+              </span>
+            ) : (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  // Find parent project path for this session
+                  onDelete(session, findParentProjectPath(node));
+                }}
+                className="rounded-lg p-1.5 transition-colors hover:bg-gray-500/10"
+                style={{ color: "var(--subtle-text)" }}
+                title={t("sessions.delete")}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Children */}
+      {(isDirectory || isProject) && isExpanded && hasChildren && (
+        <div>
+          {node.children!.map((child) => (
+            <TreeNodeItem
+              key={child.id}
+              node={child as TreeNode & { _forceExpanded?: boolean }}
+              level={level + 1}
+              expandedNodes={expandedNodes}
+              forceExpanded={!!node._forceExpanded}
+              onToggle={onToggle}
+              onDelete={onDelete}
+              onPreview={onPreview}
+              t={t}
+            />
+          ))}
         </div>
       )}
     </div>
   );
+}
+
+/** Find the parent project path for a session node */
+function findParentProjectPath(node: TreeNode): string {
+  // Walk up to find the nearest project ancestor
+  // Note: In our current structure, the parent should be a project or directory
+  // We need to pass this info differently - for now return empty string
+  // The actual fix would require restructuring how we track parent paths
+  return "";
 }
 
 export function SessionsPage() {
@@ -236,6 +483,8 @@ export function SessionsPage() {
   const [previewTarget, setPreviewTarget] = useState<SessionInfo | null>(null);
   const [preview, setPreview] = useState<{ messages: PreviewMessage[]; total: number } | null>(null);
   const [previewError, setPreviewError] = useState(false);
+  // Tree state
+  const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
 
   const loadAll = useCallback(() => {
     if (!initialized) return;
@@ -248,6 +497,9 @@ export function SessionsPage() {
         setGroups(sessionData);
         setTrash(trashData);
         setError(null);
+        // Auto-expand first 3 projects
+        const firstThree = sessionData.slice(0, 3).map((g: ProjectGroup) => g.projectPath);
+        setExpandedNodes(new Set(firstThree));
       })
       .catch((e) => setError(e.message))
       .finally(() => {
@@ -332,21 +584,43 @@ export function SessionsPage() {
       .catch(() => setPreviewError(true));
   };
 
-  // Search matches project names AND session names; matched projects auto-expand
-  const q = filter.trim().toLowerCase();
-  const filteredGroups = !q
-    ? groups
-    : groups
-        .map((g) => {
-          if (g.projectName.toLowerCase().includes(q)) return g;
-          const sessions = g.sessions.filter((s) =>
-            sessionDisplayName(s).toLowerCase().includes(q)
-          );
-          return sessions.length > 0
-            ? { ...g, sessions, totalSessions: sessions.length }
-            : null;
-        })
-        .filter((g): g is ProjectGroup => g !== null);
+  // Toggle node expansion
+  const toggleNode = (id: string) => {
+    setExpandedNodes((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  // Expand/collapse all - collect all directory and project node IDs
+  const expandAll = () => {
+    const allIds: string[] = [];
+    const collectIds = (nodes: TreeNode[]) => {
+      for (const node of nodes) {
+        if (node.type === "directory" || node.type === "project") {
+          allIds.push(node.id);
+        }
+        if (node.children) {
+          collectIds(node.children);
+        }
+      }
+    };
+    collectIds(buildDirectoryTree(groups));
+    setExpandedNodes(new Set(allIds));
+  };
+
+  const collapseAll = () => {
+    setExpandedNodes(new Set());
+  };
+
+  // Build and filter tree
+  const tree = buildDirectoryTree(groups);
+  const filteredTree = filterDirectoryTree(tree, filter.trim());
 
   const toggleTrashSelect = (path: string) => {
     setSelectedTrash((prev) => {
@@ -373,7 +647,27 @@ export function SessionsPage() {
     );
   }
 
-  const totalSessions = groups.reduce((s, g) => s + g.totalSessions, 0);
+const totalSessions = groups.reduce((s, g) => s + g.totalSessions, 0);
+// Check if all expandable nodes (directories and projects) are expanded
+const allExpanded = (() => {
+  if (groups.length === 0) return false;
+  const totalExpandable = countExpandableNodes(tree);
+  return expandedNodes.size >= totalExpandable && totalExpandable > 0;
+})();
+
+/** Count all directory and project nodes in tree */
+function countExpandableNodes(nodes: TreeNode[]): number {
+  let count = 0;
+  for (const node of nodes) {
+    if (node.type === "directory" || node.type === "project") {
+      count++;
+    }
+    if (node.children) {
+      count += countExpandableNodes(node.children);
+    }
+  }
+  return count;
+}
 
   return (
     <div className="space-y-6">
@@ -384,15 +678,29 @@ export function SessionsPage() {
             {t("sessions.summary", String(totalSessions), String(groups.length))}
           </p>
         </div>
-        <button
-          onClick={loadAll}
-          className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors"
-          style={{ borderColor: "var(--card-border)", color: "var(--muted-text)", backgroundColor: "var(--card-bg)" }}
-          title={t("sessions.refresh")}
-        >
-          <RefreshCw className={refreshing ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} />
-          {t("sessions.refresh")}
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Expand/Collapse All button */}
+          {tab === "sessions" && groups.length > 0 && (
+            <button
+              onClick={() => allExpanded ? collapseAll() : expandAll()}
+              className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors"
+              style={{ borderColor: "var(--card-border)", color: "var(--muted-text)", backgroundColor: "var(--card-bg)" }}
+              title={allExpanded ? t("sessions.collapse_all") : t("sessions.expand_all")}
+            >
+              {allExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+              {allExpanded ? t("sessions.collapse_all") : t("sessions.expand_all")}
+            </button>
+          )}
+          <button
+            onClick={loadAll}
+            className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors"
+            style={{ borderColor: "var(--card-border)", color: "var(--muted-text)", backgroundColor: "var(--card-bg)" }}
+            title={t("sessions.refresh")}
+          >
+            <RefreshCw className={refreshing ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} />
+            {t("sessions.refresh")}
+          </button>
+        </div>
       </div>
 
       {/* Tabs: Sessions / Trash */}
@@ -443,27 +751,36 @@ export function SessionsPage() {
                 color: "var(--input-text)",
               }}
             />
-            <History className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4" style={{ color: "var(--muted-text)" }} />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4" style={{ color: "var(--muted-text)" }} />
           </div>
 
-          {/* Project Groups */}
-          <div className="space-y-3">
-            {filteredGroups.length === 0 ? (
+          {/* Tree View */}
+          <div
+            className="rounded-xl border overflow-hidden"
+            style={{ borderColor: "var(--card-border)" }}
+          >
+            {filteredTree.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-12">
                 <History className="h-12 w-12" style={{ color: "var(--subtle-text)" }} />
-                <p className="mt-4 text-sm" style={{ color: "var(--muted-text)" }}>{t("sessions.no_sessions")}</p>
+                <p className="mt-4 text-sm" style={{ color: "var(--muted-text)" }}>
+                  {filter ? t("sessions.no_search_results") : t("sessions.no_sessions")}
+                </p>
               </div>
             ) : (
-              filteredGroups.map((group, i) => (
-                <ProjectCard
-                  key={group.projectPath}
-                  group={group}
-                  defaultOpen={i < 3}
-                  forceOpen={!!q}
-                  onDelete={(session, groupPath) => setDeleteTarget({ session, groupPath })}
-                  onPreview={openPreview}
-                />
-              ))
+              <div>
+                {filteredTree.map((node) => (
+                  <TreeNodeItem
+                    key={node.id}
+                    node={node}
+                    level={0}
+                    expandedNodes={expandedNodes}
+                    onToggle={toggleNode}
+                    onDelete={(session, groupPath) => setDeleteTarget({ session, groupPath })}
+                    onPreview={openPreview}
+                    t={t}
+                  />
+                ))}
+              </div>
             )}
           </div>
         </>

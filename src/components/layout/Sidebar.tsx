@@ -7,6 +7,7 @@ import {
   Globe,
   Plug,
   Users,
+  MessageSquare,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTranslation, LANGUAGES } from "@/lib/i18n";
@@ -14,6 +15,7 @@ import { useState } from "react";
 
 const navItems = [
   { to: "/", icon: LayoutDashboard, key: "nav.dashboard" },
+  { to: "/chat", icon: MessageSquare, key: "nav.chat" },
   { to: "/sessions", icon: History, key: "nav.sessions" },
   { to: "/memory", icon: Brain, key: "nav.memory" },
   { to: "/providers", icon: Plug, key: "nav.providers_models" },

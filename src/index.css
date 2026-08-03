@@ -28,6 +28,18 @@
   --sidebar-hover-text: #374151;
   --scrollbar-thumb: #d1d5db;
   --scrollbar-thumb-hover: #9ca3af;
+  
+  /* Chat component variables */
+  --bg: #ffffff;
+  --bg-panel: #f9fafb;
+  --bg-hover: #f3f4f6;
+  --bg-selected: #eff6ff;
+  --border: #e5e7eb;
+  --text: #111827;
+  --text-muted: #6b7280;
+  --text-dim: #9ca3af;
+  --accent: #2563eb;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
 
 .dark {
@@ -55,6 +67,18 @@
   --sidebar-hover-text: #e5e7eb;
   --scrollbar-thumb: #4b5563;
   --scrollbar-thumb-hover: #6b7280;
+  
+  /* Chat component variables */
+  --bg: #030712;
+  --bg-panel: rgba(17, 24, 39, 0.5);
+  --bg-hover: rgba(31, 41, 55, 0.5);
+  --bg-selected: rgba(37, 99, 235, 0.1);
+  --border: #1f2937;
+  --text: #f3f4f6;
+  --text-muted: #9ca3af;
+  --text-dim: #6b7280;
+  --accent: #2563eb;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
 
 :root {

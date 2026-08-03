@@ -6,6 +6,7 @@ import { MemoryPage } from "@/components/sessions/MemoryPage";
 import { ProvidersModelsPage } from "@/components/providers/ProvidersModelsPage";
 import { SubagentsPage } from "@/components/subagents/SubagentsPage";
 import { SettingsPage } from "@/components/settings/SettingsPage";
+import { ChatPage } from "@/components/chat/ChatPage";
 
 export default function App() {
   return (
@@ -18,6 +19,7 @@ export default function App() {
           <Route path="/providers" element={<ProvidersModelsPage />} />
           <Route path="/models" element={<ProvidersModelsPage />} />
           <Route path="/subagents" element={<SubagentsPage />} />
+          <Route path="/chat" element={<ChatPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Route>
       </Routes>
