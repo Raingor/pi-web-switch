@@ -503,57 +503,233 @@ export async function resolveSessionPath(sessionId: string): Promise<string | nu
 
 // ─── Session Context Builder ────────────────────────────
 
+/**
+ * Safely build the session path from leaf to root, detecting circular
+ * parent references that would cause the SDK's buildSessionPath to overflow
+ * the stack. Falls back to returning all entries as a flat list.
+ */
+function safeBuildSessionPath(entries: any[], leafId: string | null, byId: Map<string, any>): any[] {
+  if (!leafId) {
+    // No leaf — return last 100 entries as a safe fallback
+    return entries.slice(-100);
+  }
+  const leaf = byId.get(leafId) ?? entries[entries.length - 1];
+  if (!leaf) return entries.slice(-100);
+
+  const path: any[] = [];
+  const visited = new Set<string>();
+  let current: any = leaf;
+  while (current && !visited.has(current.id)) {
+    visited.add(current.id);
+    path.push(current);
+    current = current.parentId ? byId.get(current.parentId) : undefined;
+  }
+  path.reverse();
+  return path;
+}
+
+/**
+ * Extract messages from a path of entries (mirrors SDK's sessionEntryToContextMessages
+ * for the types we care about). Pure fallback — no SDK dependency.
+ */
+function safeExtractMessages(path: any[]): { messages: any[]; entryIds: string[] } {
+  const messages: any[] = [];
+  const entryIds: string[] = [];
+  for (const entry of path) {
+    if (entry.type === "message") {
+      const msg = entry.message;
+      // Guard against null content from corrupted files
+      if ((msg.role === "user" || msg.role === "assistant" || msg.role === "toolResult") && msg.content == null) {
+        messages.push({ ...msg, content: [] });
+      } else {
+        messages.push(msg);
+      }
+      entryIds.push(entry.id);
+    }
+  }
+  return { messages, entryIds };
+}
+
+/**
+ * Flatten the session tree into a list of { id, parentId, type, label } nodes.
+ * The SDK's tree can be extremely deep (2000+ levels in a single chain),
+ * which crashes JSON.stringify's recursive traversal. Converting to a flat
+ * list with parentId references is both JSON-safe and preserves the structure
+ * for the frontend to reconstruct if needed.
+ */
+function flattenTree(tree: any): any[] {
+  if (!tree) return [];
+  const nodes: any[] = [];
+  const stack: { node: any; parentId: string | null }[] = [];
+  // Initialize with roots
+  const roots = Array.isArray(tree) ? tree : [tree];
+  for (const root of roots) {
+    stack.push({ node: root, parentId: null });
+  }
+  const seen = new Set<string>();
+  while (stack.length > 0) {
+    const { node, parentId } = stack.pop();
+    if (!node) continue;
+    const id = node.entry?.id ?? node.id;
+    if (id) {
+      if (seen.has(id)) continue; // skip cycles
+      seen.add(id);
+      nodes.push({
+        id,
+        parentId,
+        type: node.entry?.type ?? node.type,
+        label: node.label ?? null,
+      });
+    }
+    if (node.children) {
+      for (const child of node.children) {
+        stack.push({ node: child, parentId: id ?? null });
+      }
+    }
+  }
+  return nodes;
+}
+
 export async function getSessionData(sessionId: string) {
   const filePath = await resolveSessionPath(sessionId);
   if (!filePath) return null;
 
+  try {
+    const sm = SessionManager.open(filePath);
+    const entries = sm.getEntries();
+    const leafId = sm.getLeafId();
+    const tree = flattenTree(sm.getTree());
+    const header = sm.getHeader();
+
+    const byId = new Map<string, any>();
+    for (const e of entries) byId.set(e.id, e);
+
+    // Try the SDK's build functions first; if they fail (e.g. circular parent
+    // references → "Maximum call stack size exceeded"), fall back to a safe
+    // manual implementation with cycle detection.
+    let messages: any[] = [];
+    let entryIds: string[] = [];
+    let thinkingLevel = "off";
+    let model: any = null;
+
+    try {
+      const { buildSessionContext: piBuildSessionContext, buildContextEntries: piBuildContextEntries } = await import("@earendil-works/pi-coding-agent");
+      const piCtx = piBuildSessionContext(entries, leafId, byId);
+      const contextEntries = piBuildContextEntries(entries, leafId, byId);
+      for (const entry of contextEntries) {
+        if (entry.type === "message") {
+          messages.push(entry.message);
+          entryIds.push(entry.id);
+        }
+      }
+      thinkingLevel = piCtx.thinkingLevel;
+      model = piCtx.model;
+    } catch {
+      // SDK failed (stack overflow from circular refs, etc.) — use safe fallback
+      const path = safeBuildSessionPath(entries, leafId, byId);
+      const extracted = safeExtractMessages(path);
+      messages = extracted.messages;
+      entryIds = extracted.entryIds;
+
+      // Derive thinkingLevel/model from the path
+      for (const entry of path) {
+        if (entry.type === "thinking_level_change") thinkingLevel = entry.thinkingLevel;
+        else if (entry.type === "model_change") model = { provider: entry.provider, modelId: entry.modelId };
+        else if (entry.type === "message" && entry.message?.role === "assistant") {
+          model = { provider: entry.message.provider, modelId: entry.message.model };
+        }
+      }
+    }
+
+    return {
+      sessionId,
+      filePath,
+      leafId,
+      tree,
+      info: header ? {
+        path: filePath,
+        id: header.id,
+        cwd: header.cwd ?? "",
+        name: sm.getSessionName(),
+        created: header.timestamp,
+        messageCount: messages.length,
+        firstMessage: messages.find((m: any) => m.role === "user")
+          ? (typeof messages.find((m: any) => m.role === "user")?.content === "string"
+            ? messages.find((m: any) => m.role === "user").content
+            : "(no messages)")
+          : "(no messages)",
+      } : null,
+      context: {
+        messages,
+        entryIds,
+        thinkingLevel,
+        model,
+      },
+    };
+  } catch (e: any) {
+    // SessionManager.open / getEntries / getTree failed (e.g. corrupted file,
+    // circular refs in tree building). Return a minimal stub so the UI can
+    // still display the session name without crashing.
+    console.error(`[getSessionData] Failed to load session ${sessionId}:`, e?.message ?? e);
+    return {
+      sessionId,
+      filePath,
+      leafId: null,
+      tree: null,
+      info: {
+        path: filePath,
+        id: sessionId,
+        cwd: "",
+        name: filePath.split("/").pop()?.replace(/\.jsonl$/, "") || sessionId,
+        created: "",
+        messageCount: 0,
+        firstMessage: "(session unavailable: " + (e?.message ?? "unknown error") + ")",
+      },
+      context: {
+        messages: [],
+        entryIds: [],
+        thinkingLevel: "off",
+        model: null,
+      },
+    };
+  }
+}
+
+/** Compact form: getSessionData but only for the sidebar (no context messages). */
+export async function getSessionSummary(sessionId: string): Promise<{ id: string; filePath: string; header: any } | null> {
+  const filePath = await resolveSessionPath(sessionId);
+  if (!filePath) return null;
+
   const sm = SessionManager.open(filePath);
-  const entries = sm.getEntries();
-  const leafId = sm.getLeafId();
-  const tree = sm.getTree();
   const header = sm.getHeader();
+  const entries = sm.getEntries();
 
-  // Build context from entries
-  const { buildSessionContext: piBuildSessionContext, buildContextEntries: piBuildContextEntries } = await import("@earendil-works/pi-coding-agent");
-  const byId = new Map<string, any>();
-  for (const e of entries) byId.set(e.id, e);
-
-  const piCtx = piBuildSessionContext(entries, leafId, byId);
-  const contextEntries = piBuildContextEntries(entries, leafId, byId);
-
-  const messages: any[] = [];
-  const entryIds: string[] = [];
-  for (const entry of contextEntries) {
-    if (entry.type === "message") {
-      messages.push(entry.message);
-      entryIds.push(entry.id);
+  // Count messages without building full context
+  let messageCount = 0;
+  let firstUserMessage = "";
+  for (const e of entries) {
+    if (e.type === "message") {
+      messageCount++;
+      if (!firstUserMessage && e.message?.role === "user") {
+        firstUserMessage = typeof e.message.content === "string"
+          ? e.message.content.slice(0, 100)
+          : "(no messages)";
+      }
     }
   }
 
   return {
-    sessionId,
+    id: sessionId,
     filePath,
-    leafId,
-    tree,
-    info: header ? {
+    header: header ? {
       path: filePath,
       id: header.id,
       cwd: header.cwd ?? "",
       name: sm.getSessionName(),
       created: header.timestamp,
-      messageCount: messages.length,
-      firstMessage: messages.find((m) => m.role === "user")
-        ? (typeof messages.find((m) => m.role === "user")?.content === "string"
-          ? messages.find((m) => m.role === "user").content
-          : "(no messages)")
-        : "(no messages)",
+      messageCount,
+      firstMessage: firstUserMessage || "(no messages)",
     } : null,
-    context: {
-      messages,
-      entryIds,
-      thinkingLevel: piCtx.thinkingLevel,
-      model: piCtx.model,
-    },
   };
 }
 

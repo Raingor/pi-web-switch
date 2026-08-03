@@ -42,7 +42,18 @@ function parseBody(req: Connect.IncomingMessage): Promise<any> {
 function sendJSON(res: any, data: any, status = 200) {
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json");
-  res.end(JSON.stringify(data));
+  // Use a replacer that breaks circular references so a corrupted session
+  // file (or an SDK tree with bidirectional parent/child links) never
+  // crashes JSON.stringify with "Maximum call stack size exceeded".
+  const seen = new WeakSet();
+  const replacer = (_key: string, value: any) => {
+    if (typeof value === "object" && value !== null) {
+      if (seen.has(value)) return "[Circular]";
+      seen.add(value);
+    }
+    return value;
+  };
+  res.end(JSON.stringify(data, replacer));
 }
 
 const OMITTED_EVENT_TYPES = new Set(["turn_start", "turn_end", "tool_execution_update"]);
