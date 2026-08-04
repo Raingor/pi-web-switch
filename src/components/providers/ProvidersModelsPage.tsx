@@ -73,19 +73,20 @@ function isValidHttpUrl(value: string): boolean {
 const DEFAULT_CONTEXT_WINDOW = 262144;
 const DEFAULT_MAX_TOKENS = 32768;
 
-// Sanitize to a config-safe id: lowercase letters, digits and hyphens only
+// Sanitize to a config-safe id: letters (any script), digits and hyphens.
+// pi shows this key verbatim in its model picker badge, so keep it readable.
 function sanitizeProviderId(name: string): string {
   return name
     .trim()
     .toLowerCase()
     .replace(/\s+/g, "-")
-    .replace(/[^a-z0-9-]/g, "")
+    .replace(/[^\p{L}\p{N}-]/gu, "")
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "");
 }
 
-// Non-ASCII names (e.g. 中文) sanitize to "" — fall back to the endpoint hostname
-// so the provider still gets a valid id while keeping the original display name.
+// Empty or symbol-only names fall back to the endpoint hostname so the
+// provider still gets a valid id while keeping the original display name.
 function deriveProviderId(name: string, baseUrl: string): string {
   const fromName = sanitizeProviderId(name);
   if (fromName || !name.trim()) return fromName;
@@ -294,15 +295,19 @@ export function ProvidersModelsPage() {
     // builtin provider's model list so duplicates keep their models.
     const sourceProvider = allProviders.find((p) => p.id === id);
     const sourceModels = existing?.models ?? sourceProvider?.models ?? [];
+    const sourceName = sourceProvider?.name ?? id;
+    // Derive the new key from the display name so pi's model picker badge
+    // matches what the user sees in this UI.
+    const baseId = sanitizeProviderId(sourceName) || id;
     const suffix = "-copy";
-    let newId = sanitizeProviderId(id + suffix);
+    let newId = sanitizeProviderId(baseId + suffix);
     // Ensure uniqueness against existing provider ids
     const taken = new Set(allProviders.map((p) => p.id));
     let i = 2;
-    while (taken.has(newId)) newId = sanitizeProviderId(`${id}-copy${i++}`);
+    while (taken.has(newId)) newId = sanitizeProviderId(`${baseId}-copy${i++}`);
     // Copy config but clear apiKey; carry models + headers + overrides
     const cfg: CustomProviderConfig = {
-      name: `${sourceProvider?.name ?? id} (copy)`,
+      name: `${sourceName} (copy)`,
       baseUrl: existing?.baseUrl ?? sourceProvider?.baseUrl,
       api: existing?.api ?? sourceProvider?.api,
       headers: existing?.headers,
@@ -430,6 +435,7 @@ export function ProvidersModelsPage() {
               provider={selected}
               onDelete={() => setDeleteConfirm(selected.id)}
               onDuplicate={() => handleDuplicateProvider(selected.id)}
+              onRenamed={(newId) => setSelectedId(newId)}
             />
           ) : (
             <div className="flex h-40 items-center justify-center text-sm text-gray-500">
@@ -597,7 +603,7 @@ function TestConnectionButton({ baseUrl, apiKey }: { baseUrl: string; apiKey?: s
 
 // ─── Provider Detail Panel ────────────────────────────────
 
-function ProviderDetail({ provider, onDelete, onDuplicate }: { provider: Provider; onDelete: () => void; onDuplicate: () => void }) {
+function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provider: Provider; onDelete: () => void; onDuplicate: () => void; onRenamed: (newId: string) => void }) {
   const { t } = useTranslation();
   const { currency } = useCurrency();
   const {
@@ -605,6 +611,7 @@ function ProviderDetail({ provider, onDelete, onDuplicate }: { provider: Provide
     settings,
     updateSettings,
     updateCustomProvider,
+    renameCustomProvider,
     setProviderAuth,
     removeProviderAuth,
     addModel,
@@ -858,13 +865,24 @@ function ProviderDetail({ provider, onDelete, onDuplicate }: { provider: Provide
     setSaveState("saving");
     let ok = true;
     if (isCustom) {
-      ok = await updateCustomProvider(provider.id, {
+      const cfgPatch = {
         name: providerName || undefined,
         baseUrl: baseUrl || undefined,
         api,
         apiKey: apiKey || undefined,
         compat: { supportsDeveloperRole },
-      });
+      };
+      // pi's model picker shows the provider key, not the display name, so
+      // rename the key too when the name changes (references get rewritten).
+      const nameChanged = providerName !== (provider.name ?? "");
+      const newId = nameChanged ? sanitizeProviderId(providerName) : "";
+      const taken = new Set(useConfigStore.getState().allProviders.map((p) => p.id));
+      if (newId && newId !== provider.id && !taken.has(newId)) {
+        ok = await renameCustomProvider(provider.id, newId, cfgPatch);
+        if (ok) onRenamed(newId);
+      } else {
+        ok = await updateCustomProvider(provider.id, cfgPatch);
+      }
     } else {
       // Builtin providers: baseUrl / api are persisted as a models.json
       // override (so the user can point them at a proxy/gateway), while the

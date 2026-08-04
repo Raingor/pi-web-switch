@@ -114,6 +114,7 @@ function buildDirectoryTree(groups: ProjectGroup[]): TreeNode[] {
     
     for (let i = 0; i < segments.length; i++) {
       const segment = segments[i];
+      if (!segment) continue;
       const parentPath = currentPath;
       currentPath = currentPath ? `${currentPath}-${segment}` : segment;
       
