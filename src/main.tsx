@@ -123,8 +123,10 @@ createRoot(document.getElementById("root")!).render(
   </StrictMode>
 );
 
-// ─── PWA: register service worker ──────────────────────
-if ("serviceWorker" in navigator) {
+// ─── PWA: register service worker (production only — dev must not
+// cache HTML pages, or SPA routes like /providers can return stale HTML
+// to API fetches and break JSON parsing) ─────────────────────
+if ("serviceWorker" in navigator && import.meta.env.PROD) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("/sw.js").catch((err) => {
       console.warn("SW registration failed:", err);
