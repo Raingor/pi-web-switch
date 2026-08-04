@@ -1,14 +1,20 @@
 // ─── pi-web-switch Service Worker ───────────────────────
-// Cache-first for static assets, network-first for API calls.
-// Bump CACHE_VERSION to invalidate old caches on deploy.
+// Strategy:
+//   - HTML navigation (index.html / SPA routes): NETWORK-FIRST.
+//     Every refresh must hit the network so deploys show up on a plain
+//     Cmd+R reload; the cached copy is only a fallback for offline use.
+//   - Static assets (hashed js/css): CACHE-FIRST — safe because Vite
+//     fingerprints filenames, so a new deploy means new URLs.
+//   - API calls: NETWORK-FIRST, fallback to cache.
+// Bump CACHE_VERSION when the SW logic changes to purge old caches.
 
-const CACHE_VERSION = "pi-web-switch-v1";
+const CACHE_VERSION = "pi-web-switch-v2";
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 
+// NOTE: index.html is intentionally NOT precached. Pre-caching it would
+// make Cmd+R reloads serve the stale page after a deploy.
 const PRECACHE_URLS = [
-  "/",
-  "/index.html",
   "/manifest.webmanifest",
   "/icon-192.png",
   "/icon-512.png",
@@ -60,6 +66,23 @@ self.addEventListener("fetch", (event) => {
           return response;
         })
         .catch(() => caches.match(request))
+    );
+    return;
+  }
+
+  // HTML navigation: network-first so a plain refresh always gets the
+  // latest build. Fall back to the last cached copy only when offline.
+  if (request.mode === "navigate") {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          if (response && response.status === 200 && response.type === "basic") {
+            const copy = response.clone();
+            caches.open(RUNTIME_CACHE).then((cache) => cache.put("/index.html", copy));
+          }
+          return response;
+        })
+        .catch(() => caches.match("/index.html"))
     );
     return;
   }
