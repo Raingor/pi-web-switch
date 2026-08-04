@@ -69,6 +69,7 @@ interface UsageRangeData {
   }[];
 }
 
+type SourceKey = "all" | "pi" | "cindy-pi" | "claude" | "codex" | "opencode" | "gemini" | "grok";
 type RangeKey = "today" | "7d" | "30d" | "custom";
 type TabKey = "log" | "provider" | "model";
 type SortDir = "asc" | "desc";
@@ -270,6 +271,7 @@ export function DashboardPage() {
   const { t, lang } = useTranslation();
   const { currency, toggle: toggleCurrency } = useCurrency();
   const { initialized } = useConfigStore();
+  const [source, setSource] = useState<SourceKey>("pi");
   const [range, setRange] = useState<RangeKey>("today");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
@@ -290,7 +292,15 @@ export function DashboardPage() {
 
   const fetchData = useCallback(() => {
     if (!initialized || customInvalid) return;
-    let url = "/api/pi/usage-range?range=" + range;
+    let baseUrl = "/api/pi/usage-range";
+    if (source === "all") baseUrl = "/api/pi/all-usage-range";
+    else if (source === "cindy-pi") baseUrl = "/api/pi/cindy-usage-range";
+    else if (source === "claude") baseUrl = "/api/pi/claude-usage-range";
+    else if (source === "codex") baseUrl = "/api/pi/codex-usage-range";
+    else if (source === "opencode") baseUrl = "/api/pi/opencode-usage-range";
+    else if (source === "gemini") baseUrl = "/api/pi/gemini-usage-range";
+    else if (source === "grok") baseUrl = "/api/pi/grok-usage-range";
+    let url = `${baseUrl}?range=${range}`;
     if (range === "custom" && customFrom) {
       url += `&from=${customFrom}&to=${customTo || customFrom}`;
     }
@@ -308,19 +318,22 @@ export function DashboardPage() {
     // Previous period of equal length → period-over-period trend on stat cards
     const prev = getPrevRange(range);
     if (prev) {
-      fetch(`/api/pi/usage-range?range=custom&from=${prev.from}&to=${prev.to}`)
+      fetch(`${baseUrl}?range=custom&from=${prev.from}&to=${prev.to}`)
         .then((r) => r.json())
         .then((p) => setPrevTotals({ tokens: p.totalTokens ?? 0, cost: p.totalCost ?? 0 }))
         .catch(() => setPrevTotals(null));
     } else {
       setPrevTotals(null);
     }
-  }, [initialized, range, customFrom, customTo, customInvalid]);
+  }, [initialized, source, range, customFrom, customTo, customInvalid]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  // Reset request-log pagination when the queried range changes
-  useEffect(() => { setLogPage(1); }, [range, customFrom, customTo]);
+  // Reset request-log pagination when the queried range or source changes
+  useEffect(() => { setLogPage(1); }, [range, customFrom, customTo, source]);
+
+  // Reset loading state when source changes
+  useEffect(() => { setLoading(true); }, [source]);
 
   // Auto-refresh with configurable interval (seconds)
   useEffect(() => {
@@ -384,6 +397,33 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-5">
+      {/* Source Selector: Pi / Cindy-Pi */}
+      <div className="flex items-center gap-1 rounded-lg border p-0.5" style={{ borderColor: "var(--card-border)", backgroundColor: "var(--page-bg)" }}>
+        {([
+          { key: "all" as SourceKey, label: "dashboard.source_all", icon: "📊" },
+          { key: "pi" as SourceKey, label: "dashboard.source_pi", icon: "🖥" },
+          { key: "cindy-pi" as SourceKey, label: "dashboard.source_cindy_pi", icon: "🤖" },
+          { key: "claude" as SourceKey, label: "dashboard.source_claude", icon: "🧠" },
+          { key: "codex" as SourceKey, label: "dashboard.source_codex", icon: "⚡" },
+          { key: "opencode" as SourceKey, label: "dashboard.source_opencode", icon: "🔷" },
+          { key: "gemini" as SourceKey, label: "dashboard.source_gemini", icon: "✨" },
+          { key: "grok" as SourceKey, label: "dashboard.source_grok", icon: "🌀" },
+        ]).map((s) => (
+          <button
+            key={s.key}
+            onClick={() => setSource(s.key)}
+            className={cn(
+              "rounded-md px-3 py-1.5 text-xs font-medium transition-colors flex items-center gap-1.5",
+              source === s.key ? "text-white" : "hover:bg-gray-800/30"
+            )}
+            style={source === s.key ? { backgroundColor: "#3b82f6", color: "#fff" } : { color: "var(--muted-text)" }}
+          >
+            <span>{s.icon}</span>
+            <span>{t(s.label)}</span>
+          </button>
+        ))}
+      </div>
+
       {/* Title + Time Range Selector + Currency Toggle */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>

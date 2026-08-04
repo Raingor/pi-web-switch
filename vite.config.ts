@@ -307,6 +307,145 @@ function piApiPlugin(): Plugin {
           return res.end(JSON.stringify(usage));
         }
 
+        // Handle GET /api/pi/cindy-usage-range?range=today|7d|30d|custom&from=...&to=...
+        if (method === "GET" && pathOnly === "/api/pi/cindy-usage-range") {
+          const parsedUrl = new URL(url, "http://localhost");
+          const range = parsedUrl.searchParams.get("range") || "today";
+          const fromParam = parsedUrl.searchParams.get("from") || "";
+          const toParam = parsedUrl.searchParams.get("to") || "";
+
+          const now = new Date();
+          const localDateStr = (dt: Date) =>
+            `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+          let fromDate: string;
+          let toDate = localDateStr(now);
+
+          if (range === "today") {
+            fromDate = toDate;
+          } else if (range === "7d") {
+            const d = new Date(now); d.setDate(d.getDate() - 6); fromDate = localDateStr(d);
+          } else if (range === "30d") {
+            const d = new Date(now); d.setDate(d.getDate() - 29); fromDate = localDateStr(d);
+          } else if (range === "custom" && fromParam) {
+            fromDate = fromParam;
+            if (toParam) toDate = toParam;
+          } else {
+            fromDate = toDate;
+          }
+
+          const allRecords = pi.readCindyUsage();
+          const usage = pi.getUsageByRange(allRecords, fromDate, toDate);
+          res.setHeader("Content-Type", "application/json");
+          return res.end(JSON.stringify(usage));
+        }
+
+        // Handle GET /api/pi/claude-usage-range?range=today|7d|30d|custom&from=...&to=...
+        if (method === "GET" && pathOnly === "/api/pi/claude-usage-range") {
+          const parsedUrl = new URL(url, "http://localhost");
+          const range = parsedUrl.searchParams.get("range") || "today";
+          const fromParam = parsedUrl.searchParams.get("from") || "";
+          const toParam = parsedUrl.searchParams.get("to") || "";
+
+          const now = new Date();
+          const localDateStr = (dt: Date) =>
+            `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+          let fromDate: string;
+          let toDate = localDateStr(now);
+
+          if (range === "today") {
+            fromDate = toDate;
+          } else if (range === "7d") {
+            const d = new Date(now); d.setDate(d.getDate() - 6); fromDate = localDateStr(d);
+          } else if (range === "30d") {
+            const d = new Date(now); d.setDate(d.getDate() - 29); fromDate = localDateStr(d);
+          } else if (range === "custom" && fromParam) {
+            fromDate = fromParam;
+            if (toParam) toDate = toParam;
+          } else {
+            fromDate = toDate;
+          }
+
+          const allRecords = pi.readClaudeUsage();
+          const usage = pi.getUsageByRange(allRecords, fromDate, toDate);
+          res.setHeader("Content-Type", "application/json");
+          return res.end(JSON.stringify(usage));
+        }
+
+        // Handle GET /api/pi/codex-usage-range?range=today|7d|30d|custom&from=...&to=...
+        if (method === "GET" && pathOnly === "/api/pi/codex-usage-range") {
+          const parsedUrl = new URL(url, "http://localhost");
+          const range = parsedUrl.searchParams.get("range") || "today";
+          const fromParam = parsedUrl.searchParams.get("from") || "";
+          const toParam = parsedUrl.searchParams.get("to") || "";
+
+          const now = new Date();
+          const localDateStr = (dt: Date) =>
+            `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+          let fromDate: string;
+          let toDate = localDateStr(now);
+
+          if (range === "today") {
+            fromDate = toDate;
+          } else if (range === "7d") {
+            const d = new Date(now); d.setDate(d.getDate() - 6); fromDate = localDateStr(d);
+          } else if (range === "30d") {
+            const d = new Date(now); d.setDate(d.getDate() - 29); fromDate = localDateStr(d);
+          } else if (range === "custom" && fromParam) {
+            fromDate = fromParam;
+            if (toParam) toDate = toParam;
+          } else {
+            fromDate = toDate;
+          }
+
+          const allRecords = pi.readCodexUsage();
+          const usage = pi.getUsageByRange(allRecords, fromDate, toDate);
+          res.setHeader("Content-Type", "application/json");
+          return res.end(JSON.stringify(usage));
+        }
+
+        // Helper: resolve date range params
+        const resolveDateRange = (range: string, fromParam: string, toParam: string) => {
+          const now = new Date();
+          const localDateStr = (dt: Date) =>
+            `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+          let fromDate: string;
+          let toDate = localDateStr(now);
+          if (range === "today") fromDate = toDate;
+          else if (range === "7d") { const d = new Date(now); d.setDate(d.getDate() - 6); fromDate = localDateStr(d); }
+          else if (range === "30d") { const d = new Date(now); d.setDate(d.getDate() - 29); fromDate = localDateStr(d); }
+          else if (range === "custom" && fromParam) { fromDate = fromParam; if (toParam) toDate = toParam; }
+          else fromDate = toDate;
+          return { fromDate, toDate };
+        };
+
+        // Handle GET /api/pi/all-usage-range
+        if (method === "GET" && pathOnly === "/api/pi/all-usage-range") {
+          const parsedUrl = new URL(url, "http://localhost");
+          const range = parsedUrl.searchParams.get("range") || "today";
+          const fromParam = parsedUrl.searchParams.get("from") || "";
+          const toParam = parsedUrl.searchParams.get("to") || "";
+          const { fromDate, toDate } = resolveDateRange(range, fromParam, toParam);
+          const allRecords = pi.readAllCombinedUsage();
+          const usage = pi.getUsageByRange(allRecords, fromDate, toDate);
+          res.setHeader("Content-Type", "application/json");
+          return res.end(JSON.stringify(usage));
+        }
+
+        // Handle provider-filtered endpoints: /api/pi/{provider}-usage-range
+        const providerMatch = pathOnly.match(/^\/api\/pi\/(opencode|gemini|grok)-usage-range$/);
+        if (method === "GET" && providerMatch) {
+          const providerId = providerMatch[1]!;
+          const parsedUrl = new URL(url, "http://localhost");
+          const range = parsedUrl.searchParams.get("range") || "today";
+          const fromParam = parsedUrl.searchParams.get("from") || "";
+          const toParam = parsedUrl.searchParams.get("to") || "";
+          const { fromDate, toDate } = resolveDateRange(range, fromParam, toParam);
+          const allRecords = pi.filterByProvider(pi.readAllCombinedUsage(), providerId);
+          const usage = pi.getUsageByRange(allRecords, fromDate, toDate);
+          res.setHeader("Content-Type", "application/json");
+          return res.end(JSON.stringify(usage));
+        }
+
         const key = `${method} ${pathOnly}`;
         const handler = routes[key];
         if (handler) {

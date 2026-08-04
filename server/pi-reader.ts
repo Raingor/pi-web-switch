@@ -1,9 +1,22 @@
 import { readFileSync, readdirSync, existsSync, statSync, unlinkSync, writeFileSync, mkdirSync, renameSync } from "fs";
-import { homedir } from "os";
+import { homedir, platform } from "os";
 import { join, resolve, dirname, relative, sep } from "path";
 import { spawnSync } from "child_process";
 
 const PI_DIR = join(homedir(), ".pi", "agent");
+
+// ─── Cindy Pi-Agent Sessions ───────────────────────────
+// When Cindy (the AI assistant) delegates to a pi coding agent, sessions
+// are stored under its own data directory instead of ~/.pi/agent/sessions.
+
+function getCindySessionsDir(): string {
+  const home = homedir();
+  if (platform() === "darwin") {
+    return join(home, "Library", "Application Support", "Cindy", "pi-agent-home", "sessions");
+  }
+  // Linux / Windows fallback
+  return join(home, ".config", "cindy", "pi-agent-home", "sessions");
+}
 
 // ─── Config File Paths ───────────────────────────────────
 
@@ -183,6 +196,234 @@ export function readAllUsage(): UsageRecord[] {
   // Sort by date ascending
   allRecords.sort((a, b) => a.date.localeCompare(b.date));
   return allRecords;
+}
+
+// ─── Cindy Pi-Agent Usage ──────────────────────────────
+
+/**
+ * Read usage records from Cindy's pi-agent sessions.
+ * Cindy stores pi-agent sessions in its own data directory
+ * (~/Library/Application Support/Cindy/pi-agent-home/sessions/)
+ * rather than ~/.pi/agent/sessions/. The JSONL format is identical,
+ * so we reuse the same parseSessionFile() function.
+ */
+export function readCindyUsage(): UsageRecord[] {
+  const allRecords: UsageRecord[] = [];
+  const cindyDir = getCindySessionsDir();
+
+  if (!existsSync(cindyDir)) return allRecords;
+
+  try {
+    // Cindy's sessions are flat (no subdirectory per project)
+    const files = readdirSync(cindyDir).filter((f) => f.endsWith(".jsonl"));
+    for (const file of files) {
+      const filePath = join(cindyDir, file);
+      if (!statSync(filePath).isFile()) continue;
+      const records = parseSessionFile(filePath);
+      allRecords.push(...records);
+    }
+  } catch {
+    // skip unreadable directory
+  }
+
+  // Sort by date ascending
+  allRecords.sort((a, b) => a.date.localeCompare(b.date));
+  return allRecords;
+}
+
+// ─── Claude Usage (from Cindy SQLite) ──────────────────
+
+/**
+ * Find all Cindy SQLite database files that may contain usage data.
+ * Cindy stores session/usage data in cindy-cms*.db files under its
+ * application support directory.
+ */
+function getCindyDbPaths(): string[] {
+  const home = homedir();
+  let cindyAppDir: string;
+  if (platform() === "darwin") {
+    cindyAppDir = join(home, "Library", "Application Support", "Cindy");
+  } else if (platform() === "win32") {
+    cindyAppDir = join(process.env.APPDATA ?? join(home, "AppData", "Roaming"), "Cindy");
+  } else {
+    cindyAppDir = join(home, ".config", "Cindy");
+  }
+
+  if (!existsSync(cindyAppDir)) return [];
+
+  try {
+    return readdirSync(cindyAppDir)
+      .filter((f) => f.startsWith("cindy-cms") && f.endsWith(".db"))
+      .map((f) => join(cindyAppDir, f));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Read Claude usage records from Cindy's daily_model_usage table.
+ * Cindy tracks every agent_kind (claude-code, pi, codex) in the same
+ * table; we filter to agent_kind = 'claude-code' for Claude stats.
+ */
+export function readClaudeUsage(): UsageRecord[] {
+  const allRecords: UsageRecord[] = [];
+  const dbPaths = getCindyDbPaths();
+  if (dbPaths.length === 0) return allRecords;
+
+  for (const dbPath of dbPaths) {
+    try {
+      const query = "SELECT day, model, cost_usd, input_tokens, output_tokens, cache_read_tokens, cache_create_tokens FROM daily_model_usage WHERE agent_kind = 'claude-code' ORDER BY day";
+      const result = spawnSync("sqlite3", [dbPath, "-json", query], {
+        encoding: "utf8",
+        timeout: 10000,
+      });
+
+      if (result.status !== 0) continue;
+      const output = result.stdout?.trim();
+      if (!output) continue;
+
+      const rows = JSON.parse(output) as Array<{
+        day: string;
+        model: string;
+        cost_usd: number;
+        input_tokens: number;
+        output_tokens: number;
+        cache_read_tokens: number;
+        cache_create_tokens: number;
+      }>;
+
+      for (const row of rows) {
+        allRecords.push({
+          date: row.day,
+          providerId: "claude",
+          modelId: row.model,
+          inputTokens: row.input_tokens ?? 0,
+          outputTokens: row.output_tokens ?? 0,
+          cacheReadTokens: row.cache_read_tokens ?? 0,
+          cacheWriteTokens: row.cache_create_tokens ?? 0,
+          requests: 1,
+          cost: row.cost_usd ?? 0,
+        });
+      }
+    } catch {
+      // skip this db
+    }
+  }
+
+  // Sort by date ascending
+  allRecords.sort((a, b) => a.date.localeCompare(b.date));
+  return allRecords;
+}
+
+/**
+ * Read Codex usage records from Cindy's daily_model_usage table.
+ * Filters to agent_kind = 'codex'.
+ */
+export function readCodexUsage(): UsageRecord[] {
+  const allRecords: UsageRecord[] = [];
+  const dbPaths = getCindyDbPaths();
+  if (dbPaths.length === 0) return allRecords;
+
+  for (const dbPath of dbPaths) {
+    try {
+      const query = "SELECT day, model, cost_usd, input_tokens, output_tokens, cache_read_tokens, cache_create_tokens FROM daily_model_usage WHERE agent_kind = 'codex' ORDER BY day";
+      const result = spawnSync("sqlite3", [dbPath, "-json", query], {
+        encoding: "utf8",
+        timeout: 10000,
+      });
+
+      if (result.status !== 0) continue;
+      const output = result.stdout?.trim();
+      if (!output) continue;
+
+      const rows = JSON.parse(output) as Array<{
+        day: string;
+        model: string;
+        cost_usd: number;
+        input_tokens: number;
+        output_tokens: number;
+        cache_read_tokens: number;
+        cache_create_tokens: number;
+      }>;
+
+      for (const row of rows) {
+        allRecords.push({
+          date: row.day,
+          providerId: "codex",
+          modelId: row.model,
+          inputTokens: row.input_tokens ?? 0,
+          outputTokens: row.output_tokens ?? 0,
+          cacheReadTokens: row.cache_read_tokens ?? 0,
+          cacheWriteTokens: row.cache_create_tokens ?? 0,
+          requests: 1,
+          cost: row.cost_usd ?? 0,
+        });
+      }
+    } catch {
+      // skip this db
+    }
+  }
+
+  allRecords.sort((a, b) => a.date.localeCompare(b.date));
+  return allRecords;
+}
+
+// ─── Combined All Sources ──────────────────────────────
+
+/**
+ * Combine usage from all sources: local pi, Cindy pi-agent, Claude, Codex.
+ * Used for the "All" tab that shows everything in one view.
+ */
+export function readAllCombinedUsage(): UsageRecord[] {
+  const all: UsageRecord[] = [
+    ...readAllUsage(),
+    ...readCindyUsage(),
+    ...readClaudeUsage(),
+    ...readCodexUsage(),
+  ];
+  all.sort((a, b) => a.date.localeCompare(b.date));
+  return all;
+}
+
+// ─── Provider-Based Filtering ──────────────────────────
+
+/**
+ * Provider filter patterns. Each provider has a list of regex patterns
+ * that match against providerId and modelId to classify records.
+ */
+export interface ProviderFilter {
+  id: string;
+  label: string;
+  patterns: RegExp[];
+}
+
+export const PROVIDER_FILTERS: ProviderFilter[] = [
+  {
+    id: "opencode",
+    label: "OpenCode",
+    patterns: [/^opencode$/, /^opencode-go$/i],
+  },
+  {
+    id: "gemini",
+    label: "Gemini",
+    patterns: [/^google$/, /gemini/i],
+  },
+  {
+    id: "grok",
+    label: "Grok",
+    patterns: [/^xai$/, /grok/i],
+  },
+];
+
+/**
+ * Filter usage records by provider. Matches against both providerId and modelId.
+ */
+export function filterByProvider(records: UsageRecord[], providerId: string): UsageRecord[] {
+  const filter = PROVIDER_FILTERS.find((f) => f.id === providerId);
+  if (!filter) return records;
+  return records.filter((r) =>
+    filter.patterns.some((p) => p.test(r.providerId) || p.test(r.modelId))
+  );
 }
 
 // ─── Aggregation Helpers ────────────────────────────────

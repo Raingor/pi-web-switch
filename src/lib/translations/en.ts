@@ -102,6 +102,14 @@ const en: Record<string, string> = {
 
   // Dashboard
   "dashboard.title": "Usage Statistics",
+  "dashboard.source_pi": "Pi",
+  "dashboard.source_cindy_pi": "Cindy-Pi",
+  "dashboard.source_claude": "Claude",
+  "dashboard.source_codex": "Codex",
+  "dashboard.source_all": "All",
+  "dashboard.source_opencode": "OpenCode",
+  "dashboard.source_gemini": "Gemini",
+  "dashboard.source_grok": "Grok",
   "dashboard.requests_count": "{0} requests · {1} total cost",
   "dashboard.range.today": "Today",
   "dashboard.range.7d": "7 Days",
