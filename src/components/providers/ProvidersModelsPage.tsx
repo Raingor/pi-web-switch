@@ -115,11 +115,11 @@ interface ParsedImport {
 }
 
 const IMPORT_LABEL_RE =
-  /(?<![\w/.\-])(apikey|api_key|api-key|key|token|secret|密钥|金鑰|baseurl|base_url|base-url|url|endpoint|地址|接口|provider|name|名称|名稱|供应商|供應商|model_ids?|modelids?|models?|模型)\s*[:：](?!\/\/)/gi;
+  /(?<![\w/.\-])(apikey|api_key|api-key|keys?|token|secret|密钥|金鑰|baseurl|base_url|base-url|url|endpoint|地址|接口|provider|name|名称|名稱|供应商|供應商|model_ids?|modelids?|models?|模型)\s*[:：](?!\/\/)/gi;
 
 function importField(label: string): "name" | "baseUrl" | "apiKey" | "models" {
   const l = label.toLowerCase();
-  if (/^(apikey|api_key|api-key|key|token|secret|密钥|金鑰)$/.test(l)) return "apiKey";
+  if (/^(apikey|api_key|api-key|keys?|token|secret|密钥|金鑰)$/.test(l)) return "apiKey";
   if (/^(baseurl|base_url|base-url|url|endpoint|地址|接口)$/.test(l)) return "baseUrl";
   if (/^(provider|name|名称|名稱|供应商|供應商)$/.test(l)) return "name";
   return "models";
