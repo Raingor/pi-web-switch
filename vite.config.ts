@@ -3,7 +3,6 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 import type { Connect } from "vite";
-import { chatApiPlugin } from "./server/chat-api-plugin";
 
 // ─── Pi Config API Plugin ───────────────────────────────
 
@@ -507,7 +506,6 @@ export default defineConfig({
     react(),
     tailwindcss(),
     piApiPlugin(),
-    chatApiPlugin(),
   ],
   resolve: {
     alias: {
