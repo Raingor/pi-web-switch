@@ -197,7 +197,15 @@ function parseSessionFile(filePath: string): UsageRecord[] {
   return records;
 }
 
+// Scanned session usage is cached briefly: the same 150MB+ of JSONL gets
+// re-read on every dashboard request otherwise, which stalls the page.
+const USAGE_CACHE_TTL_MS = 30_000;
+let usageCache: { records: UsageRecord[]; at: number } | null = null;
+
 export function readAllUsage(): UsageRecord[] {
+  if (usageCache && Date.now() - usageCache.at < USAGE_CACHE_TTL_MS) {
+    return usageCache.records;
+  }
   const allRecords: UsageRecord[] = [];
   const dirs = getSessionDirs();
 
@@ -216,6 +224,7 @@ export function readAllUsage(): UsageRecord[] {
 
   // Sort by date ascending
   allRecords.sort((a, b) => a.date.localeCompare(b.date));
+  usageCache = { records: allRecords, at: Date.now() };
   return allRecords;
 }
 

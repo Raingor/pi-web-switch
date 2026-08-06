@@ -19,6 +19,16 @@ function piApiPlugin(): Plugin {
       pi = require("./server/pi-reader");
       builtins = require("./src/data/builtin-providers");
 
+      // Warm the usage cache in the background so the dashboard's first
+      // request doesn't block on scanning ~150MB of session JSONL.
+      setTimeout(() => {
+        try {
+          pi.readAllUsage();
+        } catch {
+          /* ignore warm-up failure */
+        }
+      }, 0);
+
       const routes: Record<string, (req: Connect.IncomingMessage, res: any) => void> = {
         "GET /api/pi/settings"(_, res) {
           const data = pi.readSettings();
