@@ -124,6 +124,29 @@ function getSessionDirs(): string[] {
     .filter((dir) => statSync(dir).isDirectory());
 }
 
+// Usage stats are bucketed in China time (UTC+8) regardless of the machine's
+// system timezone, so daily totals stay consistent for a Beijing-based user.
+const CN_TZ = "Asia/Shanghai";
+
+function cnDateParts(ts: string | number): { date: string; hour: number } {
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return { date: "unknown", hour: 0 };
+  const date = new Intl.DateTimeFormat("en-CA", {
+    timeZone: CN_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d); // "2026-08-06"
+  const hour = Number(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: CN_TZ,
+      hour: "2-digit",
+      hour12: false,
+    }).format(d)
+  );
+  return { date, hour: hour === 24 ? 0 : hour };
+}
+
 function parseSessionFile(filePath: string): UsageRecord[] {
   const records: UsageRecord[] = [];
   try {
@@ -149,9 +172,7 @@ function parseSessionFile(filePath: string): UsageRecord[] {
           if (!usage || !usage.input) continue;
 
           const timestamp = obj.timestamp || obj.message.timestamp;
-          const d = new Date(timestamp);
-          const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-          const hour = d.getHours();
+          const { date, hour } = cnDateParts(timestamp);
 
           records.push({
             date,

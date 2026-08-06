@@ -283,8 +283,14 @@ function piApiPlugin(): Plugin {
           const toParam = parsedUrl.searchParams.get("to") || "";
 
           const now = new Date();
+          // Date buckets follow China time (UTC+8) regardless of system timezone
           const localDateStr = (dt: Date) =>
-            `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+            new Intl.DateTimeFormat("en-CA", {
+              timeZone: "Asia/Shanghai",
+              year: "numeric",
+              month: "2-digit",
+              day: "2-digit",
+            }).format(dt);
           let fromDate: string;
           let toDate = localDateStr(now);
 
@@ -315,8 +321,14 @@ function piApiPlugin(): Plugin {
           const toParam = parsedUrl.searchParams.get("to") || "";
 
           const now = new Date();
+          // Date buckets follow China time (UTC+8) regardless of system timezone
           const localDateStr = (dt: Date) =>
-            `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+            new Intl.DateTimeFormat("en-CA", {
+              timeZone: "Asia/Shanghai",
+              year: "numeric",
+              month: "2-digit",
+              day: "2-digit",
+            }).format(dt);
           let fromDate: string;
           let toDate = localDateStr(now);
 
@@ -347,8 +359,14 @@ function piApiPlugin(): Plugin {
           const toParam = parsedUrl.searchParams.get("to") || "";
 
           const now = new Date();
+          // Date buckets follow China time (UTC+8) regardless of system timezone
           const localDateStr = (dt: Date) =>
-            `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+            new Intl.DateTimeFormat("en-CA", {
+              timeZone: "Asia/Shanghai",
+              year: "numeric",
+              month: "2-digit",
+              day: "2-digit",
+            }).format(dt);
           let fromDate: string;
           let toDate = localDateStr(now);
 
@@ -379,8 +397,14 @@ function piApiPlugin(): Plugin {
           const toParam = parsedUrl.searchParams.get("to") || "";
 
           const now = new Date();
+          // Date buckets follow China time (UTC+8) regardless of system timezone
           const localDateStr = (dt: Date) =>
-            `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+            new Intl.DateTimeFormat("en-CA", {
+              timeZone: "Asia/Shanghai",
+              year: "numeric",
+              month: "2-digit",
+              day: "2-digit",
+            }).format(dt);
           let fromDate: string;
           let toDate = localDateStr(now);
 
@@ -406,8 +430,14 @@ function piApiPlugin(): Plugin {
         // Helper: resolve date range params
         const resolveDateRange = (range: string, fromParam: string, toParam: string) => {
           const now = new Date();
+          // Date buckets follow China time (UTC+8) regardless of system timezone
           const localDateStr = (dt: Date) =>
-            `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+            new Intl.DateTimeFormat("en-CA", {
+              timeZone: "Asia/Shanghai",
+              year: "numeric",
+              month: "2-digit",
+              day: "2-digit",
+            }).format(dt);
           let fromDate: string;
           let toDate = localDateStr(now);
           if (range === "today") fromDate = toDate;

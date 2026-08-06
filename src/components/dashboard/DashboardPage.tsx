@@ -116,21 +116,35 @@ function formatCostShort(n: number): string {
 }
 
 function formatDateShort(dateStr: string): string {
-  const d = new Date(dateStr + "T00:00:00");
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  // Parse as a China-time (UTC+8) calendar date and format in that timezone.
+  const [y, m, dNum] = dateStr.split("-").map(Number);
+  if (!y || !m || !dNum) return dateStr;
+  const d = new Date(Date.UTC(y, m - 1, dNum));
+  return d.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    timeZone: "Asia/Shanghai",
+  });
 }
 
-function localDateStr(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+function cnTodayStr(): string {
+  // "YYYY-MM-DD" in China time (UTC+8), independent of system timezone.
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
 }
 
 /** Previous period of equal length, for period-over-period trends. */
 function getPrevRange(range: RangeKey): { from: string; to: string } | null {
-  const now = new Date();
   const shift = (days: number) => {
-    const d = new Date(now);
-    d.setDate(d.getDate() - days);
-    return localDateStr(d);
+    // Start from China-time "today" and shift by whole days using UTC math.
+    const [y, m, dNum] = cnTodayStr().split("-").map(Number);
+    const t = Date.UTC(y ?? 0, (m ?? 1) - 1, dNum ?? 1) - days * 86400000;
+    const d = new Date(t);
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
   };
   if (range === "today") return { from: shift(1), to: shift(1) };
   if (range === "7d") return { from: shift(13), to: shift(7) };
@@ -342,7 +356,7 @@ export function DashboardPage() {
     return () => clearInterval(id);
   }, [autoRefresh, refreshInterval, fetchData]);
 
-  const today = new Date().toISOString().split("T")[0];
+  const today = cnTodayStr();
 
   // Chart data: hourly for "today", daily for 7d/30d/custom
   const rawBreakdown = range === "today" ? data?.hourlyBreakdown : data?.dailyBreakdown;
