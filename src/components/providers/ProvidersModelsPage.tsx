@@ -1742,6 +1742,23 @@ function ModelForm({ initial, onSubmit, onCancel }: ModelFormProps) {
             onChange={(e) => setContextWindow(parseInt(e.target.value) || DEFAULT_CONTEXT_WINDOW)}
             className="mt-1 w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white"
           />
+          <div className="mt-1 flex flex-wrap gap-1">
+            {[32_768, 128_000, 200_000, 1_000_000].map((v) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => setContextWindow(v)}
+                className={cn(
+                  "rounded border px-1.5 py-0.5 text-[10px] font-mono transition-colors",
+                  (form.contextWindow ?? DEFAULT_CONTEXT_WINDOW) === v
+                    ? "border-blue-500 bg-blue-500/20 text-blue-300"
+                    : "border-gray-700 bg-gray-800 text-gray-400 hover:border-gray-500 hover:text-gray-200"
+                )}
+              >
+                {formatTokens(v)}
+              </button>
+            ))}
+          </div>
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-400">{t("models.max_tokens")}</label>
@@ -1751,6 +1768,23 @@ function ModelForm({ initial, onSubmit, onCancel }: ModelFormProps) {
             onChange={(e) => setMaxTokens(parseInt(e.target.value) || DEFAULT_MAX_TOKENS)}
             className="mt-1 w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white"
           />
+          <div className="mt-1 flex flex-wrap gap-1">
+            {[4096, 8192, 16_384, 32_768, 65_536, 131_072].map((v) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => setMaxTokens(v)}
+                className={cn(
+                  "rounded border px-1.5 py-0.5 text-[10px] font-mono transition-colors",
+                  (form.maxTokens ?? DEFAULT_MAX_TOKENS) === v
+                    ? "border-blue-500 bg-blue-500/20 text-blue-300"
+                    : "border-gray-700 bg-gray-800 text-gray-400 hover:border-gray-500 hover:text-gray-200"
+                )}
+              >
+                {formatTokens(v)}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
