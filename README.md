@@ -237,6 +237,9 @@ The Vite dev server exposes these endpoints at `/api/pi/*`:
 | GET | `/api/pi/builtin-providers` | List hardcoded built-in providers |
 | GET | `/api/pi/usage` | Aggregated token/cost/request data from sessions |
 | GET | `/api/pi/usage-range` | Date-range filtered usage with hourly/daily breakdown |
+| GET | `/api/pi/copilot-usage-range` | GitHub Copilot usage (premium requests / AI credits) per day per model |
+| GET | `/api/pi/copilot-config` | Read Copilot GitHub config (username, token) |
+| POST | `/api/pi/copilot-config` | Write Copilot GitHub config |
 | GET | `/api/pi/sessions` | Session list grouped by project |
 | DELETE | `/api/pi/session?path=` | Delete a session file (path must be under sessions/) |
 | GET | `/api/pi/memory` | Read MEMORY.md, USER.md, failures.md |

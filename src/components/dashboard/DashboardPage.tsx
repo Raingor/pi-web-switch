@@ -67,9 +67,10 @@ interface UsageRangeData {
     totalCost: number;
     totalRequests: number;
   }[];
+  notice?: "no-config" | "api-error";
 }
 
-type SourceKey = "all" | "pi" | "cindy-pi" | "claude" | "codex" | "opencode" | "gemini" | "grok" | "atomcode";
+type SourceKey = "all" | "pi" | "cindy-pi" | "claude" | "codex" | "opencode" | "gemini" | "grok" | "atomcode" | "copilot";
 type RangeKey = "today" | "7d" | "30d" | "custom";
 type TabKey = "log" | "provider" | "model";
 type SortDir = "asc" | "desc";
@@ -315,6 +316,7 @@ export function DashboardPage() {
     else if (source === "gemini") baseUrl = "/api/pi/gemini-usage-range";
     else if (source === "grok") baseUrl = "/api/pi/grok-usage-range";
     else if (source === "atomcode") baseUrl = "/api/pi/atomcode-usage-range";
+    else if (source === "copilot") baseUrl = "/api/pi/copilot-usage-range";
     let url = `${baseUrl}?range=${range}`;
     if (range === "custom" && customFrom) {
       url += `&from=${customFrom}&to=${customTo || customFrom}`;
@@ -424,6 +426,7 @@ export function DashboardPage() {
           { key: "gemini" as SourceKey, label: "dashboard.source_gemini", icon: "✨" },
           { key: "grok" as SourceKey, label: "dashboard.source_grok", icon: "🌀" },
           { key: "atomcode" as SourceKey, label: "dashboard.source_atomcode", icon: "⚛️" },
+          { key: "copilot" as SourceKey, label: "dashboard.source_copilot", icon: "🐙" },
         ]).map((s) => (
           <button
             key={s.key}
@@ -448,6 +451,18 @@ export function DashboardPage() {
             {data ? t("dashboard.requests_count", String(data.requestLog.length), formatCost(data.totalCost, currency)) : ""}
             {lastUpdated && <span className="ml-2">· {t("dashboard.last_updated", lastUpdated)}</span>}
           </p>
+          {data?.notice && (
+            <p
+              className="mt-1 inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs"
+              style={{
+                borderColor: data.notice === "no-config" ? "#f59e0b" : "#ef4444",
+                color: data.notice === "no-config" ? "#f59e0b" : "#f87171",
+                backgroundColor: data.notice === "no-config" ? "#f59e0b11" : "#ef444411",
+              }}
+            >
+              {data.notice === "no-config" ? t("dashboard.copilot_not_configured") : t("dashboard.copilot_api_error")}
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <button

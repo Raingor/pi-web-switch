@@ -27,6 +27,7 @@ import {
   CloudDownload,
   RefreshCw,
   ZoomIn,
+  KeyRound,
 } from "lucide-react";
 
 type SettingsTab = "appearance" | "models" | "advanced";
@@ -116,6 +117,37 @@ export function SettingsPage() {
   const [updateError, setUpdateError] = useState(false);
   const [applying, setApplying] = useState(false);
   const [applyMessage, setApplyMessage] = useState<{ ok: number; failNames: string[] } | null>(null);
+  // GitHub Copilot usage API config (username + classic PAT).
+  const [copilotCfg, setCopilotCfg] = useState<{ username: string; token: string }>({ username: "", token: "" });
+  const [copilotSaving, setCopilotSaving] = useState(false);
+  const [copilotMsg, setCopilotMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  useEffect(() => {
+    fetch("/api/pi/copilot-config")
+      .then((r) => r.json())
+      .then((cfg: { username?: string; token?: string }) =>
+        setCopilotCfg({ username: cfg.username ?? "", token: cfg.token ?? "" })
+      )
+      .catch(() => {});
+  }, []);
+
+  const handleSaveCopilot = async () => {
+    setCopilotSaving(true);
+    setCopilotMsg(null);
+    try {
+      const res = await fetch("/api/pi/copilot-config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(copilotCfg),
+      });
+      const { success } = (await res.json()) as { success: boolean };
+      setCopilotMsg({ ok: !!success, text: success ? t("settings.copilot_saved") : t("settings.copilot_save_failed") });
+    } catch {
+      setCopilotMsg({ ok: false, text: t("settings.copilot_save_failed") });
+    } finally {
+      setCopilotSaving(false);
+    }
+  };
 
   const handleCheckUpdates = async () => {
     setCheckingUpdates(true);
@@ -561,6 +593,46 @@ export function SettingsPage() {
                 </div>
               );
             })()}
+          </Card>
+
+          <Card icon={KeyRound} title={t("settings.copilot_title")} desc={t("settings.copilot_desc")}>
+            <div className="max-w-md space-y-3">
+              <div>
+                <label className="mb-1 block text-xs text-gray-500">{t("settings.copilot_username")}</label>
+                <input
+                  type="text"
+                  value={copilotCfg.username}
+                  onChange={(e) => setCopilotCfg({ ...copilotCfg, username: e.target.value })}
+                  placeholder="octocat"
+                  className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-white placeholder-gray-600"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs text-gray-500">{t("settings.copilot_token")}</label>
+                <input
+                  type="password"
+                  value={copilotCfg.token}
+                  onChange={(e) => setCopilotCfg({ ...copilotCfg, token: e.target.value })}
+                  placeholder="ghp_…"
+                  className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-white placeholder-gray-600"
+                />
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={handleSaveCopilot}
+                  disabled={copilotSaving}
+                  className="flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-800 px-4 py-1.5 text-sm text-gray-300 hover:bg-gray-700 disabled:opacity-60"
+                >
+                  {copilotSaving ? t("settings.copilot_saving") : t("settings.copilot_save")}
+                </button>
+                {copilotMsg && (
+                  <span className={cn("text-xs", copilotMsg.ok ? "text-emerald-400" : "text-red-400")}>
+                    {copilotMsg.text}
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] leading-relaxed text-gray-500">{t("settings.copilot_token_hint")}</p>
+            </div>
           </Card>
 
           <Card icon={Package} title={t("settings.packages")}>

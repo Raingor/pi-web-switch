@@ -411,6 +411,7 @@ export function readAllCombinedUsage(): UsageRecord[] {
     ...readClaudeUsage(),
     ...readCodexUsage(),
     ...readAtomcodeUsage(),
+    ...readCopilotUsage(),
   ];
   all.sort((a, b) => a.date.localeCompare(b.date));
   return all;
@@ -492,6 +493,261 @@ function sniffAtomcodeModel(snapshotPath: string): string {
   }
 }
 
+// ─── GitHub Copilot Usage (REST API) ──────────────────
+//
+// GitHub tracks Copilot consumption in *premium requests* (and AI credits on
+// the newer billing platform) rather than tokens. We pull the per-day,
+// per-model report from the official billing usage endpoints and map it onto
+// UsageRecord (requests = premium requests, cost = billed amount in USD).
+//
+//   GET /users/{username}/settings/billing/premium_request/usage?year&month&day
+//   GET /users/{username}/settings/billing/ai_credit/usage?year&month&day
+//
+// Requires a classic PAT for the account and access to the enhanced billing
+// platform. Config (username + token) lives in ~/.pi/agent/copilot.json and
+// is edited from the dashboard Settings page.
+
+const COPILOT_CONFIG_PATH = join(PI_DIR, "copilot.json");
+const GITHUB_API_BASE = "https://api.github.com";
+const GITHUB_API_VERSION = "2022-11-28";
+
+interface CopilotConfig {
+  username?: string;
+  token?: string;
+}
+
+export function readCopilotConfig(): CopilotConfig {
+  try {
+    if (!existsSync(COPILOT_CONFIG_PATH)) return {};
+    const raw = readFileSync(COPILOT_CONFIG_PATH, "utf-8");
+    const parsed = JSON.parse(raw) as CopilotConfig;
+    return {
+      username: typeof parsed.username === "string" ? parsed.username : undefined,
+      token: typeof parsed.token === "string" ? parsed.token : undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
+export function writeCopilotConfig(cfg: CopilotConfig): boolean {
+  try {
+    const clean: CopilotConfig = {
+      username: cfg.username?.trim() || undefined,
+      token: cfg.token?.trim() || undefined,
+    };
+    writeFileSync(COPILOT_CONFIG_PATH, JSON.stringify(clean, null, 2), "utf-8");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Response shapes from the billing usage endpoints (undocumented OpenAPI schema). */
+interface CopilotUsageItem {
+  product?: string;
+  sku?: string;
+  model?: string;
+  unitType?: string;
+  pricePerUnit?: number;
+  grossQuantity?: number;
+  grossAmount?: number;
+  discountQuantity?: number;
+  discountAmount?: number;
+  netQuantity?: number;
+  netAmount?: number;
+}
+
+interface CopilotUsageReport {
+  timePeriod?: { year?: number; month?: number; day?: number };
+  user?: string;
+  product?: string;
+  model?: string;
+  usageItems?: CopilotUsageItem[];
+}
+
+async function fetchCopilotDay(
+  cfg: CopilotConfig,
+  year: number,
+  month: number,
+  day: number,
+  endpoint: "premium_request" | "ai_credit"
+): Promise<CopilotUsageItem[]> {
+  const url = `${GITHUB_API_BASE}/users/${encodeURIComponent(cfg.username!)}/settings/billing/${endpoint}/usage?year=${year}&month=${month}&day=${day}`;
+  const res = await fetchExternal(url, {
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${cfg.token}`,
+      "X-GitHub-Api-Version": GITHUB_API_VERSION,
+      "User-Agent": "pi-web-switch",
+    },
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!res.ok) {
+    // 403/404 → wrong token, wrong username, or account not on the enhanced
+    // billing platform; 4xx/5xx → transient failure. Both are surfaced to the
+    // dashboard as a fetch error instead of silently showing zero usage.
+    throw new Error(`GitHub API ${res.status}`);
+  }
+  const data = (await res.json()) as CopilotUsageReport | CopilotUsageReport[];
+  const reports = Array.isArray(data) ? data : [data];
+  const items: CopilotUsageItem[] = [];
+  for (const report of reports) {
+    if (report.usageItems) items.push(...report.usageItems);
+  }
+  return items;
+}
+
+/**
+ * Fetch premium-request usage for one day (UTC calendar date). Falls back to
+ * the AI-credit endpoint when the premium-request report is empty (accounts
+ * on the newer AI-credit billing platform). Returns UsageRecords with
+ * providerId "copilot" — one per model with non-zero usage. `ok` is false
+ * only when every endpoint failed (network/auth error), not for empty usage.
+ */
+async function fetchCopilotDayRecords(
+  cfg: CopilotConfig,
+  dateStr: string
+): Promise<{ records: UsageRecord[]; ok: boolean }> {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  if (!y || !m || !d) return { records: [], ok: true };
+
+  let items: CopilotUsageItem[] | null = null;
+  try {
+    items = await fetchCopilotDay(cfg, y, m, d, "premium_request");
+  } catch {
+    items = null;
+  }
+  if (!items || items.length === 0) {
+    try {
+      items = await fetchCopilotDay(cfg, y, m, d, "ai_credit");
+    } catch {
+      if (!items) items = null;
+    }
+  }
+
+  const records: UsageRecord[] = [];
+  for (const item of items ?? []) {
+    const requests = Math.round(item.netQuantity ?? item.grossQuantity ?? 0);
+    const cost = item.netAmount ?? item.grossAmount ?? 0;
+    if (requests <= 0 && cost <= 0) continue;
+    records.push({
+      date: dateStr,
+      providerId: "copilot",
+      modelId: item.model || item.sku || "copilot",
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      requests,
+      cost,
+    });
+  }
+  return { records, ok: items !== null };
+}
+
+// Per-day cache so the dashboard's auto-refresh doesn't re-hit the API every
+// few seconds. Range fetches fill this cache too, so the "All" view and the
+// dedicated Copilot tab share the same data without duplicate calls.
+const COPILOT_DAY_CACHE_TTL_MS = 10 * 60_000;
+const copilotDayCache = new Map<string, { records: UsageRecord[]; at: number }>();
+
+function copilotDayCacheGet(dateStr: string): UsageRecord[] | null {
+  const hit = copilotDayCache.get(dateStr);
+  if (hit && Date.now() - hit.at < COPILOT_DAY_CACHE_TTL_MS) return hit.records;
+  return null;
+}
+
+/**
+ * Fetch Copilot usage records for a date range (YYYY-MM-DD strings, inclusive,
+ * China calendar dates). Returns an empty list when Copilot isn't configured.
+ * `configured` is false when no token/username is set; `errors` counts days
+ * whose API call failed (network error, bad token, wrong billing platform).
+ */
+export interface CopilotFetchResult {
+  records: UsageRecord[];
+  configured: boolean;
+  errors: number;
+}
+
+export async function fetchCopilotUsageForRange(
+  fromDate: string,
+  toDate: string
+): Promise<CopilotFetchResult> {
+  const cfg = readCopilotConfig();
+  if (!cfg.username || !cfg.token) return { records: [], configured: false, errors: 0 };
+
+  const out: UsageRecord[] = [];
+  let errors = 0;
+  // Iterate calendar days (UTC math on the YYYY-MM-DD strings).
+  let cursor = fromDate;
+  let guard = 0;
+  while (cursor <= toDate && guard++ < 370) {
+    const cached = copilotDayCacheGet(cursor);
+    if (cached) {
+      out.push(...cached);
+    } else {
+      try {
+        const { records, ok } = await fetchCopilotDayRecords(cfg, cursor);
+        if (!ok) errors++;
+        copilotDayCache.set(cursor, { records, at: Date.now() });
+        out.push(...records);
+      } catch {
+        errors++;
+      }
+    }
+    const [y, m, d] = cursor.split("-").map(Number);
+    const next = new Date(Date.UTC(y ?? 0, (m ?? 1) - 1, (d ?? 1) + 1));
+    cursor = `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, "0")}-${String(next.getUTCDate()).padStart(2, "0")}`;
+  }
+
+  out.sort((a, b) => a.date.localeCompare(b.date));
+  return { records: out, configured: true, errors };
+}
+
+// Background-refreshed 30-day cache for the "All" combined view: the range
+// endpoints fetch on demand, while the combined view stays cheap and sync.
+const COPILOT_ALL_TTL_MS = 5 * 60_000;
+let copilotAllCache: { records: UsageRecord[]; at: number } | null = null;
+let copilotAllFetching: Promise<void> | null = null;
+
+function cnDaysAgo(days: number): string {
+  const [y, m, d] = cnDateParts(Date.now() - days * 86400000).date.split("-").map(Number);
+  return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
+async function refreshCopilotAllCache(): Promise<void> {
+  try {
+    const { records } = await fetchCopilotUsageForRange(cnDaysAgo(30), cnDaysAgo(0));
+    copilotAllCache = { records, at: Date.now() };
+  } catch {
+    /* keep stale cache */
+  }
+}
+
+/**
+ * Synchronous accessor used by the combined view. Returns the cached 30-day
+ * Copilot records, kicking off a background refresh when stale. Never blocks
+ * the request on the GitHub API.
+ */
+export function readCopilotUsage(): UsageRecord[] {
+  if (copilotAllCache && Date.now() - copilotAllCache.at < COPILOT_ALL_TTL_MS) {
+    return copilotAllCache.records;
+  }
+  if (!copilotAllFetching) {
+    copilotAllFetching = refreshCopilotAllCache().finally(() => {
+      copilotAllFetching = null;
+    });
+  }
+  return copilotAllCache?.records ?? [];
+}
+
+/** Drop cached Copilot data — called after config changes so usage refetches. */
+export function clearCopilotCaches(): void {
+  copilotDayCache.clear();
+  copilotAllCache = null;
+}
+
 // ─── Provider-Based Filtering ──────────────────────────
 
 /**
@@ -505,6 +761,11 @@ export interface ProviderFilter {
 }
 
 export const PROVIDER_FILTERS: ProviderFilter[] = [
+  {
+    id: "copilot",
+    label: "Copilot",
+    patterns: [/^copilot$/i],
+  },
   {
     id: "atomcode",
     label: "AtomCode",

@@ -26,6 +26,11 @@ function piApiPlugin(): Plugin {
         } catch {
           /* ignore warm-up failure */
         }
+        try {
+          pi.readCopilotUsage();
+        } catch {
+          /* ignore warm-up failure */
+        }
       }, 0);
 
       const routes: Record<string, (req: Connect.IncomingMessage, res: any) => void> = {
@@ -124,6 +129,28 @@ function piApiPlugin(): Plugin {
         "GET /api/pi/trash"(_, res) {
           res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify(pi.listTrash()));
+        },
+        "GET /api/pi/copilot-config"(_, res) {
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify(pi.readCopilotConfig() ?? {}));
+        },
+        "POST /api/pi/copilot-config"(req, res) {
+          let body = "";
+          req.on("data", (chunk: string) => (body += chunk));
+          req.on("end", () => {
+            try {
+              const cfg = JSON.parse(body) as { username?: string; token?: string };
+              const ok = pi.writeCopilotConfig(cfg);
+              // Config changed → drop cached usage so the next view refetches.
+              pi.clearCopilotCaches();
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ success: ok }));
+            } catch {
+              res.statusCode = 400;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ success: false, error: "Invalid request body" }));
+            }
+          });
         },
         "POST /api/pi/session/trash"(req, res) {
           let body = "";
@@ -468,6 +495,39 @@ function piApiPlugin(): Plugin {
           const usage = pi.getUsageByRange(allRecords, fromDate, toDate);
           res.setHeader("Content-Type", "application/json");
           return res.end(JSON.stringify(usage));
+        }
+
+        // Handle GET /api/pi/copilot-usage-range?range=today|7d|30d|custom&from=...&to=...
+        // Unlike the local sources, Copilot data comes from the GitHub REST
+        // API, so this handler is async and may take a few seconds on a cold
+        // cache. `notice` carries a stable code for the dashboard to i18n:
+        //   no-config  → token/username not set (see Settings → Advanced)
+        //   api-error  → GitHub returned 4xx/5xx (bad token, wrong billing platform)
+        if (method === "GET" && pathOnly === "/api/pi/copilot-usage-range") {
+          const parsedUrl = new URL(url, "http://localhost");
+          const range = parsedUrl.searchParams.get("range") || "today";
+          const fromParam = parsedUrl.searchParams.get("from") || "";
+          const toParam = parsedUrl.searchParams.get("to") || "";
+          const { fromDate, toDate } = resolveDateRange(range, fromParam, toParam);
+
+          pi.fetchCopilotUsageForRange(fromDate, toDate)
+            .then(({ records, configured, errors }) => {
+              const usage = pi.getUsageByRange(records, fromDate, toDate);
+              const payload =
+                !configured
+                  ? { ...usage, notice: "no-config" }
+                  : errors > 0
+                    ? { ...usage, notice: "api-error" }
+                    : usage;
+              res.setHeader("Content-Type", "application/json");
+              return res.end(JSON.stringify(payload));
+            })
+            .catch(() => {
+              res.statusCode = 500;
+              res.setHeader("Content-Type", "application/json");
+              return res.end(JSON.stringify({ error: "Copilot fetch failed" }));
+            });
+          return;
         }
 
         // Handle provider-filtered endpoints: /api/pi/{provider}-usage-range
