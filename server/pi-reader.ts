@@ -410,9 +410,86 @@ export function readAllCombinedUsage(): UsageRecord[] {
     ...readCindyUsage(),
     ...readClaudeUsage(),
     ...readCodexUsage(),
+    ...readAtomcodeUsage(),
   ];
   all.sort((a, b) => a.date.localeCompare(b.date));
   return all;
+}
+
+// ─── AtomCode Usage ────────────────────────────────────
+
+const ATOMCODE_DIR = join(homedir(), ".atomcode");
+
+/**
+ * Read usage records from AtomCode sessions under ~/.atomcode/sessions.
+ * Each JSONL line carries an optional usage object:
+ *   { prompt, completion, cached } — mapped to input/output/cacheRead.
+ * Model id is sniffed from the snapshot system prompt (e.g.
+ * "running the deepseek-v4-flash model"), defaulting to "atomcode".
+ */
+export function readAtomcodeUsage(): UsageRecord[] {
+  const allRecords: UsageRecord[] = [];
+  const sessionsDir = join(ATOMCODE_DIR, "sessions");
+  if (!existsSync(sessionsDir)) return allRecords;
+
+  let sessionDirs: string[] = [];
+  try {
+    sessionDirs = readdirSync(sessionsDir)
+      .map((name) => join(sessionsDir, name))
+      .filter((dir) => statSync(dir).isDirectory());
+  } catch {
+    return allRecords;
+  }
+
+  for (const dir of sessionDirs) {
+    const files = readdirSync(dir).filter((f) => f.endsWith(".jsonl"));
+    for (const file of files) {
+      const filePath = join(dir, file);
+      try {
+        const raw = readFileSync(filePath, "utf-8");
+        const model = sniffAtomcodeModel(join(dir, file.replace(/\.jsonl$/, ".snapshot")));
+        for (const line of raw.split("\n").filter((l) => l.trim())) {
+          try {
+            const obj = JSON.parse(line);
+            const usage = obj.usage;
+            if (!usage || typeof usage.prompt !== "number") continue;
+            const { date, hour } = cnDateParts(obj.iso ?? obj.ts ?? "");
+            allRecords.push({
+              date,
+              hour,
+              providerId: "atomcode",
+              modelId: model,
+              inputTokens: usage.prompt ?? 0,
+              outputTokens: usage.completion ?? 0,
+              cacheReadTokens: usage.cached ?? 0,
+              cacheWriteTokens: 0,
+              requests: 1,
+              cost: 0,
+            });
+          } catch {
+            // skip malformed lines
+          }
+        }
+      } catch {
+        // skip unreadable files
+      }
+    }
+  }
+
+  allRecords.sort((a, b) => a.date.localeCompare(b.date));
+  return allRecords;
+}
+
+/** Extract the model name from an AtomCode snapshot system prompt. */
+function sniffAtomcodeModel(snapshotPath: string): string {
+  try {
+    if (!existsSync(snapshotPath)) return "atomcode";
+    const txt = readFileSync(snapshotPath, "utf-8");
+    const m = txt.match(/running the ([\w.-]+) model/i);
+    return m?.[1] ?? "atomcode";
+  } catch {
+    return "atomcode";
+  }
 }
 
 // ─── Provider-Based Filtering ──────────────────────────
@@ -428,6 +505,11 @@ export interface ProviderFilter {
 }
 
 export const PROVIDER_FILTERS: ProviderFilter[] = [
+  {
+    id: "atomcode",
+    label: "AtomCode",
+    patterns: [/^atomcode$/i],
+  },
   {
     id: "opencode",
     label: "OpenCode",
@@ -591,6 +673,8 @@ export function getUsageByRange(records: UsageRecord[], fromDate: string, toDate
     totalRequests += r.requests;
   }
 
+  // totalTokens counts all processed tokens including cached context reads.
+  // Cache hits are billed at a lower rate, but they still count as usage.
   const totalTokens = totalInput + totalOutput + totalCacheRead + totalCacheWrite;
   const cacheHitRate = totalTokens > 0 ? ((totalCacheRead + totalCacheWrite) / totalTokens) * 100 : 0;
 

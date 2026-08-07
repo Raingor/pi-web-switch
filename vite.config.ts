@@ -471,7 +471,7 @@ function piApiPlugin(): Plugin {
         }
 
         // Handle provider-filtered endpoints: /api/pi/{provider}-usage-range
-        const providerMatch = pathOnly.match(/^\/api\/pi\/(opencode|gemini|grok)-usage-range$/);
+        const providerMatch = pathOnly.match(/^\/api\/pi\/(atomcode|opencode|gemini|grok)-usage-range$/);
         if (method === "GET" && providerMatch) {
           const providerId = providerMatch[1]!;
           const parsedUrl = new URL(url, "http://localhost");

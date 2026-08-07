@@ -69,7 +69,7 @@ interface UsageRangeData {
   }[];
 }
 
-type SourceKey = "all" | "pi" | "cindy-pi" | "claude" | "codex" | "opencode" | "gemini" | "grok";
+type SourceKey = "all" | "pi" | "cindy-pi" | "claude" | "codex" | "opencode" | "gemini" | "grok" | "atomcode";
 type RangeKey = "today" | "7d" | "30d" | "custom";
 type TabKey = "log" | "provider" | "model";
 type SortDir = "asc" | "desc";
@@ -314,6 +314,7 @@ export function DashboardPage() {
     else if (source === "opencode") baseUrl = "/api/pi/opencode-usage-range";
     else if (source === "gemini") baseUrl = "/api/pi/gemini-usage-range";
     else if (source === "grok") baseUrl = "/api/pi/grok-usage-range";
+    else if (source === "atomcode") baseUrl = "/api/pi/atomcode-usage-range";
     let url = `${baseUrl}?range=${range}`;
     if (range === "custom" && customFrom) {
       url += `&from=${customFrom}&to=${customTo || customFrom}`;
@@ -422,6 +423,7 @@ export function DashboardPage() {
           { key: "opencode" as SourceKey, label: "dashboard.source_opencode", icon: "🔷" },
           { key: "gemini" as SourceKey, label: "dashboard.source_gemini", icon: "✨" },
           { key: "grok" as SourceKey, label: "dashboard.source_grok", icon: "🌀" },
+          { key: "atomcode" as SourceKey, label: "dashboard.source_atomcode", icon: "⚛️" },
         ]).map((s) => (
           <button
             key={s.key}

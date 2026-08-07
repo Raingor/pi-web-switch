@@ -106,6 +106,7 @@ const zhCN: Record<string, string> = {
   "dashboard.source_opencode": "OpenCode",
   "dashboard.source_gemini": "Gemini",
   "dashboard.source_grok": "Grok",
+  "dashboard.source_atomcode": "AtomCode",
   "dashboard.requests_count": "{0} 次请求 · 总成本 {1}",
   "dashboard.range.today": "当天",
   "dashboard.range.7d": "7天",

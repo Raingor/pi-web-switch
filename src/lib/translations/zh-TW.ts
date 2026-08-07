@@ -106,6 +106,7 @@ const zhTW: Record<string, string> = {
   "dashboard.source_opencode": "OpenCode",
   "dashboard.source_gemini": "Gemini",
   "dashboard.source_grok": "Grok",
+  "dashboard.source_atomcode": "AtomCode",
   "dashboard.requests_count": "{0} 次請求 · 總成本 {1}",
   "dashboard.range.today": "當天",
   "dashboard.range.7d": "7天",

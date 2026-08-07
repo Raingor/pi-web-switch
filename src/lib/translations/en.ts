@@ -109,6 +109,7 @@ const en: Record<string, string> = {
   "dashboard.source_opencode": "OpenCode",
   "dashboard.source_gemini": "Gemini",
   "dashboard.source_grok": "Grok",
+  "dashboard.source_atomcode": "AtomCode",
   "dashboard.requests_count": "{0} requests · {1} total cost",
   "dashboard.range.today": "Today",
   "dashboard.range.7d": "7 Days",

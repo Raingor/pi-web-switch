@@ -106,6 +106,7 @@ const ja: Record<string, string> = {
   "dashboard.source_opencode": "OpenCode",
   "dashboard.source_gemini": "Gemini",
   "dashboard.source_grok": "Grok",
+  "dashboard.source_atomcode": "AtomCode",
   "dashboard.requests_count": "{0} リクエスト · 総コスト {1}",
   "dashboard.range.today": "今日",
   "dashboard.range.7d": "7日",
