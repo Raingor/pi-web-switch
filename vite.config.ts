@@ -497,41 +497,11 @@ function piApiPlugin(): Plugin {
           return res.end(JSON.stringify(usage));
         }
 
-        // Handle GET /api/pi/copilot-usage-range?range=today|7d|30d|custom&from=...&to=...
-        // Unlike the local sources, Copilot data comes from the GitHub REST
-        // API, so this handler is async and may take a few seconds on a cold
-        // cache. `notice` carries a stable code for the dashboard to i18n:
-        //   no-config  → token/username not set (see Settings → Advanced)
-        //   api-error  → GitHub returned 4xx/5xx (bad token, wrong billing platform)
-        if (method === "GET" && pathOnly === "/api/pi/copilot-usage-range") {
-          const parsedUrl = new URL(url, "http://localhost");
-          const range = parsedUrl.searchParams.get("range") || "today";
-          const fromParam = parsedUrl.searchParams.get("from") || "";
-          const toParam = parsedUrl.searchParams.get("to") || "";
-          const { fromDate, toDate } = resolveDateRange(range, fromParam, toParam);
-
-          pi.fetchCopilotUsageForRange(fromDate, toDate)
-            .then(({ records, configured, errors }) => {
-              const usage = pi.getUsageByRange(records, fromDate, toDate);
-              const payload =
-                !configured
-                  ? { ...usage, notice: "no-config" }
-                  : errors > 0
-                    ? { ...usage, notice: "api-error" }
-                    : usage;
-              res.setHeader("Content-Type", "application/json");
-              return res.end(JSON.stringify(payload));
-            })
-            .catch(() => {
-              res.statusCode = 500;
-              res.setHeader("Content-Type", "application/json");
-              return res.end(JSON.stringify({ error: "Copilot fetch failed" }));
-            });
-          return;
-        }
-
         // Handle provider-filtered endpoints: /api/pi/{provider}-usage-range
-        const providerMatch = pathOnly.match(/^\/api\/pi\/(atomcode|opencode|gemini|grok)-usage-range$/);
+        // Copilot is read from the local ~/.copilot/session-store.db (no
+        // GitHub REST API, no PAT), so it shares the same sync pipeline as
+        // the other local sources.
+        const providerMatch = pathOnly.match(/^\/api\/pi\/(atomcode|copilot|opencode|gemini|grok)-usage-range$/);
         if (method === "GET" && providerMatch) {
           const providerId = providerMatch[1]!;
           const parsedUrl = new URL(url, "http://localhost");
