@@ -532,6 +532,9 @@ function piApiPlugin(): Plugin {
 // ─── Vite Config ────────────────────────────────────────
 
 export default defineConfig({
+  // Relative base so Electron can loadFile() the built HTML from disk —
+  // absolute "/assets/..." URLs would resolve to the filesystem root.
+  base: './',
   plugins: [
     react(),
     tailwindcss(),
@@ -545,5 +548,14 @@ export default defineConfig({
   server: {
     port: 5176,
     strictPort: true,
+  },
+  build: {
+    rollupOptions: {
+      input: {
+        main: path.resolve(__dirname, "index.html"),
+        // Menu-bar popup (used by the Electron tray app)
+        popup: path.resolve(__dirname, "electron/popup.html"),
+      },
+    },
   },
 });

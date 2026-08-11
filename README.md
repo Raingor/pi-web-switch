@@ -139,17 +139,32 @@ The dev server automatically serves pi configuration via Vite middleware at `/ap
 
 ## 🖥️ Desktop App (Electron)
 
-pi-web-switch also runs as a desktop app (macOS / Windows / Linux) with its own branded app icon.
+pi-web-switch also runs as a **macOS menu bar app** (and a Windows/Linux tray app) — the app lives in your menu bar, and a single click on the tray icon pops up a compact usage summary (today's tokens / cost / requests + a 7-day sparkline + top providers). The full Dashboard is still available from the tray menu or by double-clicking the tray icon.
 
 ```bash
 # Run in development (Vite dev server + Electron with HMR)
 npm run electron:dev
 
-# Build installers (DMG / NSIS / AppImage) into release/
+# Build installers (DMG + ZIP for macOS, NSIS for Windows, AppImage for Linux) into release/
 npm run electron:build
+
+# Preview the production build without packaging
+npm run electron:preview
 ```
 
-App icons live in `build/` (`icon.icns` / `icon.ico` / `icon.png`) and are wired into electron-builder per platform; in development the macOS dock icon is set at runtime.
+### 🍹 macOS menu bar mode
+
+The packaged macOS app runs as a **menu bar-only** app — it does not appear in the Dock, and `Cmd+Q` quits from the tray menu. This is wired in via `LSUIElement = true` in `electron-builder`'s `extendInfo`. In dev (`electron:dev`) the Dock icon still shows because that Info.plist key only applies to packaged builds; the tray icon works in both modes.
+
+| Tray interaction | What happens |
+|------------------|--------------|
+| Click | Toggle the usage popup (today + 7d tokens / cost / requests, sparkline, top providers) |
+| Right-click | Context menu: open Dashboard, refresh usage, quit |
+| Menu → "打开 Dashboard" | Open the full React Dashboard window |
+
+The popup auto-refreshes every 30 seconds while visible. The tray icon is a 16×16 template PNG (`build/trayIconTemplate.png`) that adapts to light/dark menu bars; regenerate it with `npm run tray:icon`.
+
+App icons live in `build/` (`icon.icns` / `icon.ico` / `icon.png`); in development the macOS dock icon is set at runtime from `public/icon-512.png`.
 
 ## 🏗️ Tech Stack
 
@@ -266,9 +281,12 @@ Once installed, the following commands are available in your pi session:
 
 | Command | Description |
 |---------|-------------|
-| `/pi-web-switch start` | Launch the dashboard at `http://localhost:5173` |
-| `/pi-web-switch stop` | Stop the server |
-| `/pi-web-switch status` | Check if the dashboard is running |
+| `/pi-switch start` | Launch the dashboard at `http://localhost:5173` |
+| `/pi-switch stop` | Stop the server |
+| `/pi-switch status` | Check if the dashboard is running |
+| `/pi-usage` | Print a quick usage summary (today + 7 days) in the terminal — tokens / cost / requests / daily sparkline, without launching the dashboard |
+
+The `/pi-usage` command reads `~/.pi/agent/sessions/*.jsonl` directly and aggregates today + last-7-days stats, so you can see your usage at a glance from any pi session. It mirrors what the macOS menu bar popup shows.
 
 ### Package Structure
 

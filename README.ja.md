@@ -88,17 +88,32 @@ npm run build  # プロダクションビルド
 
 ## 🖥️ デスクトップアプリ（Electron）
 
-pi-web-switch はデスクトップアプリ（macOS / Windows / Linux）としても利用でき、専用ブランドアイコンを備えています。
+pi-web-switch は **macOS メニューバーアプリ**（および Windows/Linux トレイアプリ）としても利用可能 — アプリはメニューバーに常駐し、トレイアイコンのクリックで使用量サマリー（今日の tokens / コスト / リクエスト数 + 7 日間の sparkline + Top プロバイダ）がポップアップします。フルダッシュボードはトレイメニュー or ダブルクリックで開けます。
 
 ```bash
-# 開発モードで実行（Vite 開発サーバー + Electron、HMR 対応）
+# 開発モードで実行（Vite 開発サーバー + Electron、HMR 寂応）
 npm run electron:dev
 
-# インストーラー（DMG / NSIS / AppImage）を release/ にビルド
+# インストーラー（macOS DMG+ZIP / Windows NSIS / Linux AppImage）を release/ にビルド
 npm run electron:build
+
+# パッケージ化せずプロダクションビルドをプレビュー
+npm run electron:preview
 ```
 
-アプリアイコンは `build/`（`icon.icns` / `icon.ico` / `icon.png`）にあり、プラットフォームごとに electron-builder へ組み込まれています。開発モードでは実行時に macOS の Dock アイコンを設定します。
+### 🍹 macOS メニューバーモード
+
+パッケージ化された macOS アプリは **メニューバー専用アプリ** として実行 — Dock に表示されず、`Cmd+Q` でトレイメニューから終了。`electron-builder` の `extendInfo` で `LSUIElement = true` を設定して実装。開発モード（`electron:dev`）では Dock アイコンが表示されます（この Info.plist キーはパッケージビルドにのみ適用）。トレイアイコンは両モードで動作します。
+
+| トレイ操作 | 動作 |
+|------------|------|
+| クリック | 使用量ポップアップの切替（今日 + 7 日 tokens / コスト / リクエスト数、sparkline、Top プロバイダ） |
+| 右クリック | コンテキストメニュー：Dashboard を開く、使用量を更新、終了 |
+| メニュー → "開く Dashboard" | フル React Dashboard ウィンドウを開く |
+
+ポップアップは表示中 30 秒ごとに自動更新。トレイアイコンは 16×16 template PNG（`build/trayIconTemplate.png`）で明暗メニューバーに自動適合；`npm run tray:icon` で再生成。
+
+アプリアイコンは `build/`（`icon.icns` / `icon.ico` / `icon.png`）にあり；開発モードでは実行時に `public/icon-512.png` から macOS の Dock アイコンを設定します。
 
 ## 🏗️ 技術スタック
 
@@ -124,9 +139,12 @@ pi-web-switch は **pi コーディングエージェント拡張** としてイ
 
 | コマンド | 説明 |
 |---------|------|
-| `/pi-web-switch start` | ダッシュボード起動 http://localhost:5173 |
-| `/pi-web-switch stop` | サーバー停止 |
-| `/pi-web-switch status` | 実行状態を確認 |
+| `/pi-switch start` | ダッシュボード起動 http://localhost:5173 |
+| `/pi-switch stop` | サーバー停止 |
+| `/pi-switch status` | 実行状態を確認 |
+| `/pi-usage` | 使用量サマリー（今日 + 7 日）を端末に印字 — tokens / コスト / リクエスト数 / デイリー sparkline、ダッシュボード起動不要 |
+
+`/pi-usage` コマンドは `~/.pi/agent/sessions/*.jsonl` を直接読み込み、今日 + 直近 7 日の統計を集約します。どの pi セッションからでも一目で使用量を確認可能。macOS メニューバーポップアップと同じ内容を表示します。
 
 ### パッケージ構造
 

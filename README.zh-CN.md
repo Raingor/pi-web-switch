@@ -126,17 +126,32 @@ npm run preview # 预览生产构建
 
 ## 🖥️ 桌面应用（Electron）
 
-pi-web-switch 同样提供桌面应用（macOS / Windows / Linux），并带有专属品牌图标。
+pi-web-switch 同样提供 **macOS 菜单栏应用**（以及 Windows/Linux 托盘应用）—— 应用驻留在顶部菜单栏，点击托盘图标即可弹出使用量摘要（今日 tokens / 成本 / 请求数 + 7 天 sparkline + Top 提供商）。完整仪表盘仍可从托盘菜单或双击图标打开。
 
 ```bash
 # 开发模式运行（Vite 开发服务器 + Electron，支持 HMR）
 npm run electron:dev
 
-# 构建安装包（DMG / NSIS / AppImage）到 release/
+# 构建安装包（macOS DMG+ZIP / Windows NSIS / Linux AppImage）到 release/
 npm run electron:build
+
+# 不打包预览生产构建
+npm run electron:preview
 ```
 
-应用图标位于 `build/`（`icon.icns` / `icon.ico` / `icon.png`），已按平台接入 electron-builder；开发模式下会在运行时设置 macOS 程序坞图标。
+### 🍹 macOS 菜单栏模式
+
+打包后的 macOS 应用以 **纯菜单栏应用** 运行 —— 不出现在 Dock 中，`Cmd+Q` 从托盘菜单退出。通过 `electron-builder` 的 `extendInfo` 中 `LSUIElement = true` 实现。开发模式下（`electron:dev`）Dock 图标仍会显示（该 Info.plist 键仅对打包构建生效），托盘图标两种模式都可用。
+
+| 托盘交互 | 行为 |
+|----------|------|
+| 点击 | 切换使用量弹窗（今日 + 7 天 tokens / 成本 / 请求数、sparkline、Top 提供商） |
+| 右键 | 上下文菜单：打开 Dashboard、刷新使用量、退出 |
+| 菜单 → "打开 Dashboard" | 打开完整 React Dashboard 窗口 |
+
+弹窗可见时每 30 秒自动刷新。托盘图标是 16×16 template PNG（`build/trayIconTemplate.png`），自动适配明暗菜单栏；用 `npm run tray:icon` 重新生成。
+
+应用图标位于 `build/`（`icon.icns` / `icon.ico` / `icon.png`）；开发模式下会在运行时从 `public/icon-512.png` 设置 macOS 程序坞图标。
 
 ## 🏗️ 技术栈
 
@@ -162,9 +177,12 @@ pi-web-switch 可安装为 **pi 编码代理扩展**，在 pi 会话中直接启
 
 | 命令 | 说明 |
 |------|------|
-| `/pi-web-switch start` | 启动仪表盘 http://localhost:5173 |
-| `/pi-web-switch stop` | 停止服务器 |
-| `/pi-web-switch status` | 查看运行状态 |
+| `/pi-switch start` | 启动仪表盘 http://localhost:5173 |
+| `/pi-switch stop` | 娶止服务器 |
+| `/pi-switch status` | 查看运行状态 |
+| `/pi-usage` | 在终端打印使用量摘要（今日 + 7 天）—— tokens / 成本 / 请求数 / 每日 sparkline，无需启动仪表盘 |
+
+`/pi-usage` 命令直接读取 `~/.pi/agent/sessions/*.jsonl` 并聚合今日 + 最近 7 天统计，让你在任何 pi 会话中一眼看到使用量。它与 macOS 菜单栏弹窗显示的内容一致。
 
 ### 包结构
 

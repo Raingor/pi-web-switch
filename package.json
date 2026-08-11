@@ -3,7 +3,7 @@
   "private": false,
   "version": "0.4.1",
   "type": "module",
-  "main": "dist-electron/main.js",
+  "main": "dist-electron/main/main.cjs",
   "description": "Web UI for pi coding agent — live configuration management, session browser, and memory viewer",
   "keywords": [
     "pi-package",
@@ -29,7 +29,8 @@
     "preview": "vite preview",
     "electron:dev": "node scripts/electron-dev.mjs",
     "electron:build": "tsc -b && vite build && vite build --config vite.electron.config.ts && vite build --config vite.preload.config.ts && electron-builder",
-    "electron:preview": "vite build && vite build --config vite.electron.config.ts && vite build --config vite.preload.config.ts && env -u ELECTRON_RUN_AS_NODE npx electron ."
+    "electron:preview": "vite build && vite build --config vite.electron.config.ts && vite build --config vite.preload.config.ts && env -u ELECTRON_RUN_AS_NODE npx electron .",
+    "tray:icon": "node scripts/generate-tray-icon.mjs"
   },
   "files": [
     "pi-package",
@@ -89,8 +90,17 @@
       "dist-electron/**/*"
     ],
     "mac": {
-      "target": "dmg",
-      "icon": "build/icon.icns"
+      "target": [
+        { "target": "dmg" },
+        { "target": "zip" }
+      ],
+      "icon": "build/icon.icns",
+      "extendInfo": {
+        "LSUIElement": true,
+        "LSMinimumSystemVersion": "11.0.0",
+        "CFBundleName": "pi-web-switch"
+      },
+      "category": "public.app-category.developer-tools"
     },
     "win": {
       "target": "nsis",

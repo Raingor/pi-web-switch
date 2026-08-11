@@ -305,7 +305,7 @@ export function DashboardPage() {
 
   const customInvalid = range === "custom" && !!customFrom && !!customTo && customFrom > customTo;
 
-  const fetchData = useCallback(() => {
+  const fetchData = useCallback((force = false) => {
     if (!initialized || customInvalid) return;
     let baseUrl = "/api/pi/usage-range";
     if (source === "all") baseUrl = "/api/pi/all-usage-range";
@@ -317,7 +317,8 @@ export function DashboardPage() {
     else if (source === "grok") baseUrl = "/api/pi/grok-usage-range";
     else if (source === "atomcode") baseUrl = "/api/pi/atomcode-usage-range";
     else if (source === "copilot") baseUrl = "/api/pi/copilot-usage-range";
-    let url = `${baseUrl}?range=${range}`;
+    // force=true adds refresh=1 so the API rescan bypasses its 30s session cache
+    let url = `${baseUrl}?range=${range}${force ? "&refresh=1" : ""}`;
     if (range === "custom" && customFrom) {
       url += `&from=${customFrom}&to=${customTo || customFrom}`;
     }
@@ -475,7 +476,7 @@ export function DashboardPage() {
             {currency}
           </button>
           <button
-            onClick={() => { fetchData(); }}
+            onClick={() => { fetchData(true); }}
             className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-gray-800/30"
             style={{ borderColor: "var(--card-border)", color: "var(--muted-text)", backgroundColor: "var(--card-bg)" }}
             title={t("dashboard.refresh_now")}

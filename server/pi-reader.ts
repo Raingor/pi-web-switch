@@ -203,6 +203,11 @@ function parseSessionFile(filePath: string): UsageRecord[] {
 const USAGE_CACHE_TTL_MS = 30_000;
 let usageCache: { records: UsageRecord[]; at: number } | null = null;
 
+/** Drop cached session usage — called when the UI requests a forced refresh. */
+export function clearUsageCache(): void {
+  usageCache = null;
+}
+
 export function readAllUsage(): UsageRecord[] {
   if (usageCache && Date.now() - usageCache.at < USAGE_CACHE_TTL_MS) {
     return usageCache.records;
