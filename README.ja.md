@@ -111,7 +111,7 @@ npm run electron:preview
 | 右クリック | コンテキストメニュー：Dashboard を開く、使用量を更新、終了 |
 | メニュー → "開く Dashboard" | フル React Dashboard ウィンドウを開く |
 
-ポップアップは表示中 30 秒ごとに自動更新。トレイアイコンは 16×16 template PNG（`build/trayIconTemplate.png`）で明暗メニューバーに自動適合；`npm run tray:icon` で再生成。
+ポップアップは表示中 30 秒ごとに自動更新。トレイアイコンは 32×32 template PNG（`build/trayIconTemplate.png`）で明暗メニューバーに自動適合；`npm run tray:icon` で再生成。
 
 アプリアイコンは `build/`（`icon.icns` / `icon.ico` / `icon.png`）にあり；開発モードでは実行時に `public/icon-512.png` から macOS の Dock アイコンを設定します。
 
@@ -152,12 +152,18 @@ pi-web-switch は **pi コーディングエージェント拡張** としてイ
 pi-web-switch/
 ├── package.json           # npm パッケージ + pi.extensions + pi.skills
 ├── pi-package/
-│   ├── index.ts           # 拡張エントリ：/pi-web-switch コマンド登録
+│   ├── index.ts           # 拡張エントリ：/pi-switch、/pi-usage コマンド登録
 │   └── skills/
 │       └── pi-web-switch/
 │           └── SKILL.md   # 使用ドキュメント
 ├── server/
 │   └── pi-reader.ts       # サーバーサイド：~/.pi/agent/ 読み取り
+├── electron/              # デスクトップアプリ（macOS メニューバー / トレイ）
+│   ├── main.ts            # メインプロセス：トレイ、ポップアップ、IPC、ローカル API サーバー
+│   ├── api-server.ts      # ローカル HTTP サーバー（パッケージ版で dist/ + /api/pi/* を提供）
+│   ├── preload.ts         # contextBridge：settings/auth/models/usage IPC
+│   ├── popup.html         # メニューバー使用量ポップアップ
+│   └── popup-render.ts    # ポップアップ描画（今日/7 日 tokens、sparkline、Top プロバイダ）
 └── src/                   # React フロントエンド
 ```
 

@@ -149,7 +149,7 @@ npm run electron:preview
 | 右键 | 上下文菜单：打开 Dashboard、刷新使用量、退出 |
 | 菜单 → "打开 Dashboard" | 打开完整 React Dashboard 窗口 |
 
-弹窗可见时每 30 秒自动刷新。托盘图标是 16×16 template PNG（`build/trayIconTemplate.png`），自动适配明暗菜单栏；用 `npm run tray:icon` 重新生成。
+弹窗可见时每 30 秒自动刷新。托盘图标是 32×32 template PNG（`build/trayIconTemplate.png`），自动适配明暗菜单栏；用 `npm run tray:icon` 重新生成。
 
 应用图标位于 `build/`（`icon.icns` / `icon.ico` / `icon.png`）；开发模式下会在运行时从 `public/icon-512.png` 设置 macOS 程序坞图标。
 
@@ -190,12 +190,18 @@ pi-web-switch 可安装为 **pi 编码代理扩展**，在 pi 会话中直接启
 pi-web-switch/
 ├── package.json           # npm 包 + pi.extensions + pi.skills
 ├── pi-package/
-│   ├── index.ts           # 扩展入口：注册 /pi-web-switch 命令
+│   ├── index.ts           # 扩展入口：注册 /pi-switch、/pi-usage 命令
 │   └── skills/
 │       └── pi-web-switch/
 │           └── SKILL.md   # 使用文档
 ├── server/
 │   └── pi-reader.ts       # 服务端：读取 ~/.pi/agent/ 文件
+├── electron/              # 桌面应用（macOS 菜单栏 / 托盘）
+│   ├── main.ts            # 主进程：托盘、弹窗、IPC、本地 API 服务器
+│   ├── api-server.ts      # 本地 HTTP 服务器（打包模式提供 dist/ + /api/pi/*）
+│   ├── preload.ts         # contextBridge：settings/auth/models/usage IPC
+│   ├── popup.html         # 菜单栏使用量弹窗
+│   └── popup-render.ts    # 弹窗渲染（今日/7 天 tokens、sparkline、Top 提供商）
 └── src/                   # React 前端
 ```
 

@@ -185,10 +185,21 @@ App icons live in `build/` (`icon.icns` / `icon.ico` / `icon.png`); in developme
 pi-web-switch/
 ├── index.html
 ├── package.json
-├── vite.config.ts          # Vite config + pi API plugin (middleware)
+├── vite.config.ts          # Vite config + pi API plugin (middleware) + popup entry
 ├── tsconfig.json
 ├── server/
 │   └── pi-reader.ts        # Server-side module: reads ~/.pi/agent/ files + parses sessions
+├── electron/               # Desktop app (macOS menu-bar / tray)
+│   ├── main.ts             # Main process: tray, popup window, IPC, local API server
+│   ├── api-server.ts       # Local HTTP server serving dist/ + /api/pi/* in packaged mode
+│   ├── preload.ts          # contextBridge: settings/auth/models/usage IPC
+│   ├── popup.html          # Menu-bar popup UI
+│   └── popup-render.ts     # Popup renderer (today/7d tokens, sparkline, top providers)
+├── scripts/
+│   └── generate-tray-icon.mjs  # Regenerates build/trayIconTemplate.png
+├── build/
+│   ├── trayIconTemplate.png    # 32x32 menu-bar template icon
+│   └── icon.icns / icon.ico / icon.png
 ├── public/
 │   └── pi.svg
 └── src/
@@ -239,7 +250,7 @@ Changes made in the UI are written back to these files in real time — the pi a
 
 ## 🧩 API Routes
 
-The Vite dev server exposes these endpoints at `/api/pi/*`:
+These endpoints at `/api/pi/*` are served by the Vite middleware in dev, and by the built-in HTTP server (`electron/api-server.ts`) in the packaged app — so the frontend works identically in both modes:
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -251,13 +262,29 @@ The Vite dev server exposes these endpoints at `/api/pi/*`:
 | POST | `/api/pi/models` | Write `models.json` |
 | GET | `/api/pi/builtin-providers` | List hardcoded built-in providers |
 | GET | `/api/pi/usage` | Aggregated token/cost/request data from sessions |
-| GET | `/api/pi/usage-range` | Date-range filtered usage with hourly/daily breakdown |
+| GET | `/api/pi/usage-range` | Date-range filtered usage (pi sessions) — `?range=today\|7d\|30d\|custom&from=&to=` |
+| GET | `/api/pi/all-usage-range` | Same shape, but combined across **all** sources (pi + cindy + claude + codex + atomcode + copilot) |
+| GET | `/api/pi/{cindy-pi\|claude\|codex\|opencode\|gemini\|grok\|atomcode\|copilot}-usage-range` | Per-source usage range |
 | GET | `/api/pi/copilot-usage-range` | Local Copilot CLI usage from `~/.copilot/session-store.db` (tokens / requests per day per model; no GitHub API or token required) |
 | GET | `/api/pi/copilot-config` | Read Copilot GitHub config (username, token) |
 | POST | `/api/pi/copilot-config` | Write Copilot GitHub config |
 | GET | `/api/pi/sessions` | Session list grouped by project |
-| DELETE | `/api/pi/session?path=` | Delete a session file (path must be under sessions/) |
+| DELETE | `/api/pi/session?path=` | Move a session file to trash (path must be under sessions/) |
+| POST | `/api/pi/session/trash` | Move a session to trash (body: `{ path }`) |
+| POST | `/api/pi/session/restore` | Restore a session from trash (body: `{ trashPath }`) |
+| GET | `/api/pi/session-preview` | Preview session messages — `?path=` |
+| GET | `/api/pi/trash` | List trashed sessions |
+| DELETE | `/api/pi/trash?path=` | Permanently delete a trashed session |
 | GET | `/api/pi/memory` | Read MEMORY.md, USER.md, failures.md |
+| POST | `/api/pi/memory/delete-entry` | Delete a memory entry (body: `{ filename, text }`) |
+| GET | `/api/pi/subagents` | Read subagent run history |
+| GET | `/api/pi/check-updates` | Check pi package updates |
+| POST | `/api/pi/apply-updates` | Apply package updates (body: `{ names }`) |
+| POST | `/api/pi/provider-test` | Test a provider connection (body: `{ baseUrl, apiKey }`) |
+| POST | `/api/pi/provider-models` | Fetch a provider's live model list (body: `{ baseUrl, apiKey, providerId }`) |
+| POST | `/api/pi/model-test` | Test a model (body: `{ baseUrl, modelId, apiKey, apiType }`) |
+
+All `-usage-range` endpoints accept `&refresh=1` to force a rescan, bypassing the 30-second session cache (the Dashboard refresh button sends this).
 
 ## 📦 Pi Package
 
