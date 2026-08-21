@@ -199,6 +199,8 @@ const ja: Record<string, string> = {
   "compat.desc": "OpenAI 互換 API が一部の機能をサポートしていない場合の動作を上書きします。",
   "compat.supports_developer_role": "developer ロールをサポート",
   "compat.supports_developer_role_desc": "システムプロンプトを 'developer' ロールで送信（推論モデル）。API が 'system' ロールのみ受け付ける場合は無効にしてください。",
+  "compat.supports_finish_reason": "finish_reason の厳格な検証",
+  "compat.supports_finish_reason_desc": "ストリーム応答に finish_reason の含有を必須にし、無ければエラーにします。上流がストリームを途中で切断する場合（無料モデルに多い）は無効にして終了理由の自動判定に切り替えてください。",
   "compat.supports_reasoning_effort": "reasoning_effort をサポート",
   "compat.supports_reasoning_effort_desc": "reasoning_effort パラメータを送信します。API がサポートしていない場合は無効にしてください。",
 

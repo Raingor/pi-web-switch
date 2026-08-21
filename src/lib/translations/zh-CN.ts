@@ -199,6 +199,8 @@ const zhCN: Record<string, string> = {
   "compat.desc": "当 OpenAI 兼容 API 不支持某些功能时，覆盖默认行为。",
   "compat.supports_developer_role": "支持 developer 角色",
   "compat.supports_developer_role_desc": "使用 'developer' 角色发送系统提示（推理模型）。如果不支持，请关闭以改用 'system' 角色。",
+  "compat.supports_finish_reason": "严格校验 finish_reason",
+  "compat.supports_finish_reason_desc": "要求流式响应必须包含 finish_reason，否则报错。上游偶尔掐断流（免费模型常见）时，请关闭以改为自动推断结束原因。",
   "compat.supports_reasoning_effort": "支持 reasoning_effort",
   "compat.supports_reasoning_effort_desc": "发送 reasoning_effort 参数。如果 API 不支持，请关闭。",
 

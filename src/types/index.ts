@@ -19,6 +19,7 @@ export interface ThinkingLevelMap {
 export interface ModelCompat {
   supportsStore?: boolean;
   supportsDeveloperRole?: boolean;
+  supportsFinishReason?: boolean;
   supportsReasoningEffort?: boolean;
   supportsUsageInStreaming?: boolean;
   maxTokensField?: "max_completion_tokens" | "max_tokens";

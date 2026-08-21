@@ -203,6 +203,8 @@ const en: Record<string, string> = {
   "compat.desc": "Override default behavior for OpenAI-compatible providers that don't support certain features.",
   "compat.supports_developer_role": "Supports developer role",
   "compat.supports_developer_role_desc": "Send system prompt as 'developer' role (for reasoning models). Disable if the API only accepts 'system' role.",
+  "compat.supports_finish_reason": "Strict finish_reason check",
+  "compat.supports_finish_reason_desc": "Require streamed responses to include finish_reason, otherwise fail. Disable to infer the stop reason automatically when the upstream drops the stream (common with free models).",
   "compat.supports_reasoning_effort": "Supports reasoning_effort",
   "compat.supports_reasoning_effort_desc": "Send reasoning_effort parameter. Disable if the API does not support it.",
 

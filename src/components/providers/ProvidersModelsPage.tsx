@@ -658,6 +658,9 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provid
   const [supportsDeveloperRole, setSupportsDeveloperRole] = useState(
     provider.compat?.supportsDeveloperRole ?? false
   );
+  const [supportsFinishReason, setSupportsFinishReason] = useState(
+    provider.compat?.supportsFinishReason ?? true
+  );
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
 
   // ─── Quick add (inline, one-liner) ───
@@ -857,7 +860,7 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provid
   const urlInvalid = baseUrl.trim() !== "" && !isValidHttpUrl(baseUrl.trim());
 
   const dirty =
-    (isCustom && (providerName !== (provider.name ?? "") || baseUrl !== (provider.baseUrl ?? "") || api !== (provider.api ?? "openai-completions") || supportsDeveloperRole !== (provider.compat?.supportsDeveloperRole ?? true))) ||
+    (isCustom && (providerName !== (provider.name ?? "") || baseUrl !== (provider.baseUrl ?? "") || api !== (provider.api ?? "openai-completions") || supportsDeveloperRole !== (provider.compat?.supportsDeveloperRole ?? true) || supportsFinishReason !== (provider.compat?.supportsFinishReason ?? true))) ||
     (!isCustom && (baseUrl !== (provider.baseUrl ?? "") || api !== (provider.api ?? "openai-completions"))) ||
     apiKey !== savedKey;
 
@@ -870,7 +873,7 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provid
         baseUrl: baseUrl || undefined,
         api,
         apiKey: apiKey || undefined,
-        compat: { supportsDeveloperRole },
+        compat: { ...provider.compat, supportsDeveloperRole, supportsFinishReason },
       };
       // pi's model picker shows the provider key, not the display name, so
       // rename the key too when the name changes (references get rewritten).
@@ -1047,6 +1050,21 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provid
         <label htmlFor="supports-developer-role" className="text-sm text-gray-400">
           <span>{t("compat.supports_developer_role")}</span>
           <span className="ml-2 text-xs text-gray-500">{t("compat.supports_developer_role_desc")}</span>
+        </label>
+      </div>
+
+      {/* Finish Reason Support */}
+      <div className="flex items-center gap-2">
+        <input
+          id="supports-finish-reason"
+          type="checkbox"
+          checked={supportsFinishReason}
+          onChange={(e) => setSupportsFinishReason(e.target.checked)}
+          className="rounded border-gray-600 bg-gray-800 text-blue-500"
+        />
+        <label htmlFor="supports-finish-reason" className="text-sm text-gray-400">
+          <span>{t("compat.supports_finish_reason")}</span>
+          <span className="ml-2 text-xs text-gray-500">{t("compat.supports_finish_reason_desc")}</span>
         </label>
       </div>
 

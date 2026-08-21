@@ -199,6 +199,8 @@ const zhTW: Record<string, string> = {
   "compat.desc": "當 OpenAI 相容 API 不支援某些功能時，覆蓋預設行為。",
   "compat.supports_developer_role": "支援 developer 角色",
   "compat.supports_developer_role_desc": "使用 'developer' 角色發送系統提示（推理模型）。如果不支援，請關閉以改用 'system' 角色。",
+  "compat.supports_finish_reason": "嚴格校驗 finish_reason",
+  "compat.supports_finish_reason_desc": "要求串流回應必須包含 finish_reason，否則報錯。上游偶爾掐斷串流（免費模型常見）時，請關閉以改為自動推斷結束原因。",
   "compat.supports_reasoning_effort": "支援 reasoning_effort",
   "compat.supports_reasoning_effort_desc": "發送 reasoning_effort 參數。如果 API 不支援，請關閉。",
 
