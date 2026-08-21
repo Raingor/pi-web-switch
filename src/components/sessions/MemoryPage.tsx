@@ -60,8 +60,9 @@ function parseMemoryEntries(content: string): MemoryEntry[] {
   for (const section of sections) {
     const trimmed = section.trim();
     // Match `<!-- created=DATE, last=DATE -->` at the end
+    // Tolerate extra fields after `last=` (e.g. `, project64=...`) before `-->`
     const markerMatch = trimmed.match(
-      /<!--\s*created\s*=\s*([^,\s]+)\s*,\s*last\s*=\s*([^>\s]+)\s*-->\s*$/
+      /<!--\s*created\s*=\s*([^,\s>]+)\s*,\s*last\s*=\s*([^,\s>]+)[^>]*-->\s*$/
     );
     if (markerMatch) {
       entries.push({
