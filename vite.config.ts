@@ -7,16 +7,12 @@ import type { Connect } from "vite";
 // ─── Pi Config API Plugin ───────────────────────────────
 
 function piApiPlugin(): Plugin {
-  // Lazy-load the server-side module (Node.js only)
-  let pi: typeof import("./server/pi-reader");
-  let builtins: typeof import("./src/data/builtin-providers");
-
   return {
     name: "pi-api",
     configureServer(server) {
-      // Load server-side modules
-      pi = require("./server/pi-reader");
-      builtins = require("./src/data/builtin-providers");
+      // Lazy-load the server-side module (Node.js only)
+      const pi = require("./server/pi-reader");
+      const builtins = require("./src/data/builtin-providers");
 
       // Warm the usage cache in the background so the dashboard's first
       // request doesn't block on scanning ~150MB of session JSONL.
@@ -553,8 +549,6 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: path.resolve(__dirname, "index.html"),
-        // Menu-bar popup (used by the Electron tray app)
-        popup: path.resolve(__dirname, "electron/popup.html"),
       },
     },
   },
