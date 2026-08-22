@@ -415,35 +415,6 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-5">
-      {/* Source Selector: Pi / Cindy-Pi */}
-      <div className="flex items-center gap-1 rounded-lg border p-0.5" style={{ borderColor: "var(--card-border)", backgroundColor: "var(--page-bg)" }}>
-        {([
-          { key: "all" as SourceKey, label: "dashboard.source_all", icon: "📊" },
-          { key: "pi" as SourceKey, label: "dashboard.source_pi", icon: "🖥" },
-          { key: "cindy-pi" as SourceKey, label: "dashboard.source_cindy_pi", icon: "🤖" },
-          { key: "claude" as SourceKey, label: "dashboard.source_claude", icon: "🧠" },
-          { key: "codex" as SourceKey, label: "dashboard.source_codex", icon: "⚡" },
-          { key: "opencode" as SourceKey, label: "dashboard.source_opencode", icon: "🔷" },
-          { key: "gemini" as SourceKey, label: "dashboard.source_gemini", icon: "✨" },
-          { key: "grok" as SourceKey, label: "dashboard.source_grok", icon: "🌀" },
-          { key: "atomcode" as SourceKey, label: "dashboard.source_atomcode", icon: "⚛️" },
-          { key: "copilot" as SourceKey, label: "dashboard.source_copilot", icon: "🐙" },
-        ]).map((s) => (
-          <button
-            key={s.key}
-            onClick={() => setSource(s.key)}
-            className={cn(
-              "rounded-md px-3 py-1.5 text-xs font-medium transition-colors flex items-center gap-1.5",
-              source === s.key ? "text-white" : "hover:bg-gray-800/30"
-            )}
-            style={source === s.key ? { backgroundColor: "#3b82f6", color: "#fff" } : { color: "var(--muted-text)" }}
-          >
-            <span>{s.icon}</span>
-            <span>{t(s.label)}</span>
-          </button>
-        ))}
-      </div>
-
       {/* Title + Time Range Selector + Currency Toggle */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>

@@ -3,7 +3,7 @@
   "private": false,
   "version": "0.4.2",
   "type": "module",
-  "main": "dist-electron/main/main.cjs",
+  "main": "dist/index.html",
   "description": "Web UI for pi coding agent — live configuration management, session browser, and memory viewer",
   "keywords": [
     "pi-package",
@@ -26,11 +26,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview",
-    "electron:dev": "node scripts/electron-dev.mjs",
-    "electron:build": "tsc -b && vite build && vite build --config vite.electron.config.ts && vite build --config vite.preload.config.ts && electron-builder",
-    "electron:preview": "vite build && vite build --config vite.electron.config.ts && vite build --config vite.preload.config.ts && env -u ELECTRON_RUN_AS_NODE npx electron .",
-    "tray:icon": "node scripts/generate-tray-icon.mjs"
+    "preview": "vite preview"
   },
   "files": [
     "pi-package",
@@ -69,14 +65,10 @@
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2",
     "@vitejs/plugin-react": "^4.4.1",
-    "electron": "^43.2.0",
-    "electron-builder": "^26.15.3",
-    "electron-vite": "^5.0.0",
     "tailwindcss": "^4.1.4",
     "typescript": "~5.8.3",
     "undici": "^8.9.0",
     "vite": "^6.3.2",
-    "vite-plugin-electron": "^1.1.0",
     "vite-plugin-pwa": "^1.3.0"
   },
   "build": {
@@ -86,32 +78,7 @@
       "output": "release"
     },
     "files": [
-      "dist/**/*",
-      "dist-electron/**/*"
-    ],
-    "mac": {
-      "target": [
-        {
-          "target": "dmg"
-        },
-        {
-          "target": "zip"
-        }
-      ],
-      "icon": "build/icon.icns",
-      "extendInfo": {
-        "LSMinimumSystemVersion": "11.0.0",
-        "CFBundleName": "pi-web-switch"
-      },
-      "category": "public.app-category.developer-tools"
-    },
-    "win": {
-      "target": "nsis",
-      "icon": "build/icon.ico"
-    },
-    "linux": {
-      "target": "AppImage",
-      "icon": "build/icon.png"
-    }
+      "dist/**/*"
+    ]
   }
 }
