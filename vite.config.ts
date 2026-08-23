@@ -49,6 +49,48 @@ function piApiPlugin(): Plugin {
           res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify(data ?? {}));
         },
+        "GET /api/pi/official-usage-config"(_, res) {
+          const config = pi.readOfficialUsageConfig();
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({
+            endpoint: config.endpoint,
+            authMode: config.authMode,
+            keyCount: config.apiKeys.length,
+            maskedKeys: config.apiKeys.map((key: string) => key.length > 8 ? `${key.slice(0, 4)}••••${key.slice(-4)}` : "••••••••"),
+          }));
+        },
+        "POST /api/pi/official-usage-refresh"(_, res) {
+          pi.queryOfficialUsage(pi.readOfficialUsageConfig()).then((usage) => {
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ success: true, usage }));
+          }).catch((error) => {
+            res.statusCode = 400;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ success: false, error: error instanceof Error ? error.message : "Official usage query failed" }));
+          });
+        },
+        "POST /api/pi/official-usage-query"(req, res) {
+          let body = "";
+          req.on("data", (chunk: string) => (body += chunk));
+          req.on("end", async () => {
+            try {
+              const input = JSON.parse(body);
+              const config = {
+                endpoint: typeof input.endpoint === "string" ? input.endpoint : "",
+                apiKeys: Array.isArray(input.apiKeys) ? input.apiKeys : [],
+                authMode: input.authMode,
+              };
+              const usage = await pi.queryOfficialUsage(config);
+              const saved = pi.writeOfficialUsageConfig(config);
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ success: saved, usage, error: saved ? undefined : "Failed to save configuration" }));
+            } catch (error) {
+              res.statusCode = 400;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ success: false, error: error instanceof Error ? error.message : "Official usage query failed" }));
+            }
+          });
+        },
         "POST /api/pi/auth"(req, res) {
           let body = "";
           req.on("data", (chunk: string) => (body += chunk));

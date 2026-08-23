@@ -10,6 +10,7 @@ import {
   ChevronDown,
   X,
   Orbit,
+  Gauge,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTranslation, LANGUAGES } from "@/lib/i18n";
@@ -22,6 +23,7 @@ const navItems = [
   { to: "/providers", icon: Plug, key: "nav.providers_models", code: "04" },
   { to: "/subagents", icon: Users, key: "nav.subagents", code: "05" },
   { to: "/settings", icon: Settings, key: "nav.settings", code: "06" },
+  { to: "/official-usage", icon: Gauge, key: "nav.official_usage", code: "07" },
 ];
 
 interface SidebarProps {

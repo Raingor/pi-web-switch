@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, existsSync, statSync, unlinkSync, writeFileSync, mkdirSync, renameSync } from "fs";
+import { readFileSync, readdirSync, existsSync, statSync, unlinkSync, writeFileSync, mkdirSync, renameSync, chmodSync } from "fs";
 import { homedir, platform } from "os";
 import { join, resolve, dirname, relative, sep } from "path";
 import { spawnSync } from "child_process";
@@ -46,13 +46,181 @@ export function readSettings() {
 export function writeSettings(settings: any): boolean {
   try {
     const path = piPath("settings.json");
-    const backup = existsSync(path) ? readFileSync(path, "utf-8") : null;
     const raw = JSON.stringify(settings, null, 2);
     writeFileSync(path, raw, "utf-8");
     return true;
   } catch {
     return false;
   }
+}
+
+// ─── Official Usage Query ──────────────────────────────
+
+export type OfficialUsageAuthMode = "auto" | "bearer" | "x-api-key" | "api-key";
+
+export interface OfficialUsageConfig {
+  endpoint: string;
+  apiKeys: string[];
+  authMode: OfficialUsageAuthMode;
+}
+
+export interface OfficialUsageSummary {
+  total: number;
+  used: number;
+  remaining: number;
+  remainingPercent: number;
+  unit: string;
+  source: string;
+  checkedAt: string;
+}
+
+const OFFICIAL_USAGE_CONFIG_FILE = "official-usage.json";
+
+function officialUsagePath(): string {
+  return piPath(OFFICIAL_USAGE_CONFIG_FILE);
+}
+
+function normalizeOfficialUsageConfig(value: any): OfficialUsageConfig {
+  const endpoint = typeof value?.endpoint === "string" ? value.endpoint.trim() : "";
+  const apiKeys = Array.isArray(value?.apiKeys)
+    ? value.apiKeys.filter((key: unknown): key is string => typeof key === "string").map((key) => key.trim()).filter(Boolean)
+    : typeof value?.apiKey === "string" && value.apiKey.trim()
+      ? [value.apiKey.trim()]
+      : [];
+  const authMode: OfficialUsageAuthMode = ["auto", "bearer", "x-api-key", "api-key"].includes(value?.authMode)
+    ? value.authMode
+    : "auto";
+  return { endpoint, apiKeys: Array.from(new Set(apiKeys)), authMode };
+}
+
+export function readOfficialUsageConfig(): OfficialUsageConfig {
+  try {
+    if (!existsSync(officialUsagePath())) return { endpoint: "", apiKeys: [], authMode: "auto" };
+    return normalizeOfficialUsageConfig(JSON.parse(readFileSync(officialUsagePath(), "utf-8")));
+  } catch {
+    return { endpoint: "", apiKeys: [], authMode: "auto" };
+  }
+}
+
+export function writeOfficialUsageConfig(config: OfficialUsageConfig): boolean {
+  try {
+    const normalized = normalizeOfficialUsageConfig(config);
+    if (!normalized.endpoint || normalized.apiKeys.length === 0) return false;
+    const url = new URL(normalized.endpoint);
+    if (!/^https?:$/.test(url.protocol)) return false;
+    mkdirSync(PI_DIR, { recursive: true });
+    writeFileSync(officialUsagePath(), JSON.stringify(normalized, null, 2), { encoding: "utf-8", mode: 0o600 });
+    chmodSync(officialUsagePath(), 0o600);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function officialNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() && Number.isFinite(Number(value.replace(/[, ]/g, "")))) return Number(value.replace(/[, ]/g, ""));
+  return null;
+}
+
+function findOfficialMetric(root: unknown, names: string[]): { value: number; unit?: string } | null {
+  const wanted = new Set(names.map((name) => name.toLowerCase().replace(/[^a-z0-9]/g, "")));
+  const queue: Array<{ value: unknown; path: string[] }> = [{ value: root, path: [] }];
+  while (queue.length) {
+    const current = queue.shift()!;
+    if (!current.value || typeof current.value !== "object") continue;
+    for (const [key, value] of Object.entries(current.value as Record<string, unknown>)) {
+      const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const number = officialNumber(value);
+      if (number !== null && wanted.has(normalizedKey)) {
+        const parent = current.value as Record<string, unknown>;
+        const unit = typeof parent.unit === "string"
+          ? parent.unit
+          : typeof parent.currency === "string"
+            ? parent.currency
+            : normalizedKey.includes("usd") ? "USD" : undefined;
+        return { value: number, unit };
+      }
+      if (value && typeof value === "object") queue.push({ value, path: [...current.path, key] });
+    }
+  }
+  return null;
+}
+
+function parseOfficialUsagePayload(payload: unknown, endpoint: string): OfficialUsageSummary {
+  const total = findOfficialMetric(payload, ["total", "totalquota", "quota", "limit", "usagelimit", "monthlylimit", "included"])?.value ?? null;
+  const used = findOfficialMetric(payload, ["used", "usage", "currentusage", "consumed", "spend", "spent", "utilized"])?.value ?? null;
+  const explicitRemaining = findOfficialMetric(payload, ["remaining", "remainingquota", "balance", "available", "left"])?.value ?? null;
+  const resolvedTotal = total !== null && (used !== null || explicitRemaining !== null)
+    ? total
+    : used !== null && explicitRemaining !== null
+      ? used + explicitRemaining
+      : Number.NaN;
+  const resolvedUsed = used ?? (resolvedTotal - (explicitRemaining ?? 0));
+  const resolvedRemaining = explicitRemaining ?? Math.max(resolvedTotal - resolvedUsed, 0);
+  if (!Number.isFinite(resolvedTotal) || resolvedTotal <= 0 || !Number.isFinite(resolvedUsed) || !Number.isFinite(resolvedRemaining)) {
+    throw new Error("Unable to find total/used/remaining quota fields in the response");
+  }
+  const remainingPercent = Math.min(100, Math.max(0, (resolvedRemaining / resolvedTotal) * 100));
+  return {
+    total: resolvedTotal,
+    used: Math.max(0, resolvedUsed),
+    remaining: Math.max(0, resolvedRemaining),
+    remainingPercent,
+    unit: findOfficialMetric(payload, ["total", "totalquota", "quota", "limit", "usagelimit", "monthlylimit", "included"])?.unit ?? "units",
+    source: endpoint,
+    checkedAt: new Date().toISOString(),
+  };
+}
+
+function officialEndpoint(endpoint: string, apiKey: string): string {
+  return endpoint.replace(/\{apiKey\}/gi, encodeURIComponent(apiKey));
+}
+
+export async function queryOfficialUsage(configInput: OfficialUsageConfig): Promise<OfficialUsageSummary> {
+  const config = normalizeOfficialUsageConfig(configInput);
+  if (!config.endpoint || config.apiKeys.length === 0) throw new Error("Endpoint and at least one API key are required");
+  const errors: string[] = [];
+  const results: OfficialUsageSummary[] = [];
+  for (const apiKey of config.apiKeys) {
+    const modes: OfficialUsageAuthMode[] = config.authMode === "auto" ? ["bearer", "x-api-key", "api-key"] : [config.authMode];
+    let keySucceeded = false;
+    for (const mode of modes) {
+      try {
+        const headers: Record<string, string> = { Accept: "application/json" };
+        if (mode === "bearer") headers.Authorization = `Bearer ${apiKey}`;
+        if (mode === "x-api-key") headers["x-api-key"] = apiKey;
+        if (mode === "api-key") headers["api-key"] = apiKey;
+        const response = await fetch(officialEndpoint(config.endpoint, apiKey), { headers, signal: AbortSignal.timeout(15_000) });
+        const text = await response.text();
+        let payload: unknown;
+        try { payload = JSON.parse(text); } catch { payload = text; }
+        if (!response.ok) {
+          errors.push(`${response.status} ${response.statusText}`);
+          continue;
+        }
+        results.push(parseOfficialUsagePayload(payload, config.endpoint));
+        keySucceeded = true;
+        break;
+      } catch (error) {
+        errors.push(error instanceof Error ? error.message : "request failed");
+      }
+    }
+    if (!keySucceeded) continue;
+  }
+  if (results.length === 0) throw new Error(errors[0] || "Official usage query failed");
+  const total = results.reduce((sum, result) => sum + result.total, 0);
+  const used = results.reduce((sum, result) => sum + result.used, 0);
+  const remaining = results.reduce((sum, result) => sum + result.remaining, 0);
+  return {
+    total,
+    used,
+    remaining,
+    remainingPercent: total > 0 ? Math.min(100, Math.max(0, (remaining / total) * 100)) : 0,
+    unit: results.find((result) => result.unit)?.unit ?? "units",
+    source: config.endpoint,
+    checkedAt: new Date().toISOString(),
+  };
 }
 
 // ─── Auth ───────────────────────────────────────────────
