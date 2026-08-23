@@ -6,7 +6,7 @@ import { Modal } from "@/components/ui/Modal";
 import { formatTokens, cn, formatCost, USD_TO_CNY } from "@/lib/utils";
 import { useCurrency } from "@/lib/currency";
 import type { ApiType, CustomProviderConfig, Model, Provider } from "@/types";
-import { searchCatalog, catalogToModel, guessModelMeta } from "@/data/model-catalog";
+import { searchCatalog, catalogToModel, findCatalogEntry, guessModelMeta } from "@/data/model-catalog";
 import {
   Plus,
   Trash2,
@@ -250,6 +250,10 @@ export function ProvidersModelsPage() {
       return a.name.localeCompare(b.name);
     });
   const customProviders = allProviders.filter((p) => p.type === "custom");
+  const enabledModelRefs = new Set(useConfigStore.getState().settings?.enabledModels ?? []);
+  const configuredProviders = allProviders.filter((provider) => hasKey(provider)).length;
+  const totalModels = allProviders.reduce((sum, provider) => sum + provider.models.length, 0);
+  const enabledModelsCount = allProviders.reduce((sum, provider) => sum + provider.models.filter((model) => enabledModelRefs.has(`${provider.id}/${model.id}`)).length, 0);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
@@ -328,21 +332,31 @@ export function ProvidersModelsPage() {
   };
 
   return (
-    <div className="space-y-6">
-      <div>
+    <div className="providers-page space-y-6">
+      <div className="providers-command-header">
+        <div>
+          <div className="page-kicker"><span /> ROUTING FABRIC // CONFIGURATION</div>
         <h1 className="text-2xl font-bold" style={{ color: "var(--page-text)" }}>
           {t("nav.providers_models")}
         </h1>
         <p className="mt-1 text-sm" style={{ color: "var(--muted-text)" }}>
           {t("providers_models.subtitle")}
         </p>
+        </div>
+        <div className="providers-header-signal"><span /> {t("providers_models.config_sync_ready")}</div>
+      </div>
+
+      <div className="providers-readout-grid">
+        <div className="tech-panel providers-readout-card"><span>{t("providers_models.providers_indexed")}</span><strong>{allProviders.length}</strong><small>{configuredProviders} {t("providers_models.configured")}</small></div>
+        <div className="tech-panel providers-readout-card"><span>{t("providers_models.models_catalogued")}</span><strong>{totalModels}</strong><small>{enabledModelsCount} {t("providers_models.enabled")}</small></div>
+        <div className="tech-panel providers-readout-card"><span>{t("providers_models.builtin_custom")}</span><strong>{builtinProviders.length} / {customProviders.length}</strong><small>{t("providers_models.routing_sources")}</small></div>
       </div>
 
       <EnabledModelsPanel />
 
-      <div className="flex overflow-hidden rounded-xl border border-gray-800 bg-gray-900/50">
+      <div className="providers-console flex overflow-hidden rounded-xl border border-gray-800 bg-gray-900/50">
         {/* ─── Left: Provider List ─────────────────────── */}
-        <div className="w-60 shrink-0 border-r border-gray-800 p-3">
+        <div className="provider-rail w-60 shrink-0 border-r border-gray-800 p-3">
           {builtinProviders.length > 0 && (
             <>
               <div className="flex items-center justify-between px-2 pb-2 pt-1">
@@ -426,7 +440,7 @@ export function ProvidersModelsPage() {
         </div>
 
         {/* ─── Right: Provider Detail / Add Form ───────── */}
-        <div className="min-w-0 flex-1 p-6">
+        <div className="provider-detail min-w-0 flex-1 p-6">
           {adding ? (
             <AddProviderForm onSubmit={handleAddProvider} onCancel={() => setAdding(false)} />
           ) : selected ? (
@@ -519,10 +533,8 @@ function ProviderListItem({
     <button
       onClick={onClick}
       className={cn(
-        "flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-colors",
-        active
-          ? "border-gray-600 bg-gray-800 text-white"
-          : "border-transparent text-gray-300 hover:bg-gray-800/60"
+        "provider-list-item flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-colors",
+        active ? "is-active border-gray-600 bg-gray-800 text-white" : "is-inactive border-transparent text-gray-300 hover:bg-gray-800/60"
       )}
     >
       {provider.type === "custom" ? (
@@ -794,9 +806,10 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provid
     const id = quickId.trim();
     if (!id) { setQuickHint(null); return; }
     const g = guessModelMeta(id);
+    const exact = findCatalogEntry(id);
     setQuickHint(
       g.source === "catalog" && g.matched
-        ? t("models.detected_catalog", g.matched)
+        ? t("models.detected_catalog_meta", g.matched, formatTokens(exact?.contextWindow ?? g.contextWindow ?? 0), formatTokens(exact?.maxTokens ?? g.maxTokens ?? 0))
         : g.source === "heuristic"
           ? t("models.detected_heuristic")
           : null
@@ -806,22 +819,32 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provid
   const handleQuickAdd = async () => {
     const id = quickId.trim();
     if (!id) return;
-    // Don't duplicate
-    if (provider.models.some((m) => m.id === id)) {
+    const g = guessModelMeta(id);
+    const match = findCatalogEntry(id);
+    const existing = provider.models.find((model) => model.id === id);
+    if (existing) {
+      // Re-entering a known model id acts as metadata repair. This fixes
+      // models previously added with generic fallback limits without forcing
+      // the user to delete and recreate the model or overwriting a custom
+      // provider-specific price.
+      if (match) {
+        updateModel(provider.id, id, {
+          name: match.name ?? existing.name,
+          reasoning: match.reasoning ?? existing.reasoning,
+          input: match.input ?? existing.input,
+          contextWindow: match.contextWindow,
+          maxTokens: match.maxTokens,
+          cost: existing.cost ?? match.cost,
+        });
+      }
+      const list = settings?.enabledModels ?? [];
+      await updateSettings({ enabledModels: Array.from(new Set([...list, `${provider.id}/${id}`])) });
       setQuickId("");
       setQuickHint(null);
       return;
     }
-    const g = guessModelMeta(id);
-    const cw = g.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
-    const mt = g.contextWindow
-      ? (g.contextWindow >= 1_000_000 ? 65536 : g.contextWindow >= 200_000 ? 32768 : 8192)
-      : DEFAULT_MAX_TOKENS;
-    // Pull full cost/name from catalog if available
-    const entries = searchCatalog(id, 5);
-    const match = g.source === "catalog"
-      ? entries.find((e) => e.patterns.some((p) => id.toLowerCase().includes(p.toLowerCase())))
-      : undefined;
+    const cw = match?.contextWindow ?? g.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
+    const mt = match?.maxTokens ?? g.maxTokens ?? (cw >= 1_000_000 ? 65_536 : cw >= 200_000 ? 32_768 : 8192);
     const model: Model = {
       id,
       name: match?.name,
@@ -1169,7 +1192,7 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provid
             return (
             <div
               key={m.id}
-              className="flex items-center gap-2 rounded-lg border border-gray-700 bg-gray-900/70 px-3 py-2.5"
+              className="provider-model-row flex items-center gap-2 rounded-lg border border-gray-700 bg-gray-900/70 px-3 py-2.5"
             >
               <button
                 onClick={() => toggleModelEnabled(m.id)}
@@ -2011,7 +2034,7 @@ function AddProviderForm({
             {models.map((m) => (
               <div
                 key={m.id}
-                className="flex items-center gap-2 rounded-lg border border-gray-700 bg-gray-900/70 px-3 py-2.5"
+                className="provider-model-row flex items-center gap-2 rounded-lg border border-gray-700 bg-gray-900/70 px-3 py-2.5"
               >
                 <Box className="h-4 w-4 shrink-0 text-gray-500" />
                 <span className="min-w-0 flex-1 truncate font-mono text-sm text-gray-200">

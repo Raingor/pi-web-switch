@@ -231,11 +231,11 @@ export const MODEL_CATALOG: CatalogEntry[] = [
 
   // ── DeepSeek ────────────────────────────────────────────
   {
-    patterns: ["deepseek-v4", "deepseek-v4-flash", "deepseek-v4-chat"],
+    patterns: ["deepseek-v4-flash", "deepseek-v4-chat", "deepseek-v4"],
     name: "DeepSeek V4 Flash",
     reasoning: false,
     input: ["text"],
-    contextWindow: 128_000,
+    contextWindow: 1_048_576,
     maxTokens: 8192,
     cost: P(0.3, 0.6, 0.15, 0.3),
     family: "DeepSeek",
@@ -864,7 +864,7 @@ export const MODEL_CATALOG: CatalogEntry[] = [
     name: "DeepSeek V4 Flash (Free)",
     reasoning: false,
     input: ["text"],
-    contextWindow: 128_000,
+    contextWindow: 1_048_576,
     maxTokens: 8192,
     cost: P(0, 0, 0, 0),
     family: "OpenCode",
@@ -894,25 +894,49 @@ export interface GuessResult {
   matched?: string; // pattern that matched
 }
 
+function catalogPatternScore(id: string, pattern: string): number {
+  const key = id.trim().toLowerCase();
+  const pat = pattern.trim().toLowerCase();
+  if (!key || !pat) return 0;
+  const tail = key.split("/").pop() ?? key;
+
+  // Exact matches must always beat a broader family prefix. For example,
+  // deepseek-v4-flash-free must match its own entry rather than deepseek-v4.
+  if (key === pat) return 10_000 + pat.length;
+  if (tail === pat) return 9_500 + pat.length;
+  if (key.endsWith("/" + pat)) return 9_000 + pat.length;
+  if (tail.startsWith(pat + "-") || tail.startsWith(pat + ":")) return 7_000 + pat.length;
+  if (key.startsWith(pat + "-") || key.startsWith(pat + ":")) return 6_500 + pat.length;
+  if (key.includes("/" + pat + "-") || key.includes("/" + pat + ":")) return 6_000 + pat.length;
+  return 0;
+}
+
+/** Resolve the single best catalog entry for a full model id. */
+export function findCatalogEntry(id: string): CatalogEntry | undefined {
+  let best: { entry: CatalogEntry; score: number } | undefined;
+  for (const entry of MODEL_CATALOG) {
+    for (const pattern of entry.patterns) {
+      const score = catalogPatternScore(id, pattern);
+      if (score > 0 && (!best || score > best.score)) best = { entry, score };
+    }
+  }
+  return best?.entry;
+}
+
 export function guessModelMeta(id: string): GuessResult {
   const key = (id ?? "").toLowerCase();
 
-  // 1. Exact/prefix/suffix catalog match
-  for (const entry of MODEL_CATALOG) {
-    for (const p of entry.patterns) {
-      const pat = p.toLowerCase();
-      if (key === pat || key.startsWith(pat + "-") || key.endsWith("/" + pat) ||
-          key.includes("/" + pat + "-") || key.includes("/" + pat + ":")) {
-        return {
-          reasoning: entry.reasoning,
-          input: entry.input,
-          contextWindow: entry.contextWindow,
-          maxTokens: entry.maxTokens,
-          source: "catalog",
-          matched: entry.name ?? p,
-        };
-      }
-    }
+  // 1. Best exact/alias/family catalog match.
+  const entry = findCatalogEntry(key);
+  if (entry) {
+    return {
+      reasoning: entry.reasoning,
+      input: entry.input,
+      contextWindow: entry.contextWindow,
+      maxTokens: entry.maxTokens,
+      source: "catalog",
+      matched: entry.name ?? entry.patterns[0],
+    };
   }
 
   // 2. Heuristic keyword match
@@ -943,13 +967,17 @@ export function guessModelMeta(id: string): GuessResult {
 export function searchCatalog(query: string, limit = 40): CatalogEntry[] {
   const q = query.trim().toLowerCase();
   if (!q) return MODEL_CATALOG.slice(0, limit);
-  const out: CatalogEntry[] = [];
-  for (const e of MODEL_CATALOG) {
-    const hay = [e.name ?? "", e.family ?? "", ...e.patterns].join(" ").toLowerCase();
-    if (hay.includes(q)) out.push(e);
-    if (out.length >= limit) break;
-  }
-  return out;
+  return MODEL_CATALOG
+    .map((entry, index) => {
+      const patternScore = Math.max(0, ...entry.patterns.map((pattern) => catalogPatternScore(q, pattern)));
+      const hay = [entry.name ?? "", entry.family ?? "", ...entry.patterns].join(" ").toLowerCase();
+      const textScore = hay.includes(q) ? 1_000 - index : 0;
+      return { entry, score: Math.max(patternScore, textScore) };
+    })
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map((item) => item.entry);
 }
 
 // ─── Convert a catalog entry to a Partial<Model> for prefill ─

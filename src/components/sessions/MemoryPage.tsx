@@ -212,7 +212,7 @@ function EntryCard({
 
   return (
     <div
-      className="group relative rounded-lg border px-3.5 py-2.5"
+      className="memory-entry-card group relative rounded-lg border px-3.5 py-2.5"
       style={{ backgroundColor: "var(--card-bg)", borderColor: "var(--card-border)" }}
     >
       <p
@@ -222,7 +222,7 @@ function EntryCard({
         {renderInline(entry.text, q)}
       </p>
       {/* Hover actions: copy / delete */}
-      <div className="absolute right-2 top-2 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+      <div className="memory-entry-actions absolute right-2 top-2 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
         <button
           onClick={handleCopy}
           className="rounded p-1 transition-colors hover:bg-black/10"
@@ -268,10 +268,10 @@ function MemoryFileSection({
     setOpenOverrides((prev) => ({ ...prev, [key]: !currentOpen }));
 
   return (
-    <div>
+    <div className="memory-file-section">
       {/* File header */}
       <div
-        className="flex items-center gap-2 pb-3"
+        className="memory-file-header flex items-center gap-2 pb-3"
         style={{ borderBottom: "1px solid var(--card-border)" }}
       >
         <Icon className="h-4 w-4" style={{ color }} />
@@ -348,7 +348,7 @@ function MemoryFileSection({
 
                 {/* Timeline entries */}
                 {open && (
-                  <div className="space-y-1.5 pl-2">
+                  <div className="memory-timeline space-y-1.5 pl-2">
                     {dateEntries.map((entry, idx) => (
                       <EntryCard
                         key={`${dateKey}-${idx}`}
@@ -459,11 +459,14 @@ export function MemoryPage() {
   }
 
   const totalEntries = parsed.reduce((s, p) => s + p.entries.length, 0);
+  const totalChars = parsed.reduce((sum, item) => sum + item.file.content.length, 0);
+  const latestFile = [...parsed].sort((a, b) => (b.file.updatedAt || "").localeCompare(a.file.updatedAt || ""))[0]?.file;
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between">
+    <div className="memory-page space-y-6">
+      <div className="memory-command-header flex items-start justify-between">
         <div>
+          <div className="page-kicker"><span /> {t("memory.knowledge_synced")}</div>
           <h1 className="text-2xl font-bold" style={{ color: "var(--page-text)" }}>{t("memory.title")}</h1>
           <p className="mt-1 text-sm" style={{ color: "var(--muted-text)" }}>
             {t("memory.summary", String(totalEntries), String(parsed.length))}
@@ -481,15 +484,29 @@ export function MemoryPage() {
       </div>
 
       {parsed.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-12">
-          <Brain className="h-12 w-12" style={{ color: "var(--subtle-text)" }} />
+        <div className="memory-empty-state">
+          <div className="memory-empty-radar"><Brain className="h-7 w-7" /></div>
           <p className="mt-4 text-sm" style={{ color: "var(--muted-text)" }}>{t("memory.no_memory")}</p>
           <p className="text-xs mt-1" style={{ color: "var(--subtle-text)" }}>{t("memory.no_memory_desc")}</p>
         </div>
       ) : (
         <>
-          {/* Search */}
-          <div className="relative max-w-md">
+          <div className="memory-readout-grid">
+            <div className="tech-panel memory-readout-card"><span>{t("memory.files_indexed")}</span><strong>{parsed.length}</strong><small>{t("memory.summary", String(totalEntries), String(parsed.length))}</small></div>
+            <div className="tech-panel memory-readout-card"><span>{t("memory.entry_count")}</span><strong>{totalEntries}</strong><small>{formatDate(latestFile?.updatedAt || "")}</small></div>
+            <div className="tech-panel memory-readout-card"><span>{t("memory.text_volume")}</span><strong>{totalChars > 1000 ? `${(totalChars / 1000).toFixed(1)}K` : totalChars}</strong><small>{t("memory.characters_indexed")}</small></div>
+          </div>
+
+          <div className="memory-toolbar tech-panel">
+            <div className="memory-file-jump">
+              <span className="memory-toolbar-label">{t("memory.channels")}</span>
+              {parsed.map(({ file, entries }) => {
+                const Icon = FILE_ICONS[file.filename] || FileText;
+                return <a key={file.filename} href={`#memory-${file.filename}`} className="memory-file-chip"><Icon className="h-3.5 w-3.5" />{file.filename}<b>{entries.length}</b></a>;
+              })}
+            </div>
+            {/* Search */}
+            <div className="relative memory-search">
             <Search
               className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2"
               style={{ color: "var(--subtle-text)" }}
@@ -506,6 +523,7 @@ export function MemoryPage() {
                 color: "var(--page-text)",
               }}
             />
+            </div>
           </div>
 
           {visible.length === 0 ? (
@@ -513,8 +531,9 @@ export function MemoryPage() {
               {t("memory.no_results")}
             </p>
           ) : (
-            <div className="space-y-8">
+            <div className="memory-sections">
               {visible.map(({ file, entries }) => (
+                <div key={file.filename} id={`memory-${file.filename}`} className="memory-file-panel tech-panel">
                 <MemoryFileSection
                   key={file.filename}
                   file={file}
@@ -522,6 +541,7 @@ export function MemoryPage() {
                   q={q}
                   onDeleteEntry={(entry) => setDeleteTarget({ filename: file.filename, entry })}
                 />
+                </div>
               ))}
             </div>
           )}

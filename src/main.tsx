@@ -39,10 +39,10 @@ function useThemeSync(initialized: boolean) {
 function LoadingScreen() {
   const { t } = useTranslation();
   return (
-    <div className="flex h-screen items-center justify-center bg-gray-950">
-      <div className="flex flex-col items-center gap-4">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-gray-600 border-t-blue-500" />
-        <p className="text-sm text-gray-500">{t("loading.config")}</p>
+    <div className="loading-console">
+      <div className="loading-core">
+        <div className="loading-ring" />
+        <p>{t("loading.config")}</p>
       </div>
     </div>
   );
@@ -51,8 +51,8 @@ function LoadingScreen() {
 function ErrorScreen({ error, onRetry }: { error: string; onRetry: () => void }) {
   const { t } = useTranslation();
   return (
-    <div className="flex h-screen items-center justify-center bg-gray-950">
-      <div className="flex flex-col items-center gap-4 max-w-md text-center">
+    <div className="loading-console">
+      <div className="tech-panel relative z-10 flex max-w-md flex-col items-center gap-4 rounded-xl border p-8 text-center">
         <p className="text-lg font-semibold text-red-400">{t("loading.error_title")}</p>
         <p className="text-sm text-gray-400">{error}</p>
         <button
@@ -112,24 +112,101 @@ function applySavedFontSize() {
 applySavedZoom();
 function applySavedZoom() {
   const saved = Number(localStorage.getItem("pi-ui-zoom"));
+  document.documentElement.style.zoom = "";
   if (saved >= 50 && saved <= 200) {
-    document.documentElement.style.zoom = `${saved}%`;
+    document.documentElement.style.setProperty("--ui-zoom", String(saved / 100));
   }
 }
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <Root />
-  </StrictMode>
-);
+// ─── Service worker lifecycle ───────────────────────────
+// A production SW can remain registered when the same localhost origin is
+// later opened with Vite dev. Actively remove it in development; otherwise a
+// normal Cmd+R may be served an old HTML shell while Cmd+Shift+R bypasses it.
+const APP_CACHE_PREFIX = "pi-web-switch-";
+const DEV_SW_CLEANUP_KEY = "pi-web-switch-dev-sw-cleaned";
 
-// ─── PWA: register service worker (production only — dev must not
-// cache HTML pages, or SPA routes like /providers can return stale HTML
-// to API fetches and break JSON parsing) ─────────────────────
-if ("serviceWorker" in navigator && import.meta.env.PROD) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/sw.js").catch((err) => {
-      console.warn("SW registration failed:", err);
-    });
-  });
+async function clearAppCaches() {
+  if (!("caches" in window)) return;
+  const keys = await caches.keys();
+  await Promise.all(
+    keys.filter((key) => key.startsWith(APP_CACHE_PREFIX)).map((key) => caches.delete(key))
+  );
 }
+
+function getAppBaseUrl() {
+  const moduleScript = Array.from(document.scripts).find(
+    (script) => script.type === "module" && script.src
+  );
+  return new URL("../", moduleScript?.src ?? document.baseURI);
+}
+
+async function configureServiceWorker() {
+  if (!("serviceWorker" in navigator)) return;
+
+  const appBaseUrl = getAppBaseUrl();
+
+  if (import.meta.env.DEV) {
+    try {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      const appRegistrations = registrations.filter(
+        (registration) => registration.scope === appBaseUrl.href
+      );
+      const hadController = Boolean(navigator.serviceWorker.controller);
+      const removed = await Promise.all(
+        appRegistrations.map((registration) => registration.unregister())
+      );
+      await clearAppCaches();
+
+      // If this document was already controlled by the old production worker,
+      // reload once after unregistering it so the first API/static requests are
+      // also guaranteed to bypass the old worker. sessionStorage prevents a
+      // reload loop if the browser reports the controller for one extra tick.
+      if (
+        hadController &&
+        removed.some(Boolean) &&
+        sessionStorage.getItem(DEV_SW_CLEANUP_KEY) !== "1"
+      ) {
+        sessionStorage.setItem(DEV_SW_CLEANUP_KEY, "1");
+        window.location.reload();
+        return;
+      }
+      sessionStorage.removeItem(DEV_SW_CLEANUP_KEY);
+    } catch (err) {
+      // Cache cleanup must never prevent React from mounting.
+      console.warn("SW cleanup failed:", err);
+    }
+    return;
+  }
+
+  try {
+    // Resolve from the built JS asset directory so this also works when the
+    // app is hosted under a subdirectory instead of the domain root.
+    const swUrl = new URL("sw.js", appBaseUrl);
+    const registration = await navigator.serviceWorker.register(swUrl, {
+      updateViaCache: "none",
+    });
+    // Check on every application start instead of waiting for the browser's
+    // periodic service-worker update window.
+    await registration.update();
+  } catch (err) {
+    console.warn("SW registration failed:", err);
+  }
+}
+
+async function bootstrap() {
+  if (import.meta.env.DEV) {
+    await configureServiceWorker();
+  }
+
+  createRoot(document.getElementById("root")!).render(
+    <StrictMode>
+      <Root />
+    </StrictMode>
+  );
+
+  if (import.meta.env.PROD) {
+    void configureServiceWorker();
+  }
+}
+
+void bootstrap();

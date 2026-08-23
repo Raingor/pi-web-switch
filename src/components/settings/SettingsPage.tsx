@@ -200,7 +200,11 @@ export function SettingsPage() {
 
   // Apply + persist UI zoom (whole-interface percentage scaling).
   useEffect(() => {
-    document.documentElement.style.zoom = `${uiZoom}%`;
+    // Migrate away from the old browser zoom implementation. Keeping the
+    // legacy `zoom` property would compound scaling with the new layout-aware
+    // transform and make dense pages appear clipped or unexpectedly tiny.
+    document.documentElement.style.zoom = "";
+    document.documentElement.style.setProperty("--ui-zoom", String(uiZoom / 100));
     localStorage.setItem(UI_ZOOM_KEY, String(uiZoom));
   }, [uiZoom]);
 
@@ -427,6 +431,7 @@ export function SettingsPage() {
                 max={200}
                 step={5}
                 value={uiZoom}
+                onInput={(e) => setUiZoom(Number(e.currentTarget.value))}
                 onChange={(e) => setUiZoom(Number(e.target.value))}
                 className="flex-1 accent-blue-500"
               />

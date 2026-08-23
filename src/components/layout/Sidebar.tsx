@@ -7,105 +7,107 @@ import {
   Plug,
   Users,
   Globe,
+  ChevronDown,
+  X,
+  Orbit,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTranslation, LANGUAGES } from "@/lib/i18n";
 import { useState } from "react";
 
 const navItems = [
-  { to: "/", icon: LayoutDashboard, key: "nav.dashboard" },
-  { to: "/sessions", icon: History, key: "nav.sessions" },
-  { to: "/memory", icon: Brain, key: "nav.memory" },
-  { to: "/providers", icon: Plug, key: "nav.providers_models" },
-  { to: "/subagents", icon: Users, key: "nav.subagents" },
-  { to: "/settings", icon: Settings, key: "nav.settings" },
+  { to: "/", icon: LayoutDashboard, key: "nav.dashboard", code: "01" },
+  { to: "/sessions", icon: History, key: "nav.sessions", code: "02" },
+  { to: "/memory", icon: Brain, key: "nav.memory", code: "03" },
+  { to: "/providers", icon: Plug, key: "nav.providers_models", code: "04" },
+  { to: "/subagents", icon: Users, key: "nav.subagents", code: "05" },
+  { to: "/settings", icon: Settings, key: "nav.settings", code: "06" },
 ];
 
-export function Sidebar() {
+interface SidebarProps {
+  mobileOpen?: boolean;
+  onClose?: () => void;
+}
+
+export function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
   const { t, lang, setLang } = useTranslation();
   const [langOpen, setLangOpen] = useState(false);
 
   return (
-    <aside
-      className="flex h-screen w-64 flex-col border-r"
-      style={{
-        backgroundColor: "var(--sidebar-bg)",
-        borderColor: "var(--sidebar-border)",
-      }}
-    >
-      {/* Logo */}
-      <div
-        className="flex items-center gap-3 border-b px-6 py-5"
-        style={{ borderColor: "var(--sidebar-border)" }}
-      >
-        <img src="/pi.svg" alt="pi-switch" className="h-9 w-9 rounded-lg" />
-        <div>
-          <h1 className="text-base font-semibold" style={{ color: "var(--page-text)" }}>pi-switch</h1>
-          <p className="text-xs" style={{ color: "var(--subtle-text)" }}>{t("app.subtitle")}</p>
+    <aside className={cn("command-sidebar", mobileOpen && "is-open")}>
+      <div className="sidebar-edge" aria-hidden="true" />
+
+      <div className="brand-block">
+        <div className="brand-mark">
+          <img src="/pi.svg" alt="pi-switch" />
+          <span className="brand-orbit" aria-hidden="true" />
         </div>
+        <div className="min-w-0">
+          <div className="brand-name">pi-switch</div>
+          <div className="brand-subtitle">{t("app.subtitle")}</div>
+        </div>
+        <button className="sidebar-close" aria-label="Close navigation" onClick={onClose}>
+          <X className="h-4 w-4" />
+        </button>
       </div>
 
-      {/* Navigation */}
-      <nav className="flex-1 space-y-1 px-3 py-4">
-        {navItems.map(({ to, icon: Icon, key }) => (
+      <div className="sidebar-system-label">
+        <span>CONTROL MATRIX</span>
+        <span className="sidebar-label-line" />
+      </div>
+
+      <nav className="command-nav">
+        {navItems.map(({ to, icon: Icon, key, code }) => (
           <NavLink
             key={to}
             to={to}
             end={to === "/"}
-            className={({ isActive }) =>
-              cn(
-                "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
-              )
-            }
-            style={({ isActive }) => ({
-              backgroundColor: isActive ? "var(--sidebar-active-bg)" : "transparent",
-              color: isActive ? "var(--sidebar-active-text)" : "var(--sidebar-text)",
-            })}
+            onClick={onClose}
+            className={({ isActive }) => cn("command-nav-item", isActive && "is-active")}
           >
-            <Icon className="h-4 w-4" />
-            {t(key)}
+            <span className="nav-code">{code}</span>
+            <span className="nav-icon"><Icon className="h-4 w-4" /></span>
+            <span className="nav-label">{t(key)}</span>
+            <span className="nav-signal" aria-hidden="true" />
           </NavLink>
         ))}
       </nav>
 
-      {/* Language Switcher */}
-      <div className="border-t px-3 py-3" style={{ borderColor: "var(--sidebar-border)" }}>
-        <button
-          onClick={() => setLangOpen(!langOpen)}
-          className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors"
-          style={{ color: "var(--sidebar-text)" }}
-        >
-          <Globe className="h-4 w-4" />
-          <span className="flex-1 text-left">{LANGUAGES.find((l) => l.code === lang)?.nativeLabel || "English"}</span>
-        </button>
-        {langOpen && (
-          <div className="mt-1 space-y-0.5 px-1">
-            {LANGUAGES.map((l) => (
-              <button
-                key={l.code}
-                onClick={() => { setLang(l.code); setLangOpen(false); }}
-                className={cn(
-                  "flex w-full items-center gap-3 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors",
-                  lang === l.code ? "bg-blue-600/10 text-blue-400" : ""
-                )}
-                style={{
-                  color: lang === l.code ? "var(--sidebar-active-text)" : "var(--sidebar-text)",
-                  backgroundColor: lang === l.code ? "var(--sidebar-active-bg)" : "transparent",
-                }}
-              >
-                {l.nativeLabel}
-              </button>
-            ))}
+      <div className="sidebar-footer">
+        <div className="node-status">
+          <div className="node-status-icon"><Orbit className="h-4 w-4" /></div>
+          <div>
+            <span className="node-status-label">LOCAL NODE</span>
+            <span className="node-status-value"><i /> SYSTEM ONLINE</span>
           </div>
-        )}
-      </div>
+        </div>
 
-      {/* Version */}
-      <div
-        className="border-t px-6 py-3"
-        style={{ borderColor: "var(--sidebar-border)" }}
-      >
-        <p className="text-xs" style={{ color: "var(--subtle-text)" }}>{t("app.version")}</p>
+        <div className="language-panel">
+          <button onClick={() => setLangOpen(!langOpen)} className="language-trigger">
+            <Globe className="h-4 w-4" />
+            <span>{LANGUAGES.find((l) => l.code === lang)?.nativeLabel || "English"}</span>
+            <ChevronDown className={cn("ml-auto h-3.5 w-3.5 transition-transform", langOpen && "rotate-180")} />
+          </button>
+          {langOpen && (
+            <div className="language-menu">
+              {LANGUAGES.map((l) => (
+                <button
+                  key={l.code}
+                  onClick={() => { setLang(l.code); setLangOpen(false); }}
+                  className={cn("language-option", lang === l.code && "is-selected")}
+                >
+                  <span>{l.nativeLabel}</span>
+                  {lang === l.code && <i />}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="version-strip">
+          <span>{t("app.version")}</span>
+          <span>BUILD // STABLE</span>
+        </div>
       </div>
     </aside>
   );

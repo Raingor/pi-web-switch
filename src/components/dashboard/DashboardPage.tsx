@@ -1,14 +1,15 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useConfigStore } from "@/store/config-store";
 import { useTranslation } from "@/lib/i18n";
 import { useCurrency } from "@/lib/currency";
 import { formatCost, formatNumber, cn, USD_TO_CNY } from "@/lib/utils";
 import {
   Activity, DollarSign, BarChart3, ArrowUp, ArrowDown, Database, DollarSignIcon, RefreshCw, Download,
+  Gauge, Layers3, Clock3, Zap, CircleDollarSign, Cpu, PieChart as PieChartIcon,
 } from "lucide-react";
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  CartesianGrid, Legend,
+  CartesianGrid, Legend, BarChart, Bar, PieChart, Pie, Cell,
 } from "recharts";
 
 // ─── Types ──────────────────────────────────────────────
@@ -70,21 +71,21 @@ interface UsageRangeData {
   notice?: "no-config" | "api-error";
 }
 
-type SourceKey = "all" | "pi" | "cindy-pi" | "claude" | "codex" | "opencode" | "gemini" | "grok" | "atomcode" | "copilot";
+type SourceKey = "pi" | "chatgpt";
 type RangeKey = "today" | "7d" | "30d" | "custom";
 type TabKey = "log" | "provider" | "model";
 type SortDir = "asc" | "desc";
 
 const RANGE_KEYS: RangeKey[] = ["today", "7d", "30d", "custom"];
 
-const COLORS = ["#3b82f6", "#10b981", "#8b5cf6", "#f59e0b", "#ef4444"];
+const COLORS = ["#00d8ff", "#9ef01a", "#ffb84d", "#9f8cff", "#ff5c7a"];
 
 const CHART_LINE_COLORS: Record<string, string> = {
-  input: "#3b82f6",
-  output: "#10b981",
-  cacheRead: "#8b5cf6",
-  cacheWrite: "#f59e0b",
-  cost: "#ef4444",
+  input: "#00d8ff",
+  output: "#9ef01a",
+  cacheRead: "#9f8cff",
+  cacheWrite: "#ffb84d",
+  cost: "#ff5c7a",
 };
 
 const LOG_PAGE_SIZE = 20;
@@ -199,7 +200,7 @@ function StatCard({
   className?: string;
 }) {
   return (
-    <div className={cn("rounded-xl border p-5", className)} style={{ borderColor: "var(--card-border)", backgroundColor: "var(--card-bg)" }}>
+    <div className={cn("tech-panel dashboard-stat-card p-5", className)} style={{ borderColor: "var(--card-border)", backgroundColor: "var(--card-bg)" }}>
       <div className="flex items-start justify-between mb-3">
         <p className="text-xs font-medium uppercase tracking-wider" style={{ color: "var(--muted-text)" }}>{title}</p>
         <div className="rounded-lg p-2" style={{ backgroundColor: "var(--accent-bg)" }}>
@@ -269,7 +270,7 @@ function SortableTh({
   return (
     <th
       className="px-4 py-3 text-right font-medium cursor-pointer select-none"
-      style={{ color: active ? "#3b82f6" : "var(--muted-text)" }}
+      style={{ color: active ? "var(--signal-cyan)" : "var(--muted-text)" }}
       onClick={() => onSort(sortKey)}
     >
       <span className="inline-flex items-center gap-0.5">
@@ -277,6 +278,67 @@ function SortableTh({
         {active && (sort.dir === "desc" ? <ArrowDown className="h-3 w-3" /> : <ArrowUp className="h-3 w-3" />)}
       </span>
     </th>
+  );
+}
+
+// ─── Analytics Components ───────────────────────────────
+
+function AnalyticsMetric({
+  label,
+  value,
+  detail,
+  icon,
+  accent = "var(--signal-cyan)",
+}: {
+  label: string;
+  value: string;
+  detail: string;
+  icon: React.ReactNode;
+  accent?: string;
+}) {
+  return (
+    <div className="analytics-metric">
+      <div className="analytics-metric-icon" style={{ color: accent, borderColor: `${accent}38`, backgroundColor: `${accent}12` }}>
+        {icon}
+      </div>
+      <div className="min-w-0">
+        <p className="analytics-metric-label">{label}</p>
+        <p className="analytics-metric-value">{value}</p>
+        <p className="analytics-metric-detail">{detail}</p>
+      </div>
+    </div>
+  );
+}
+
+function DistributionRow({
+  name,
+  meta,
+  value,
+  percentage,
+  color,
+  valueLabel,
+}: {
+  name: string;
+  meta: string;
+  value: number;
+  percentage: number;
+  color: string;
+  valueLabel: string;
+}) {
+  return (
+    <div className="distribution-row">
+      <div className="distribution-row-head">
+        <div className="min-w-0">
+          <span className="distribution-name">{name}</span>
+          <span className="distribution-meta">{meta}</span>
+        </div>
+        <span className="distribution-value">{valueLabel}</span>
+      </div>
+      <div className="distribution-track">
+        <span style={{ width: `${Math.max(percentage, percentage > 0 ? 1.5 : 0)}%`, backgroundColor: color }} />
+      </div>
+      <span className="distribution-percent">{percentage.toFixed(1)}%</span>
+    </div>
   );
 }
 
@@ -307,16 +369,9 @@ export function DashboardPage() {
 
   const fetchData = useCallback((force = false) => {
     if (!initialized || customInvalid) return;
-    let baseUrl = "/api/pi/usage-range";
-    if (source === "all") baseUrl = "/api/pi/all-usage-range";
-    else if (source === "cindy-pi") baseUrl = "/api/pi/cindy-usage-range";
-    else if (source === "claude") baseUrl = "/api/pi/claude-usage-range";
-    else if (source === "codex") baseUrl = "/api/pi/codex-usage-range";
-    else if (source === "opencode") baseUrl = "/api/pi/opencode-usage-range";
-    else if (source === "gemini") baseUrl = "/api/pi/gemini-usage-range";
-    else if (source === "grok") baseUrl = "/api/pi/grok-usage-range";
-    else if (source === "atomcode") baseUrl = "/api/pi/atomcode-usage-range";
-    else if (source === "copilot") baseUrl = "/api/pi/copilot-usage-range";
+    const baseUrl = source === "chatgpt"
+      ? "/api/pi/chatgpt-usage-range"
+      : "/api/pi/usage-range";
     // force=true adds refresh=1 so the API rescan bypasses its 30s session cache
     let url = `${baseUrl}?range=${range}${force ? "&refresh=1" : ""}`;
     if (range === "custom" && customFrom) {
@@ -391,6 +446,65 @@ export function DashboardPage() {
   const currentLogPage = Math.min(logPage, totalLogPages);
   const pagedLog = (data?.requestLog ?? []).slice((currentLogPage - 1) * LOG_PAGE_SIZE, currentLogPage * LOG_PAGE_SIZE);
 
+  const analytics = useMemo(() => {
+    const current = data ?? {
+      totalTokens: 0,
+      totalInput: 0,
+      totalOutput: 0,
+      totalCacheRead: 0,
+      totalCacheWrite: 0,
+      totalCost: 0,
+      totalRequests: 0,
+      cacheHitRate: 0,
+      dailyBreakdown: [],
+      hourlyBreakdown: [],
+      requestLog: [],
+      providerStats: [],
+      modelStats: [],
+    };
+    const totalTokens = Math.max(current.totalTokens, 0);
+    const totalRequests = Math.max(current.totalRequests, 0);
+    const cacheTokens = current.totalCacheRead + current.totalCacheWrite;
+    const activitySource = range === "today" ? current.hourlyBreakdown : current.dailyBreakdown;
+    const peak = activitySource.reduce<{ label: string; requests: number; tokens: number } | null>((best, row: any) => {
+      const requests = row.requests ?? 0;
+      const tokens = (row.input ?? 0) + (row.output ?? 0) + (row.cacheRead ?? 0) + (row.cacheWrite ?? 0);
+      const label = range === "today" ? String(row.hour ?? "").slice(-5) : formatDateShort(row.date || row.hour || "");
+      if (!best || requests > best.requests || (requests === best.requests && tokens > best.tokens)) {
+        return { label, requests, tokens };
+      }
+      return best;
+    }, null);
+    const providers = current.providerStats.filter((provider) => provider.totalRequests > 0).sort((a, b) => b.totalTokens - a.totalTokens);
+    const models = current.modelStats.filter((model) => model.totalRequests > 0).sort((a, b) => b.totalTokens - a.totalTokens);
+    const providerTokenTotal = providers.reduce((sum, provider) => sum + provider.totalTokens, 0);
+    const composition = [
+      { key: "input", value: current.totalInput, color: CHART_LINE_COLORS.input },
+      { key: "output", value: current.totalOutput, color: CHART_LINE_COLORS.output },
+      { key: "cacheRead", value: current.totalCacheRead, color: CHART_LINE_COLORS.cacheRead },
+      { key: "cacheWrite", value: current.totalCacheWrite, color: CHART_LINE_COLORS.cacheWrite },
+    ];
+    return {
+      totalTokens,
+      avgTokens: totalRequests > 0 ? totalTokens / totalRequests : 0,
+      avgCost: totalRequests > 0 ? current.totalCost / totalRequests : 0,
+      cacheTokens,
+      cacheShare: totalTokens > 0 ? (cacheTokens / totalTokens) * 100 : 0,
+      activeProviders: providers.length,
+      activeModels: models.length,
+      peak,
+      providers,
+      models,
+      providerTokenTotal,
+      composition,
+      activity: activitySource.map((row: any) => ({
+        label: range === "today" ? String(row.hour ?? "").slice(-5) : formatDateShort(row.date || row.hour || ""),
+        requests: row.requests ?? 0,
+        tokens: Math.round(((row.input ?? 0) + (row.output ?? 0) + (row.cacheRead ?? 0) + (row.cacheWrite ?? 0)) / 1000),
+      })),
+    };
+  }, [data, range]);
+
   const fmtCostCell = (v: number) => (currency === "CNY" ? `¥${(v * USD_TO_CNY).toFixed(4)}` : formatCostShort(v));
 
   const toggleSort = (setter: typeof setProviderSort) => (key: string) =>
@@ -414,10 +528,11 @@ export function DashboardPage() {
   };
 
   return (
-    <div className="space-y-5">
+    <div className="dashboard-page space-y-5">
       {/* Title + Time Range Selector + Currency Toggle */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
+      <div className="dashboard-command-header flex items-center justify-between flex-wrap gap-3">
         <div>
+          <div className="page-kicker"><span /> TELEMETRY // LIVE OPERATIONS</div>
           <h1 className="text-xl font-bold" style={{ color: "var(--page-text)" }}>{t("dashboard.title")}</h1>
           <p className="text-xs mt-0.5" style={{ color: "var(--muted-text)" }}>
             {data ? t("dashboard.requests_count", String(data.requestLog.length), formatCost(data.totalCost, currency)) : ""}
@@ -526,6 +641,26 @@ export function DashboardPage() {
           </div>
         </div>
 
+      <div className="dashboard-source-strip tech-panel">
+        <span className="dashboard-source-label">{t("dashboard.data_source")}</span>
+        <div className="dashboard-source-options">
+          {([
+            ["pi", "dashboard.source_pi"],
+            ["chatgpt", "dashboard.source_chatgpt"],
+          ] as const).map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setSource(key)}
+              className={cn("dashboard-source-option", source === key && "is-active")}
+            >
+              <span className="dashboard-source-dot" />
+              {t(label)}
+            </button>
+          ))}
+        </div>
+        {source === "chatgpt" && <span className="dashboard-source-note">{t("dashboard.source_chatgpt_note")}</span>}
+      </div>
+
       {/* Custom Date Picker */}
       {range === "custom" && (
         <div className="flex items-center gap-2 flex-wrap">
@@ -599,8 +734,187 @@ export function DashboardPage() {
             />
           </div>
 
+          {/* Rich analytics overview */}
+          <div className="dashboard-analytics-grid">
+            <section className="tech-panel analytics-overview-panel">
+              <div className="analytics-panel-header">
+                <div>
+                  <span className="analytics-panel-kicker">SYSTEM READOUT // 01</span>
+                  <h3>{t("dashboard.operational_overview")}</h3>
+                </div>
+                <Gauge className="h-4 w-4" style={{ color: "var(--signal-cyan)" }} />
+              </div>
+              <div className="analytics-metrics-grid">
+                <AnalyticsMetric
+                  label={t("dashboard.avg_tokens_request")}
+                  value={formatTokensShort(Math.round(analytics.avgTokens), lang)}
+                  detail={t("dashboard.avg_tokens_request_detail", String(analytics.activeModels))}
+                  icon={<Activity className="h-4 w-4" />}
+                />
+                <AnalyticsMetric
+                  label={t("dashboard.avg_cost_request")}
+                  value={fmtCostCell(analytics.avgCost)}
+                  detail={t("dashboard.avg_cost_request_detail", String(analytics.activeProviders))}
+                  icon={<CircleDollarSign className="h-4 w-4" />}
+                  accent="var(--signal-amber)"
+                />
+                <AnalyticsMetric
+                  label={t("dashboard.peak_activity")}
+                  value={analytics.peak?.label || "—"}
+                  detail={analytics.peak ? t("dashboard.peak_activity_detail", String(analytics.peak.requests)) : t("dashboard.no_data")}
+                  icon={<Zap className="h-4 w-4" />}
+                  accent="var(--signal-lime)"
+                />
+                <AnalyticsMetric
+                  label={t("dashboard.active_models")}
+                  value={String(analytics.activeModels)}
+                  detail={t("dashboard.active_models_detail", String(analytics.activeProviders))}
+                  icon={<Cpu className="h-4 w-4" />}
+                  accent="var(--signal-violet)"
+                />
+              </div>
+            </section>
+
+            <section className="tech-panel composition-panel">
+              <div className="analytics-panel-header">
+                <div>
+                  <span className="analytics-panel-kicker">TOKEN FLOW // 02</span>
+                  <h3>{t("dashboard.token_composition")}</h3>
+                </div>
+                <PieChartIcon className="h-4 w-4" style={{ color: "var(--signal-violet)" }} />
+              </div>
+              <div className="composition-layout">
+                <div className="composition-chart">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={analytics.composition}
+                        dataKey="value"
+                        nameKey="key"
+                        innerRadius="62%"
+                        outerRadius="86%"
+                        paddingAngle={3}
+                        stroke="none"
+                      >
+                        {analytics.composition.map((entry) => <Cell key={entry.key} fill={entry.color} />)}
+                      </Pie>
+                      <Tooltip
+                        formatter={(value: any) => formatTokensShort(Number(Array.isArray(value) ? value[0] : value ?? 0), lang)}
+                        contentStyle={{ backgroundColor: "var(--card-bg-solid)", border: "1px solid var(--card-border)", borderRadius: "8px", fontSize: "11px" }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="composition-center">
+                    <strong>{formatTokensShort(analytics.cacheTokens, lang)}</strong>
+                    <span>{t("dashboard.cache_total")}</span>
+                  </div>
+                </div>
+                <div className="composition-legend">
+                  {analytics.composition.map((entry) => {
+                    const pct = analytics.totalTokens > 0 ? (entry.value / analytics.totalTokens) * 100 : 0;
+                    const labels: Record<string, string> = {
+                      input: t("dashboard.input"),
+                      output: t("dashboard.output"),
+                      cacheRead: t("dashboard.cache_hit"),
+                      cacheWrite: t("dashboard.cache_create"),
+                    };
+                    return (
+                      <div key={entry.key} className="composition-legend-row">
+                        <span className="legend-dot" style={{ backgroundColor: entry.color }} />
+                        <span>{labels[entry.key]}</span>
+                        <strong>{pct.toFixed(1)}%</strong>
+                      </div>
+                    );
+                  })}
+                  <div className="composition-summary">
+                    <span>{t("dashboard.cache_hit_rate")}</span>
+                    <strong>{analytics.cacheShare.toFixed(1)}%</strong>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section className="tech-panel distribution-panel">
+              <div className="analytics-panel-header">
+                <div>
+                  <span className="analytics-panel-kicker">ROUTING MATRIX // 03</span>
+                  <h3>{t("dashboard.provider_mix")}</h3>
+                </div>
+                <Layers3 className="h-4 w-4" style={{ color: "var(--signal-amber)" }} />
+              </div>
+              <div className="distribution-list">
+                {analytics.providers.length === 0 ? (
+                  <p className="analytics-no-data">{t("dashboard.no_data")}</p>
+                ) : analytics.providers.slice(0, 5).map((provider, index) => (
+                  <DistributionRow
+                    key={provider.providerId}
+                    name={provider.providerId}
+                    meta={t("dashboard.provider_models", String(provider.modelCount))}
+                    value={provider.totalTokens}
+                    percentage={analytics.providerTokenTotal > 0 ? (provider.totalTokens / analytics.providerTokenTotal) * 100 : 0}
+                    valueLabel={formatTokensShort(provider.totalTokens, lang)}
+                    color={COLORS[index % COLORS.length] ?? COLORS[0]!}
+                  />
+                ))}
+              </div>
+            </section>
+
+            <section className="tech-panel activity-panel">
+              <div className="analytics-panel-header">
+                <div>
+                  <span className="analytics-panel-kicker">REQUEST PULSE // 04</span>
+                  <h3>{t("dashboard.request_activity")}</h3>
+                </div>
+                <Clock3 className="h-4 w-4" style={{ color: "var(--signal-lime)" }} />
+              </div>
+              <div className="activity-chart">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={analytics.activity} margin={{ top: 8, right: 4, left: -22, bottom: 0 }}>
+                    <CartesianGrid vertical={false} stroke="var(--card-border)" strokeDasharray="3 3" />
+                    <XAxis dataKey="label" tick={{ fontSize: 9, fill: "var(--muted-text)" }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                    <YAxis allowDecimals={false} tick={{ fontSize: 9, fill: "var(--muted-text)" }} axisLine={false} tickLine={false} />
+                    <Tooltip
+                      cursor={{ fill: "color-mix(in srgb, var(--signal-cyan) 6%, transparent)" }}
+                      formatter={(value: any) => [Number(Array.isArray(value) ? value[0] : value ?? 0), t("dashboard.requests")]}
+                      contentStyle={{ backgroundColor: "var(--card-bg-solid)", border: "1px solid var(--card-border)", borderRadius: "8px", fontSize: "11px" }}
+                    />
+                    <Bar dataKey="requests" fill="var(--signal-cyan)" radius={[3, 3, 0, 0]} maxBarSize={18} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="activity-footer">
+                <span>{t("dashboard.total_requests")}</span>
+                <strong>{formatNumber(data.totalRequests)}</strong>
+              </div>
+            </section>
+
+            <section className="tech-panel model-leaderboard-panel">
+              <div className="analytics-panel-header">
+                <div>
+                  <span className="analytics-panel-kicker">MODEL LOAD // 05</span>
+                  <h3>{t("dashboard.model_leaderboard")}</h3>
+                </div>
+                <Cpu className="h-4 w-4" style={{ color: "var(--signal-violet)" }} />
+              </div>
+              <div className="leaderboard-list">
+                {analytics.models.length === 0 ? (
+                  <p className="analytics-no-data">{t("dashboard.no_data")}</p>
+                ) : analytics.models.slice(0, 5).map((model, index) => (
+                  <div key={`${model.providerId}/${model.modelId}`} className="leaderboard-row">
+                    <span className="leaderboard-rank">0{index + 1}</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="leaderboard-name">{model.modelId}</div>
+                      <div className="leaderboard-meta">{model.providerId} · {formatNumber(model.totalRequests)} {t("dashboard.requests")}</div>
+                    </div>
+                    <span className="leaderboard-value">{formatTokensShort(model.totalTokens, lang)}</span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </div>
+
           {/* Usage Trend Chart */}
-          <div className="rounded-xl border p-5" style={{ borderColor: "var(--card-border)", backgroundColor: "var(--card-bg)" }}>
+          <div className="tech-panel telemetry-chart p-5" style={{ borderColor: "var(--card-border)", backgroundColor: "var(--card-bg)" }}>
             <h3 className="text-sm font-semibold mb-1" style={{ color: "var(--page-text)" }}>{t("dashboard.usage_trend")}</h3>
             <p className="text-xs mb-4" style={{ color: "var(--muted-text)" }}>
               {range === "today" ? t("dashboard.range.today") : `${formatDateShort(chartData[0]?.rawDate || "")} - ${formatDateShort(chartData[chartData.length - 1]?.rawDate || "")}`}
@@ -633,7 +947,7 @@ export function DashboardPage() {
           </div>
 
           {/* Tabs: Request Log / Provider / Model */}
-          <div className="rounded-xl border overflow-hidden" style={{ borderColor: "var(--card-border)", backgroundColor: "var(--card-bg)" }}>
+          <div className="tech-panel data-console overflow-hidden" style={{ borderColor: "var(--card-border)", backgroundColor: "var(--card-bg)" }}>
             {/* Tab Header */}
             <div className="flex items-center border-b" style={{ borderColor: "var(--card-border)" }}>
               {([
@@ -649,8 +963,8 @@ export function DashboardPage() {
                     tab === tabItem.key ? "" : "border-transparent"
                   )}
                   style={{
-                    color: tab === tabItem.key ? "#3b82f6" : "var(--muted-text)",
-                    borderBottomColor: tab === tabItem.key ? "#3b82f6" : "transparent",
+                    color: tab === tabItem.key ? "var(--signal-cyan)" : "var(--muted-text)",
+                    borderBottomColor: tab === tabItem.key ? "var(--signal-cyan)" : "transparent",
                   }}
                 >
                   {t(tabItem.label)}

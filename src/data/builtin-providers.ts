@@ -56,8 +56,8 @@ export const BUILTIN_PROVIDERS: Provider[] = [
     hasAuth: true,
     authMethod: "file",
     models: [
-      { id: "deepseek-v4-flash-free", name: "DeepSeek V4 Flash (Free)", reasoning: false, input: ["text"], contextWindow: 128000, maxTokens: 8192, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, enabled: true },
-      { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash", reasoning: false, input: ["text"], contextWindow: 128000, maxTokens: 8192, cost: { input: 0.3, output: 0.6, cacheRead: 0.15, cacheWrite: 0.3 }, enabled: true },
+      { id: "deepseek-v4-flash-free", name: "DeepSeek V4 Flash (Free)", reasoning: false, input: ["text"], contextWindow: 1048576, maxTokens: 8192, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, enabled: true },
+      { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash", reasoning: false, input: ["text"], contextWindow: 1048576, maxTokens: 8192, cost: { input: 0.3, output: 0.6, cacheRead: 0.15, cacheWrite: 0.3 }, enabled: true },
     ],
   },
   {
@@ -68,7 +68,7 @@ export const BUILTIN_PROVIDERS: Provider[] = [
     hasAuth: true,
     authMethod: "file",
     models: [
-      { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash", reasoning: false, input: ["text"], contextWindow: 128000, maxTokens: 8192, cost: { input: 0.3, output: 0.6, cacheRead: 0.15, cacheWrite: 0.3 }, enabled: true },
+      { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash", reasoning: false, input: ["text"], contextWindow: 1048576, maxTokens: 8192, cost: { input: 0.3, output: 0.6, cacheRead: 0.15, cacheWrite: 0.3 }, enabled: true },
       { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro", reasoning: true, input: ["text"], contextWindow: 128000, maxTokens: 8192, cost: { input: 2, output: 8, cacheRead: 1, cacheWrite: 2 }, enabled: true },
       { id: "glm-5.1", name: "GLM 5.1", reasoning: false, input: ["text"], contextWindow: 128000, maxTokens: 8192, cost: { input: 0.5, output: 2, cacheRead: 0.25, cacheWrite: 0.5 }, enabled: true },
       { id: "qwen3.7-max", name: "Qwen 3.7 Max", reasoning: true, input: ["text"], contextWindow: 128000, maxTokens: 8192, cost: { input: 1.5, output: 6, cacheRead: 0.75, cacheWrite: 1.5 }, enabled: true },

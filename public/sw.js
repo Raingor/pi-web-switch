@@ -1,27 +1,29 @@
 // ─── pi-web-switch Service Worker ───────────────────────
 // Strategy:
-//   - HTML navigation (index.html / SPA routes): NETWORK-FIRST.
-//     Every refresh must hit the network so deploys show up on a plain
-//     Cmd+R reload; the cached copy is only a fallback for offline use.
-//   - Static assets (hashed js/css): CACHE-FIRST — safe because Vite
-//     fingerprints filenames, so a new deploy means new URLs.
-//   - API calls: NETWORK-FIRST, fallback to cache.
-// Bump CACHE_VERSION when the SW logic changes to purge old caches.
+//   - HTML navigation: NETWORK-FIRST with `cache: no-store` so Cmd+R always
+//     receives the current index.html instead of an HTTP/SW cached shell.
+//   - API calls: NETWORK-ONLY. Configuration/auth data must never be restored
+//     from a stale service-worker cache.
+//   - Static assets: CACHE-FIRST. Vite fingerprints JS/CSS filenames, so a new
+//     build receives a new URL and cannot collide with an older asset.
+//
+// v3 also purges the v1 cache-first HTML shell that can remain registered on
+// the same localhost origin and cause a blank page after a normal refresh.
 
-const CACHE_VERSION = "pi-web-switch-v2";
+const CACHE_VERSION = "pi-web-switch-v3";
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
+const CACHE_PREFIX = "pi-web-switch-";
+const SCOPE_URL = self.registration.scope;
+const OFFLINE_INDEX_URL = new URL("./index.html", SCOPE_URL).href;
 
-// NOTE: index.html is intentionally NOT precached. Pre-caching it would
-// make Cmd+R reloads serve the stale page after a deploy.
 const PRECACHE_URLS = [
-  "/manifest.webmanifest",
-  "/icon-192.png",
-  "/icon-512.png",
-  "/apple-touch-icon.png",
-];
+  "./manifest.webmanifest",
+  "./icon-192.png",
+  "./icon-512.png",
+  "./apple-touch-icon.png",
+].map((path) => new URL(path, SCOPE_URL).href);
 
-// ─── Install: precache core assets ─────────────────────
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches
@@ -31,7 +33,6 @@ self.addEventListener("install", (event) => {
   );
 });
 
-// ─── Activate: clean old caches ────────────────────────
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches
@@ -39,66 +40,65 @@ self.addEventListener("activate", (event) => {
       .then((keys) =>
         Promise.all(
           keys
-            .filter((k) => !k.startsWith(CACHE_VERSION))
-            .map((k) => caches.delete(k))
+            .filter((key) => key.startsWith(CACHE_PREFIX) && !key.startsWith(CACHE_VERSION))
+            .map((key) => caches.delete(key))
         )
       )
       .then(() => self.clients.claim())
   );
 });
 
-// ─── Fetch: strategy by request type ───────────────────
 self.addEventListener("fetch", (event) => {
   const { request } = event;
-
-  // Only handle GET; ignore cross-origin and chrome-extension.
   if (request.method !== "GET") return;
+
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
 
-  // API calls: network-first, fallback to cache.
-  if (url.pathname.startsWith("/api/")) {
-    event.respondWith(
-      fetch(request)
-        .then((response) => {
-          const copy = response.clone();
-          caches.open(RUNTIME_CACHE).then((cache) => cache.put(request, copy));
-          return response;
-        })
-        .catch(() => caches.match(request))
-    );
+  // Never cache local configuration, authentication, or usage responses.
+  if (url.pathname.includes("/api/")) {
+    event.respondWith(fetch(request, { cache: "no-store" }));
     return;
   }
 
-  // HTML navigation: network-first so a plain refresh always gets the
-  // latest build. Fall back to the last cached copy only when offline.
+  // Always revalidate the SPA shell. The cached copy is offline fallback only.
   if (request.mode === "navigate") {
     event.respondWith(
-      fetch(request)
+      fetch(request, { cache: "no-store" })
         .then((response) => {
-          if (response && response.status === 200 && response.type === "basic") {
+          if (response && response.ok && response.type === "basic") {
             const copy = response.clone();
-            caches.open(RUNTIME_CACHE).then((cache) => cache.put("/index.html", copy));
+            event.waitUntil(
+              caches.open(RUNTIME_CACHE).then((cache) => cache.put(OFFLINE_INDEX_URL, copy))
+            );
           }
           return response;
         })
-        .catch(() => caches.match("/index.html"))
+        .catch(async () => {
+          const cached = await caches.match(OFFLINE_INDEX_URL);
+          return cached ?? new Response("Offline", {
+            status: 503,
+            headers: { "Content-Type": "text/plain; charset=utf-8" },
+          });
+        })
     );
     return;
   }
 
-  // Static assets: cache-first, then network (and cache the result).
-  event.respondWith(
-    caches.match(request).then((cached) => {
-      if (cached) return cached;
-      return fetch(request).then((response) => {
-        if (!response || response.status !== 200 || response.type !== "basic") {
-          return response;
+  // Fingerprinted build assets are safe to cache by URL.
+  if (url.pathname.includes("/assets/")) {
+    event.respondWith(
+      caches.match(request).then(async (cached) => {
+        if (cached) return cached;
+        const response = await fetch(request);
+        if (response && response.ok && response.type === "basic") {
+          const copy = response.clone();
+          event.waitUntil(
+            caches.open(RUNTIME_CACHE).then((cache) => cache.put(request, copy))
+          );
         }
-        const copy = response.clone();
-        caches.open(RUNTIME_CACHE).then((cache) => cache.put(request, copy));
         return response;
-      });
-    })
-  );
+      })
+    );
+  }
 });

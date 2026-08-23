@@ -5,6 +5,7 @@ import { spawnSync } from "child_process";
 import { DatabaseSync } from "node:sqlite";
 
 const PI_DIR = join(homedir(), ".pi", "agent");
+const CODEX_DIR = join(homedir(), ".codex");
 
 // ─── Cindy Pi-Agent Sessions ───────────────────────────
 // When Cindy (the AI assistant) delegates to a pi coding agent, sessions
@@ -404,23 +405,125 @@ export function readCodexUsage(): UsageRecord[] {
   return allRecords;
 }
 
-// ─── Combined All Sources ──────────────────────────────
+// ─── ChatGPT / Codex Desktop Usage ─────────────────────
 
 /**
- * Combine usage from all sources: local pi, Cindy pi-agent, Claude, Codex.
- * Used for the "All" tab that shows everything in one view.
+ * ChatGPT/Codex Desktop stores local rollout sessions as JSONL under
+ * ~/.codex/sessions and ~/.codex/archived_sessions. Each `token_count` event
+ * contains the usage for the latest model response, so it can be normalized
+ * into the same UsageRecord shape used by Pi sessions.
  */
-export function readAllCombinedUsage(): UsageRecord[] {
-  const all: UsageRecord[] = [
-    ...readAllUsage(),
-    ...readCindyUsage(),
-    ...readClaudeUsage(),
-    ...readCodexUsage(),
-    ...readAtomcodeUsage(),
-    ...readCopilotUsage(),
+function collectJsonlFiles(dir: string, out: string[] = []): string[] {
+  if (!existsSync(dir)) return out;
+  try {
+    for (const name of readdirSync(dir)) {
+      const path = join(dir, name);
+      try {
+        if (statSync(path).isDirectory()) collectJsonlFiles(path, out);
+        else if (name.endsWith(".jsonl")) out.push(path);
+      } catch {
+        // Ignore files that disappear while the desktop app is writing.
+      }
+    }
+  } catch {
+    // Ignore inaccessible directories.
+  }
+  return out;
+}
+
+function numericUsage(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function modelFromCodexPayload(payload: any): string | undefined {
+  const candidates = [
+    payload?.model,
+    payload?.model_id,
+    payload?.modelId,
+    payload?.state?.model,
+    payload?.thread_settings?.model,
+    payload?.thread_settings?.collaboration_mode?.settings?.model,
+    payload?.collaboration_mode?.settings?.model,
+    payload?.item?.model,
+    payload?.item?.content?.model,
+    payload?.base_instructions?.provenance?.model,
   ];
-  all.sort((a, b) => a.date.localeCompare(b.date));
-  return all;
+  return candidates.find((value) => typeof value === "string" && value.trim())?.trim();
+}
+
+function parseCodexSessionFile(filePath: string): UsageRecord[] {
+  const records: UsageRecord[] = [];
+  let currentModel = "chatgpt";
+  try {
+    for (const line of readFileSync(filePath, "utf-8").split("\n")) {
+      if (!line.trim()) continue;
+      let envelope: any;
+      try {
+        envelope = JSON.parse(line);
+      } catch {
+        continue;
+      }
+
+      const payload = envelope?.payload;
+      if (!payload || typeof payload !== "object") continue;
+      currentModel = modelFromCodexPayload(payload) || currentModel;
+      if (payload.type !== "token_count") continue;
+
+      const usage = payload.info?.last_token_usage;
+      if (!usage || typeof usage !== "object") continue;
+      const timestamp = typeof envelope.timestamp === "string" ? envelope.timestamp : "";
+      if (!timestamp) continue;
+      const { date, hour } = cnDateParts(timestamp);
+      const rawInputTokens = numericUsage(usage.input_tokens);
+      const cachedInputTokens = numericUsage(usage.cached_input_tokens);
+      const cacheWriteTokens = numericUsage(usage.cache_write_input_tokens);
+      // Codex reports cached/cache-write tokens as subsets of input_tokens.
+      // Split them out so the dashboard total remains raw input + output,
+      // rather than counting cached context twice.
+      const inputTokens = Math.max(rawInputTokens - cachedInputTokens - cacheWriteTokens, 0);
+      // reasoning_output_tokens is informational and already included in
+      // output_tokens (total_tokens = input_tokens + output_tokens).
+      const outputTokens = numericUsage(usage.output_tokens);
+
+      // The local format has no per-call price. Keep cost at zero rather than
+      // inventing a price for a ChatGPT subscription/Codex plan.
+      records.push({
+        date,
+        hour,
+        providerId: "chatgpt",
+        modelId: currentModel,
+        inputTokens,
+        outputTokens,
+        cacheReadTokens: cachedInputTokens,
+        cacheWriteTokens,
+        requests: 1,
+        cost: 0,
+      });
+    }
+  } catch {
+    // Ignore unreadable or partially-written rollout files.
+  }
+  return records;
+}
+
+const CODEX_USAGE_TTL_MS = 30_000;
+let codexUsageCache: { records: UsageRecord[]; at: number } | null = null;
+
+export function readChatgptUsage(): UsageRecord[] {
+  if (codexUsageCache && Date.now() - codexUsageCache.at < CODEX_USAGE_TTL_MS) {
+    return codexUsageCache.records;
+  }
+  const files = [
+    ...collectJsonlFiles(join(CODEX_DIR, "sessions")),
+    ...collectJsonlFiles(join(CODEX_DIR, "archived_sessions")),
+  ];
+  const records = files.flatMap(parseCodexSessionFile).sort((a, b) => a.date.localeCompare(b.date));
+  codexUsageCache = { records, at: Date.now() };
+  return records;
+}
+
+export function clearChatgptUsageCache(): void {
+  codexUsageCache = null;
 }
 
 // ─── AtomCode Usage ────────────────────────────────────
@@ -635,9 +738,13 @@ export interface ProviderFilter {
 
 export const PROVIDER_FILTERS: ProviderFilter[] = [
   {
-    id: "copilot",
-    label: "Copilot",
-    patterns: [/^copilot$/i],
+    id: "chatgpt",
+    label: "ChatGPT",
+    // ChatGPT/OpenAI model calls can be recorded under a direct OpenAI
+    // provider or behind a compatible gateway. Match provider and model names
+    // so the dashboard can surface them as one source without changing the
+    // original records used by the default Pi view.
+    patterns: [/^(openai|chatgpt|openai-chatgpt)$/i, /chatgpt/i, /openai/i, /^gpt[-_]/i, /^o[1345](?:[-_]|$)/i],
   },
   {
     id: "atomcode",
@@ -1681,7 +1788,8 @@ function heuristicFlags(id: string): { reasoning?: boolean; vision?: boolean; au
   const vision = VISION_RE.test(k);
   const audio = AUDIO_RE.test(k);
   let contextWindow: number | undefined;
-  if (/[-_](1m|1024k|1048576)\b/i.test(k)) contextWindow = 1_048_576;
+  if (/deepseek[-_]v4[-_](flash|chat)(?:[-_:]|$)/i.test(k)) contextWindow = 1_048_576;
+  else if (/[-_](1m|1024k|1048576)\b/i.test(k)) contextWindow = 1_048_576;
   else if (/[-_](256k)\b/i.test(k)) contextWindow = 262_144;
   else if (/[-_](128k)\b/i.test(k)) contextWindow = 131_072;
   else if (/[-_](64k)\b/i.test(k)) contextWindow = 65_536;
