@@ -1062,7 +1062,7 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provid
       </div>
 
       {/* Developer Role Support */}
-      <div className="flex items-center gap-2">
+      <div className="provider-compat-row flex items-center gap-2">
         <input
           id="supports-developer-role"
           type="checkbox"
@@ -1070,14 +1070,14 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provid
           onChange={(e) => setSupportsDeveloperRole(e.target.checked)}
           className="rounded border-gray-600 bg-gray-800 text-blue-500"
         />
-        <label htmlFor="supports-developer-role" className="text-sm text-gray-400">
+        <label htmlFor="supports-developer-role" className="provider-compat-label text-sm text-gray-400">
           <span>{t("compat.supports_developer_role")}</span>
-          <span className="ml-2 text-xs text-gray-500">{t("compat.supports_developer_role_desc")}</span>
+          <span className="provider-compat-description ml-2 text-xs text-gray-500">{t("compat.supports_developer_role_desc")}</span>
         </label>
       </div>
 
       {/* Finish Reason Support */}
-      <div className="flex items-center gap-2">
+      <div className="provider-compat-row flex items-center gap-2">
         <input
           id="supports-finish-reason"
           type="checkbox"
@@ -1085,9 +1085,9 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provid
           onChange={(e) => setSupportsFinishReason(e.target.checked)}
           className="rounded border-gray-600 bg-gray-800 text-blue-500"
         />
-        <label htmlFor="supports-finish-reason" className="text-sm text-gray-400">
+        <label htmlFor="supports-finish-reason" className="provider-compat-label text-sm text-gray-400">
           <span>{t("compat.supports_finish_reason")}</span>
-          <span className="ml-2 text-xs text-gray-500">{t("compat.supports_finish_reason_desc")}</span>
+          <span className="provider-compat-description ml-2 text-xs text-gray-500">{t("compat.supports_finish_reason_desc")}</span>
         </label>
       </div>
 

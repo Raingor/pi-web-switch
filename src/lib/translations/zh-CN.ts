@@ -253,6 +253,7 @@ const zhCN: Record<string, string> = {
   "sessions.delete_error": "删除时发生错误",
   "sessions.load_failed": "加载会话失败",
   "sessions.refresh": "刷新",
+  "sessions.auto_trashed": "已将 {0} 个超过 14 天未更新的会话自动移入回收站。",
   "sessions.expand_all": "全部展开",
   "sessions.collapse_all": "全部折叠",
   "sessions.more_count": "还有 {0} 条",

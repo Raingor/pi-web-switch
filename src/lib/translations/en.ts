@@ -259,6 +259,7 @@ const en: Record<string, string> = {
   "sessions.delete_error": "Error deleting session",
   "sessions.load_failed": "Failed to load sessions",
   "sessions.refresh": "Refresh",
+  "sessions.auto_trashed": "Automatically moved {0} inactive sessions older than 14 days to Trash.",
   "sessions.expand_all": "Expand All",
   "sessions.collapse_all": "Collapse All",
   "sessions.more_count": "{0} more",

@@ -253,6 +253,7 @@ const zhTW: Record<string, string> = {
   "sessions.delete_error": "刪除時發生錯誤",
   "sessions.load_failed": "載入會話失敗",
   "sessions.refresh": "重新整理",
+  "sessions.auto_trashed": "已將 {0} 個超過 14 天未更新的工作階段自動移入回收站。",
   "sessions.expand_all": "全部展開",
   "sessions.collapse_all": "全部收合",
   "sessions.more_count": "還有 {0} 條",

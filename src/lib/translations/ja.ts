@@ -253,6 +253,7 @@ const ja: Record<string, string> = {
   "sessions.delete_error": "削除中にエラーが発生しました",
   "sessions.load_failed": "セッションの読み込みに失敗しました",
   "sessions.refresh": "更新",
+  "sessions.auto_trashed": "14日以上更新のない {0} 件のセッションを自動的にゴミ箱へ移動しました。",
   "sessions.expand_all": "すべて展開",
   "sessions.collapse_all": "すべて折りたたむ",
   "sessions.more_count": "あと {0} 件",

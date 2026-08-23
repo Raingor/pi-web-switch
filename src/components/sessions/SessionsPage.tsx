@@ -472,6 +472,7 @@ export function SessionsPage() {
   const [trash, setTrash] = useState<TrashEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [autoTrashed, setAutoTrashed] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<{ session: SessionInfo; groupPath: string } | null>(null);
@@ -490,10 +491,16 @@ export function SessionsPage() {
   const loadAll = useCallback(() => {
     if (!initialized) return;
     setRefreshing(true);
-    Promise.all([
-      fetch("/api/pi/sessions").then((r) => r.json()),
-      fetch("/api/pi/trash").then((r) => r.json()),
-    ])
+    fetch("/api/pi/sessions/auto-trash", { method: "POST" })
+      .then((r) => r.json())
+      .catch(() => ({ moved: 0 }))
+      .then((cleanup) => {
+        setAutoTrashed(Number(cleanup?.moved) || 0);
+        return Promise.all([
+          fetch("/api/pi/sessions").then((r) => r.json()),
+          fetch("/api/pi/trash").then((r) => r.json()),
+        ]);
+      })
       .then(([sessionData, trashData]) => {
         setGroups(sessionData);
         setTrash(trashData);
@@ -703,6 +710,13 @@ function countExpandableNodes(nodes: TreeNode[]): number {
           </button>
         </div>
       </div>
+
+      {autoTrashed > 0 && (
+        <div className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs" style={{ borderColor: "color-mix(in srgb, var(--signal-cyan) 30%, var(--card-border))", color: "var(--signal-cyan)", backgroundColor: "var(--accent-bg)" }}>
+          <Trash2 className="h-3.5 w-3.5" />
+          {t("sessions.auto_trashed", String(autoTrashed))}
+        </div>
+      )}
 
       {/* Tabs: Sessions / Trash */}
       <div className="flex items-center gap-1 border-b" style={{ borderColor: "var(--card-border)" }}>

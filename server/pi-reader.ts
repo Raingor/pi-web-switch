@@ -1306,6 +1306,37 @@ function walkJsonl(dir: string, out: string[]): void {
   }
 }
 
+const STALE_SESSION_DAYS = 14;
+
+/**
+ * Move sessions with no activity for more than 14 days into the recoverable
+ * trash. The last message/session timestamp is preferred; file mtime is the
+ * fallback for malformed or very old session files without timestamps.
+ */
+export function autoTrashStaleSessions(maxAgeDays = STALE_SESSION_DAYS): { moved: number; paths: string[] } {
+  const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
+  const files: string[] = [];
+  walkJsonl(SESSIONS_DIR, files);
+  const moved: string[] = [];
+
+  for (const filePath of files) {
+    let lastActiveMs = 0;
+    const info = parseSessionFileInfo(filePath);
+    if (info?.lastActive) lastActiveMs = new Date(info.lastActive).getTime();
+    if (!Number.isFinite(lastActiveMs) || lastActiveMs <= 0) {
+      try {
+        lastActiveMs = statSync(filePath).mtimeMs;
+      } catch {
+        continue;
+      }
+    }
+    if (lastActiveMs >= cutoff) continue;
+    if (trashSessionFile(filePath)) moved.push(filePath);
+  }
+
+  return { moved: moved.length, paths: moved };
+}
+
 /** Move a session file into the trash, preserving its path relative to the sessions dir. */
 export function trashSessionFile(filePath: string): boolean {
   try {

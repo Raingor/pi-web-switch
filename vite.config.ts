@@ -290,6 +290,14 @@ function piApiPlugin(): Plugin {
         // Strip query string
         const pathOnly = url.split("?")[0];
 
+        // Automatically archive sessions that have been inactive for more
+        // than two weeks. This is recoverable through the existing trash tab.
+        if (method === "POST" && pathOnly === "/api/pi/sessions/auto-trash") {
+          const result = pi.autoTrashStaleSessions(14);
+          res.setHeader("Content-Type", "application/json");
+          return res.end(JSON.stringify(result));
+        }
+
         // Handle DELETE /api/pi/session?path=... (move to trash) and /api/pi/trash?path=... (permanent)
         if (method === "DELETE" && (pathOnly === "/api/pi/session" || pathOnly === "/api/pi/trash")) {
           const parsedUrl = new URL(url, "http://localhost");
