@@ -627,15 +627,15 @@ table { border-collapse: collapse; }
 .official-usage-field small { color: var(--subtle-text); font-size: 10px; }
 .official-usage-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding-top: 17px; }
 .official-usage-primary, .official-usage-refresh { display: inline-flex; align-items: center; gap: 7px; border: 1px solid color-mix(in srgb, var(--signal-cyan) 40%, var(--card-border)); border-radius: 7px; }
-.official-usage-primary { padding: 10px 15px; color: #001014; background: linear-gradient(135deg, var(--signal-cyan-bright), var(--signal-cyan)); font-size: 12px; font-weight: 700; }
+.official-usage-primary { padding: 10px 15px; color: #001014; background: linear-gradient(135deg, var(--signal-cyan-bright), var(--signal-cyan)); font-size: 12px; font-weight: 700; text-shadow: 0 1px 0 rgba(255,255,255,0.35); }
 .official-usage-primary:disabled { cursor: not-allowed; opacity: .45; }
 .official-usage-primary svg, .official-usage-refresh svg { width: 15px; height: 15px; }
 .official-usage-saved { display: inline-flex; align-items: center; gap: 5px; color: var(--signal-lime); font-size: 11px; }
 .official-usage-saved svg { width: 14px; height: 14px; }
 .official-usage-error { display: flex; align-items: flex-start; gap: 7px; margin-top: 14px; padding: 10px 12px; color: var(--signal-red); border: 1px solid color-mix(in srgb, var(--signal-red) 25%, transparent); border-radius: 7px; background: color-mix(in srgb, var(--signal-red) 6%, transparent); font-size: 12px; }
 .official-usage-error svg { width: 15px; height: 15px; flex: 0 0 auto; }
-.official-usage-refresh { padding: 7px 10px; color: var(--muted-text); background: var(--card-bg); font-size: 11px; }
-.official-usage-refresh:hover { color: var(--signal-cyan); background: var(--accent-bg); }
+.official-usage-refresh { padding: 7px 10px; color: var(--page-text); background: var(--card-bg); font-size: 11px; border: 1px solid var(--card-border); }
+.official-usage-refresh:hover { color: var(--signal-cyan); background: var(--accent-bg); border-color: color-mix(in srgb, var(--signal-cyan) 40%, var(--card-border)); }
 .official-usage-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; padding-top: 16px; }
 .official-usage-card { min-height: 112px; padding: 15px; border-radius: 8px; }
 .official-usage-card span { display: block; color: var(--subtle-text); font-family: var(--font-mono); font-size: 8px; letter-spacing: .12em; text-transform: uppercase; }
