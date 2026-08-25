@@ -6,7 +6,7 @@ import { Modal } from "@/components/ui/Modal";
 import { formatTokens, cn, formatCost, USD_TO_CNY } from "@/lib/utils";
 import { useCurrency } from "@/lib/currency";
 import type { ApiType, CustomProviderConfig, Model, Provider } from "@/types";
-import { searchCatalog, catalogToModel, findCatalogEntry, guessModelMeta } from "@/data/model-catalog";
+import { MODEL_CATALOG, searchCatalog, catalogToModel, catalogEntryId, findCatalogEntry, guessModelMeta } from "@/data/model-catalog";
 import {
   Plus,
   Trash2,
@@ -70,6 +70,14 @@ function isValidHttpUrl(value: string): boolean {
 // (32K matches the common max-output ceiling of current mainstream models)
 const DEFAULT_CONTEXT_WINDOW = 262144;
 const DEFAULT_MAX_TOKENS = 32768;
+
+// Last-resort output cap when neither the catalog nor the id heuristic knows one.
+function fallbackMaxTokens(contextWindow?: number): number {
+  if (!contextWindow) return DEFAULT_MAX_TOKENS;
+  if (contextWindow >= 1_000_000) return 65_536;
+  if (contextWindow >= 200_000) return 32_768;
+  return 8192;
+}
 
 // Sanitize to a config-safe id: letters (any script), digits and hyphens.
 // pi shows this key verbatim in its model picker badge, so keep it readable.
@@ -782,14 +790,14 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provid
       return;
     }
     const cw = match?.contextWindow ?? g.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
-    const mt = match?.maxTokens ?? g.maxTokens ?? (cw >= 1_000_000 ? 65_536 : cw >= 200_000 ? 32_768 : 8192);
+    const mt = match?.maxTokens ?? g.maxTokens ?? fallbackMaxTokens(cw);
     const model: Model = {
       id,
       name: match?.name,
       reasoning: g.reasoning ?? false,
       input: g.input ?? ["text"],
-      contextWindow: match?.contextWindow ?? cw,
-      maxTokens: match?.maxTokens ?? mt,
+      contextWindow: cw,
+      maxTokens: mt,
       cost: match?.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       enabled: true,
     };
@@ -878,10 +886,7 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provid
     : provider.models;
 
   // Look up the catalog family for a model id (for sorting/grouping)
-  const familyOf = (id: string): string => {
-    const hit = searchCatalog(id, 1)[0];
-    return hit?.family ?? "—";
-  };
+  const familyOf = (id: string): string => findCatalogEntry(id)?.family ?? "—";
 
   const visibleModels = useMemo(() => {
     const arr = [...baseModels];
@@ -1528,31 +1533,23 @@ function ModelForm({ initial, onSubmit, onCancel }: ModelFormProps) {
     const guess = guessModelMeta(id);
     if (guess.source === "default") { setDetectHint(null); return; }
 
+    // The catalog is authoritative when it has an entry: maxTokens there is the
+    // vendor-documented output cap. Resolving it via findCatalogEntry (best
+    // score) instead of a loose searchCatalog+includes scan avoids a broad
+    // family prefix winning over the exact model.
+    const match = findCatalogEntry(id);
+
     setForm((prev) => {
       const next = { ...prev };
       if (guess.contextWindow && !wasTouched("contextWindow")) next.contextWindow = guess.contextWindow;
-      if (!wasTouched("maxTokens")) {
-        // Use reasonable maxTokens per context family when detected
-        next.maxTokens = guess.contextWindow
-          ? (guess.contextWindow >= 1_000_000 ? 65536 : guess.contextWindow >= 200_000 ? 32768 : 8192)
-          : DEFAULT_MAX_TOKENS;
-      } else if (next.maxTokens === undefined) {
-        // User left maxTokens empty — still provide a sensible default on detect
-        next.maxTokens = guess.contextWindow
-          ? (guess.contextWindow >= 1_000_000 ? 65536 : guess.contextWindow >= 200_000 ? 32768 : 8192)
-          : DEFAULT_MAX_TOKENS;
+      if (!wasTouched("maxTokens") || next.maxTokens === undefined) {
+        next.maxTokens = match?.maxTokens ?? guess.maxTokens ?? fallbackMaxTokens(guess.contextWindow);
       }
       if (guess.reasoning !== undefined && !wasTouched("reasoning")) next.reasoning = guess.reasoning;
       if (guess.input && !wasTouched("input")) next.input = [...guess.input];
-      // Catalog match → also set name + cost
-      if (guess.source === "catalog") {
-        // Find the matched catalog entry for name + cost
-        const entries = searchCatalog(id, 5);
-        const match = entries.find((e) => e.patterns.some((p) => id.toLowerCase().includes(p.toLowerCase())));
-        if (match) {
-          if (!wasTouched("name")) next.name = match.name;
-          if (match.cost && !wasTouched("cost")) next.cost = { ...match.cost };
-        }
+      if (match) {
+        if (!wasTouched("name")) next.name = match.name;
+        if (match.cost && !wasTouched("cost")) next.cost = { ...match.cost };
       }
       return next;
     });
@@ -1567,8 +1564,11 @@ function ModelForm({ initial, onSubmit, onCancel }: ModelFormProps) {
   // ── Catalog picker (add-mode only) ──
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerQuery, setPickerQuery] = useState("");
+  // No limit: an empty query must list the whole catalog, otherwise families
+  // ordered late in the array (GLM, Kimi, Doubao, Llama, Grok) are unreachable
+  // without typing.
   const pickerResults = useMemo(
-    () => searchCatalog(pickerQuery, 30),
+    () => searchCatalog(pickerQuery, MODEL_CATALOG.length),
     [pickerQuery]
   );
   const applyPreset = (entry: ReturnType<typeof searchCatalog>[number]) => {
@@ -1577,7 +1577,7 @@ function ModelForm({ initial, onSubmit, onCancel }: ModelFormProps) {
     touchedRef.current = new Set();
     setForm((prev) => ({ ...prev, ...preset }));
     setPickerOpen(false);
-    setDetectHint(t("models.detected_catalog", entry.name ?? entry.patterns[0] ?? ""));
+    setDetectHint(t("models.detected_catalog", entry.name ?? catalogEntryId(entry)));
   };
 
   // Apply a quick template (Claude-style, GPT-style, Reasoning, Local small)
@@ -1690,14 +1690,14 @@ function ModelForm({ initial, onSubmit, onCancel }: ModelFormProps) {
                 )}
                 {pickerResults.map((e) => (
                   <button
-                    key={e.patterns[0]}
+                    key={catalogEntryId(e)}
                     type="button"
                     onClick={() => applyPreset(e)}
                     className="flex w-full items-center gap-3 border-b border-gray-800 px-3 py-2 text-left hover:bg-gray-800 last:border-0"
                   >
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm text-gray-200">{e.name}</span>
-                      <span className="block truncate font-mono text-[11px] text-gray-500">{e.patterns[0]}</span>
+                      <span className="block truncate font-mono text-[11px] text-gray-500">{catalogEntryId(e)}</span>
                     </span>
                     {e.reasoning && <Brain className="h-3.5 w-3.5 shrink-0 text-purple-400" aria-label="reasoning" />}
                     {e.input?.includes("image") && <ImageIcon className="h-3.5 w-3.5 shrink-0 text-blue-400" aria-label="vision" />}
