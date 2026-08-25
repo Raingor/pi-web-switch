@@ -1652,7 +1652,18 @@ function ModelForm({ initial, onSubmit, onCancel }: ModelFormProps) {
                   key={kind}
                   type="button"
                   onClick={() => applyTemplate(kind)}
-                  className="rounded-md border border-gray-700 bg-gray-800/70 px-2 py-1 text-[11px] text-gray-400 hover:bg-gray-700 hover:text-gray-200"
+                  className="rounded-md border px-2 py-1 text-[11px] transition-colors"
+                  style={{
+                    borderColor: "var(--card-border)",
+                    backgroundColor: "var(--card-bg-solid)",
+                    color: "var(--muted-text)",
+                  }}
+                  onMouseEnter={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.color = "var(--page-text)";
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.color = "var(--muted-text)";
+                  }}
                 >
                   {t(key)}
                 </button>
