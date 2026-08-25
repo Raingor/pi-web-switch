@@ -239,6 +239,7 @@ const zhTW: Record<string, string> = {
   "models.image_input": "圖片輸入",
   "models.context_window": "上下文視窗",
   "models.max_tokens": "最大 Token",
+  "models.max_tokens_hint": "預設為 {0}",
   "models.cost_input": "輸入",
   "models.cost_output": "輸出",
   "models.cost_cache_read": "快取讀取",

@@ -66,6 +66,7 @@ const ja: Record<string, string> = {
   "providers_models.confirm_import": "選択モデルをインポート",
 
   "providers_models.import_done": "{0} モデルをインポートしました",
+  "providers_models.no_match": "一致するモデルが見つかりません",
 
   "nav.sessions": "セッション",
   "nav.memory": "メモリ",
@@ -239,6 +240,7 @@ const ja: Record<string, string> = {
   "models.image_input": "画像入力",
   "models.context_window": "コンテキストウィンドウ",
   "models.max_tokens": "最大 Tokens",
+  "models.max_tokens_hint": "デフォルト: {0}",
   "models.cost_input": "入力",
   "models.cost_output": "出力",
   "models.cost_cache_read": "キャッシュ読み取り",

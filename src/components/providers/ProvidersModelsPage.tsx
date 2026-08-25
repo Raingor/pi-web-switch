@@ -1417,7 +1417,10 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provid
           <ModelForm
             initial={editModel}
             onSubmit={(form) => {
-              updateModel(provider.id, editModel.id, form);
+              // Apply default maxTokens if left empty
+              const patched: Partial<Model> = { ...form };
+              if (patched.maxTokens === undefined) patched.maxTokens = DEFAULT_MAX_TOKENS;
+              updateModel(provider.id, editModel.id, patched);
               setEditModel(null);
             }}
             onCancel={() => setEditModel(null)}
@@ -1533,6 +1536,11 @@ function ModelForm({ initial, onSubmit, onCancel }: ModelFormProps) {
         next.maxTokens = guess.contextWindow
           ? (guess.contextWindow >= 1_000_000 ? 65536 : guess.contextWindow >= 200_000 ? 32768 : 8192)
           : DEFAULT_MAX_TOKENS;
+      } else if (next.maxTokens === undefined) {
+        // User left maxTokens empty — still provide a sensible default on detect
+        next.maxTokens = guess.contextWindow
+          ? (guess.contextWindow >= 1_000_000 ? 65536 : guess.contextWindow >= 200_000 ? 32768 : 8192)
+          : DEFAULT_MAX_TOKENS;
       }
       if (guess.reasoning !== undefined && !wasTouched("reasoning")) next.reasoning = guess.reasoning;
       if (guess.input && !wasTouched("input")) next.input = [...guess.input];
@@ -1592,7 +1600,7 @@ function ModelForm({ initial, onSubmit, onCancel }: ModelFormProps) {
   const setId = (v: string) => { touch("id"); setForm((p) => ({ ...p, id: v })); };
   const setName = (v: string) => { touch("name"); setForm((p) => ({ ...p, name: v })); };
   const setContextWindow = (v: number) => { touch("contextWindow"); setForm((p) => ({ ...p, contextWindow: v })); };
-  const setMaxTokens = (v: number) => { touch("maxTokens"); setForm((p) => ({ ...p, maxTokens: v })); };
+  const setMaxTokens = (v: number | undefined) => { touch("maxTokens"); setForm((p) => ({ ...p, maxTokens: v })); };
   const setReasoning = (v: boolean) => { touch("reasoning"); setForm((p) => ({ ...p, reasoning: v })); };
   const setImage = (v: boolean) => {
     touch("input");
@@ -1752,10 +1760,15 @@ function ModelForm({ initial, onSubmit, onCancel }: ModelFormProps) {
           <label className="block text-xs font-medium text-gray-400">{t("models.max_tokens")}</label>
           <input
             type="number"
-            value={form.maxTokens ?? DEFAULT_MAX_TOKENS}
-            onChange={(e) => setMaxTokens(parseInt(e.target.value) || DEFAULT_MAX_TOKENS)}
+            value={form.maxTokens ?? ""}
+            onChange={(e) => {
+              const v = e.target.value;
+              setMaxTokens(v === "" ? undefined : parseInt(v) || undefined);
+            }}
+            placeholder={String(DEFAULT_MAX_TOKENS)}
             className="mt-1 w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white"
           />
+          <p className="mt-0.5 text-[10px] text-gray-500">{t("models.max_tokens_hint", String(DEFAULT_MAX_TOKENS))}</p>
           <div className="mt-1 flex flex-wrap gap-1">
             {[4096, 8192, 16_384, 32_768, 65_536, 131_072].map((v) => (
               <button

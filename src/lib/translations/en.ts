@@ -68,6 +68,7 @@ const en: Record<string, string> = {
   "providers_models.confirm_import": "Import Selected",
 
   "providers_models.import_done": "Imported {0} models",
+  "providers_models.no_match": "No matching models found",
 
   "nav.sessions": "Sessions",
   "nav.memory": "Memory",
@@ -243,6 +244,7 @@ const en: Record<string, string> = {
   "models.image_input": "Image Input",
   "models.context_window": "Context Window",
   "models.max_tokens": "Max Tokens",
+  "models.max_tokens_hint": "Default: {0}",
   "models.cost_input": "Input",
   "models.cost_output": "Output",
   "models.cost_cache_read": "Cache Read",

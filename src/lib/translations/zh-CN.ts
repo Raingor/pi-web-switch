@@ -66,6 +66,7 @@ const zhCN: Record<string, string> = {
   "providers_models.confirm_import": "导入选中模型",
 
   "providers_models.import_done": "已导入 {0} 个模型",
+  "providers_models.no_match": "没有找到匹配的模型",
 
   "nav.sessions": "会话",
   "nav.memory": "记忆",
@@ -239,6 +240,7 @@ const zhCN: Record<string, string> = {
   "models.image_input": "图片输入",
   "models.context_window": "上下文窗口",
   "models.max_tokens": "最大 Token",
+  "models.max_tokens_hint": "默认为 {0}",
   "models.cost_input": "输入",
   "models.cost_output": "输出",
   "models.cost_cache_read": "缓存读取",
