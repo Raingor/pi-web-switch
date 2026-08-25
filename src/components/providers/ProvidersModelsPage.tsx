@@ -1750,7 +1750,7 @@ function ModelForm({ initial, onSubmit, onCancel }: ModelFormProps) {
             className="mt-1 w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white"
           />
           <div className="mt-1 flex flex-wrap gap-1">
-            {[32_768, 128_000, 200_000, 1_000_000].map((v) => (
+            {[32_768, 65_536, 131_072, 262_144, 524_288].map((v) => (
               <button
                 key={v}
                 type="button"
