@@ -7,7 +7,7 @@ interface ModalProps {
   onClose: () => void;
   title: string;
   children: ReactNode;
-  size?: "sm" | "md" | "lg";
+  size?: "sm" | "md" | "lg" | "xl";
 }
 
 export function Modal({ open, onClose, title, children, size = "md" }: ModalProps) {
@@ -21,7 +21,7 @@ export function Modal({ open, onClose, title, children, size = "md" }: ModalProp
 
   if (!open) return null;
 
-  const sizeClasses = { sm: "max-w-md", md: "max-w-lg", lg: "max-w-2xl" };
+  const sizeClasses = { sm: "max-w-md", md: "max-w-lg", lg: "max-w-2xl", xl: "max-w-4xl" };
 
   // Render into document.body via a portal. The app shell uses
   // `transform: scale(--ui-zoom)`, which turns it into the containing block

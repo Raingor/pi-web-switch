@@ -1311,7 +1311,7 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provid
         open={fetchOpen}
         onClose={() => { setFetchOpen(false); setFetchedModels([]); setFetchSelected(new Set()); setFetchError(null); setFetchImported(null); }}
         title={t("providers_models.fetch_title")}
-        size="lg"
+        size="xl"
       >
         <div className="space-y-4">
           <p className="text-sm text-gray-400">{t("providers_models.fetch_desc", provider.name)}</p>
@@ -1411,7 +1411,7 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provid
         open={!!editModel}
         onClose={() => setEditModel(null)}
         title={`${t("models.edit_model")}: ${editModel?.name || editModel?.id}`}
-        size="lg"
+        size="xl"
       >
         {editModel && (
           <ModelForm
@@ -1433,7 +1433,7 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provid
         open={showAddModel}
         onClose={() => setShowAddModel(false)}
         title={`${t("models.add_model")} — ${provider.name}`}
-        size="lg"
+        size="xl"
       >
         <ModelForm
           onSubmit={(form) => {
@@ -1750,7 +1750,7 @@ function ModelForm({ initial, onSubmit, onCancel }: ModelFormProps) {
             className="mt-1 w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white"
           />
           <div className="mt-1 flex flex-wrap gap-1">
-            {[32_768, 65_536, 131_072, 262_144, 524_288].map((v) => (
+            {[32_768, 65_536, 131_072, 262_144, 524_288, 1_000_000].map((v) => (
               <button
                 key={v}
                 type="button"
@@ -2063,7 +2063,7 @@ function AddProviderForm({
         open={showAddModel}
         onClose={() => setShowAddModel(false)}
         title={t("models.add_model")}
-        size="lg"
+        size="xl"
       >
         <ModelForm
           onSubmit={(form) => {
@@ -2278,7 +2278,7 @@ function ImportProviderModal({
       open={open}
       onClose={() => { reset(); onClose(); }}
       title={t("providers_models.import_title")}
-      size="lg"
+      size="xl"
     >
       <div className="space-y-4">
         <p className="text-sm text-gray-500">{t("providers_models.import_desc")}</p>
