@@ -1781,7 +1781,7 @@ function ModelForm({ initial, onSubmit, onCancel }: ModelFormProps) {
           />
           <p className="mt-0.5 text-[10px] text-gray-500">{t("models.max_tokens_hint", String(DEFAULT_MAX_TOKENS))}</p>
           <div className="mt-1 flex flex-wrap gap-1">
-            {[4096, 8192, 16_384, 32_768, 65_536, 131_072].map((v) => (
+            {[4096, 8192, 16_384, 32_768, 65_536].map((v) => (
               <button
                 key={v}
                 type="button"
