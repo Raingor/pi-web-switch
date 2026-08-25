@@ -1,12 +1,25 @@
-import { useMemo, useState } from "react";
-import { Gauge, Loader2, Zap, Check, X, RotateCcw } from "lucide-react";
+import { useMemo, useState, useEffect } from "react";
+import { Gauge, Loader2, Zap, Check, X, RotateCcw, Download } from "lucide-react";
 import { useTranslation } from "@/lib/i18n";
 import { useConfigStore } from "@/store/config-store";
 import { cn } from "@/lib/utils";
-import type { Provider, Model } from "@/types";
+import type { Provider } from "@/types";
 
-// Per-model speed-test result. successCount / total drive the success rate;
-// latencies collects each successful call's latency for avg/min/max.
+// Model returned by /api/pi/provider-models. Kept local to this page — these
+// are stored separately from the provider's configured/enabled models.
+interface FetchedModel {
+  id: string;
+  name?: string;
+  contextWindow?: number;
+  maxTokens?: number;
+  reasoning?: boolean;
+  vision?: boolean;
+  audio?: boolean;
+  cost?: { input: number; output: number; cacheRead?: number; cacheWrite?: number };
+  source?: string;
+}
+
+// Per-model speed-test result.
 interface ModelResult {
   status: "idle" | "testing" | "done";
   runs: number;
@@ -16,10 +29,38 @@ interface ModelResult {
 }
 
 const RUNS_PER_MODEL = 3; // sequential calls per model to derive a rate
+// Two speed profiles. Slow mode spaces requests out and retries harder to
+// avoid tripping upstream rate limits (HTTP 429).
+const SPEED_PROFILES = {
+  normal: { betweenCalls: 600,  betweenModels: 800,  maxRetries: 2, backoff: 3000 },
+  slow:   { betweenCalls: 2000, betweenModels: 4000, maxRetries: 4, backoff: 6000 },
+} as const;
+type SpeedMode = keyof typeof SPEED_PROFILES;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// LocalStorage key: the speed-test model catalog is kept entirely separate
+// from the app's configured models (models.json / enabledModels).
+const STORE_KEY = "speedtest:model-catalog";
 
 function avg(nums: number[]): number {
   if (nums.length === 0) return 0;
   return Math.round(nums.reduce((a, b) => a + b, 0) / nums.length);
+}
+
+// Load/save the fetched-model catalog (map of providerId → FetchedModel[]).
+function loadCatalog(): Record<string, FetchedModel[]> {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+function saveCatalog(catalog: Record<string, FetchedModel[]>) {
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify(catalog));
+  } catch {
+    /* ignore quota errors */
+  }
 }
 
 export function ModelSpeedTestPage() {
@@ -30,8 +71,10 @@ export function ModelSpeedTestPage() {
   const keyOf = (p: Provider) => p.apiKey ?? auth?.[p.id]?.key ?? "";
 
   // Custom providers only (built-in providers are excluded from speed tests).
+  // A provider is listed once it has an endpoint — models come from the
+  // locally-stored speed-test catalog, not the configured model list.
   const testableProviders = useMemo(
-    () => allProviders.filter((p) => p.type === "custom" && (p.baseUrl ?? "").trim() !== "" && p.models.length > 0),
+    () => allProviders.filter((p) => p.type === "custom" && (p.baseUrl ?? "").trim() !== ""),
     [allProviders]
   );
 
@@ -40,8 +83,17 @@ export function ModelSpeedTestPage() {
   );
   const selected = testableProviders.find((p) => p.id === selectedId) ?? testableProviders[0] ?? null;
 
+  // Speed-test model catalog, persisted in localStorage.
+  const [catalog, setCatalog] = useState<Record<string, FetchedModel[]>>({});
+  useEffect(() => { setCatalog(loadCatalog()); }, []);
+  const models = selected ? (catalog[selected.id] ?? []) : [];
+
   const [results, setResults] = useState<Map<string, ModelResult>>(new Map());
   const [running, setRunning] = useState(false);
+  const [speedMode, setSpeedMode] = useState<SpeedMode>("normal");
+  const [fetching, setFetching] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [fetchInfo, setFetchInfo] = useState<string | null>(null);
 
   const setResult = (modelId: string, patch: Partial<ModelResult>) => {
     setResults((prev) => {
@@ -52,21 +104,70 @@ export function ModelSpeedTestPage() {
     });
   };
 
-  const testModelOnce = async (provider: Provider, model: Model) => {
+  // One-click: fetch all models from the provider endpoint, store locally.
+  const fetchModels = async () => {
+    if (!selected || fetching) return;
+    setFetching(true);
+    setFetchError(null);
+    setFetchInfo(null);
+    try {
+      const res = await fetch("/api/pi/provider-models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          baseUrl: (selected.baseUrl ?? "").trim(),
+          apiKey: keyOf(selected),
+          providerId: selected.id,
+        }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        setFetchError(data.error);
+        return;
+      }
+      const fetched: FetchedModel[] = data.models ?? [];
+      const next = { ...loadCatalog(), [selected.id]: fetched };
+      saveCatalog(next);
+      setCatalog(next);
+      setResults(new Map()); // stale results no longer match the new list
+      setFetchInfo(t("speed_test.fetched_count", String(fetched.length)));
+    } catch {
+      setFetchError(t("speed_test.fetch_failed"));
+    } finally {
+      setFetching(false);
+    }
+  };
+
+  const clearModels = () => {
+    if (!selected || fetching || running) return;
+    const next = { ...loadCatalog() };
+    delete next[selected.id];
+    saveCatalog(next);
+    setCatalog(next);
+    setResults(new Map());
+    setFetchInfo(null);
+  };
+
+  const testModelOnce = async (provider: Provider, model: FetchedModel) => {
     const res = await fetch("/api/pi/model-test", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        baseUrl: (model.baseUrl ?? provider.baseUrl ?? "").trim(),
+        baseUrl: (provider.baseUrl ?? "").trim(),
         modelId: model.id,
         apiKey: keyOf(provider),
-        apiType: model.api ?? provider.api ?? undefined,
+        apiType: provider.api ?? undefined,
       }),
     });
-    return res.json() as Promise<{ success: boolean; latencyMs?: number; message?: string }>;
+    return res.json() as Promise<{ success: boolean; latencyMs?: number; message?: string; status?: number }>;
   };
 
-  const testOneModel = async (provider: Provider, model: Model) => {
+  // Returns true when a result indicates a rate-limit response.
+  const isRateLimited = (r: { status?: number; message?: string }) =>
+    r.status === 429 || /\b429\b|rate.?limit|too many/i.test(r.message ?? "");
+
+  const testOneModel = async (provider: Provider, model: FetchedModel) => {
+    const profile = SPEED_PROFILES[speedMode];
     setResults((prev) => {
       const next = new Map(prev);
       next.set(model.id, { status: "testing", runs: 0, success: 0, latencies: [] });
@@ -76,16 +177,26 @@ export function ModelSpeedTestPage() {
     const latencies: number[] = [];
     let lastMessage: string | undefined;
     for (let i = 0; i < RUNS_PER_MODEL; i++) {
-      try {
-        const data = await testModelOnce(provider, model);
-        if (data.success) {
-          success++;
-          if (typeof data.latencyMs === "number") latencies.push(data.latencyMs);
-        } else {
-          lastMessage = data.message;
+      if (i > 0) await sleep(profile.betweenCalls);
+      let data: { success: boolean; latencyMs?: number; message?: string; status?: number };
+      let attempt = 0;
+      // Retry with backoff specifically on 429 so bursty limits recover.
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        try {
+          data = await testModelOnce(provider, model);
+        } catch {
+          data = { success: false, message: "network error" };
         }
-      } catch {
-        lastMessage = "network error";
+        if (data.success || !isRateLimited(data) || attempt >= profile.maxRetries) break;
+        attempt++;
+        await sleep(profile.backoff * attempt);
+      }
+      if (data!.success) {
+        success++;
+        if (typeof data!.latencyMs === "number") latencies.push(data!.latencyMs);
+      } else {
+        lastMessage = data!.message;
       }
       setResult(model.id, { status: "testing", runs: i + 1, success, latencies, lastMessage });
     }
@@ -93,12 +204,15 @@ export function ModelSpeedTestPage() {
   };
 
   const runAll = async () => {
-    if (!selected || running) return;
+    if (!selected || running || models.length === 0) return;
+    const profile = SPEED_PROFILES[speedMode];
     setRunning(true);
     setResults(new Map());
     try {
-      for (const model of selected.models) {
-        await testOneModel(selected, model);
+      for (let i = 0; i < models.length; i++) {
+        if (i > 0) await sleep(profile.betweenModels);
+        const model = models[i];
+        if (model) await testOneModel(selected, model);
       }
     } finally {
       setRunning(false);
@@ -139,40 +253,61 @@ export function ModelSpeedTestPage() {
               {t("speed_test.providers")} ({testableProviders.length})
             </p>
             <div className="space-y-0.5">
-              {testableProviders.map((p) => (
-                <button
-                  key={p.id}
-                  disabled={running}
-                  onClick={() => setSelectedId(p.id)}
-                  className={cn(
-                    "flex w-full items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-colors disabled:opacity-50",
-                    selected?.id === p.id
-                      ? "border-blue-500 bg-blue-500/10 text-white"
-                      : "border-transparent text-gray-300 hover:bg-gray-800 hover:text-white"
-                  )}
-                >
-                  <span className="min-w-0 flex-1 truncate">{p.name}</span>
-                  <span className="shrink-0 rounded border border-gray-700 bg-gray-800 px-1.5 py-0.5 text-[10px] font-mono text-gray-400">
-                    {p.models.length}
-                  </span>
-                </button>
-              ))}
+              {testableProviders.map((p) => {
+                const count = (catalog[p.id] ?? []).length;
+                return (
+                  <button
+                    key={p.id}
+                    disabled={running || fetching}
+                    onClick={() => setSelectedId(p.id)}
+                    className={cn(
+                      "flex w-full items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-colors disabled:opacity-50",
+                      selected?.id === p.id
+                        ? "border-blue-500 bg-blue-500/10 text-white"
+                        : "border-transparent text-gray-300 hover:bg-gray-800 hover:text-white"
+                    )}
+                  >
+                    <span className="min-w-0 flex-1 truncate">{p.name}</span>
+                    <span className="shrink-0 rounded border border-gray-700 bg-gray-800 px-1.5 py-0.5 text-[10px] font-mono text-gray-400">
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
-          {/* Right: model speed results */}
+          {/* Right: fetch + speed results */}
           <div className="flex-1 space-y-4 p-4">
             {selected && (
               <>
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <h2 className="text-lg font-semibold text-white">{selected.name}</h2>
-                    <p className="text-xs text-gray-500">{selected.models.length} {t("speed_test.models")}</p>
+                    <p className="text-xs text-gray-500">{models.length} {t("speed_test.models")}</p>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="flex items-center gap-1.5 rounded-lg border border-gray-700 px-2.5 py-2 text-xs text-gray-300">
+                      <input
+                        type="checkbox"
+                        checked={speedMode === "slow"}
+                        disabled={running || fetching}
+                        onChange={(e) => setSpeedMode(e.target.checked ? "slow" : "normal")}
+                        className="rounded border-gray-600 bg-gray-800 text-blue-500"
+                      />
+                      {t("speed_test.slow_mode")}
+                    </label>
+                    <button
+                      onClick={fetchModels}
+                      disabled={fetching || running}
+                      className="flex items-center gap-2 rounded-lg border border-gray-700 px-3 py-2 text-sm text-gray-300 transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {fetching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                      {fetching ? t("speed_test.fetching") : t("speed_test.fetch_models")}
+                    </button>
                     <button
                       onClick={resetResults}
-                      disabled={running || results.size === 0}
+                      disabled={running || fetching || results.size === 0}
                       className="flex items-center gap-1.5 rounded-lg border border-gray-700 px-3 py-2 text-sm text-gray-300 transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <RotateCcw className="h-4 w-4" />
@@ -180,7 +315,7 @@ export function ModelSpeedTestPage() {
                     </button>
                     <button
                       onClick={runAll}
-                      disabled={running}
+                      disabled={running || fetching || models.length === 0}
                       className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50"
                       style={{ backgroundColor: "#3b82f6" }}
                     >
@@ -190,78 +325,100 @@ export function ModelSpeedTestPage() {
                   </div>
                 </div>
 
-                <div className="overflow-hidden rounded-lg border border-gray-800">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-gray-800 text-left text-xs uppercase tracking-wider text-gray-500">
-                        <th className="px-3 py-2 font-medium">{t("speed_test.col_model")}</th>
-                        <th className="px-3 py-2 font-medium text-right">{t("speed_test.col_success_rate")}</th>
-                        <th className="px-3 py-2 font-medium text-right">{t("speed_test.col_avg_latency")}</th>
-                        <th className="px-3 py-2 font-medium text-right">{t("speed_test.col_range")}</th>
-                        <th className="px-3 py-2 font-medium">{t("speed_test.col_status")}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {selected.models.map((m) => {
-                        const r = results.get(m.id);
-                        const rate = r && r.runs > 0 ? Math.round((r.success / r.runs) * 100) : null;
-                        const avgMs = r ? avg(r.latencies) : 0;
-                        const minMs = r && r.latencies.length ? Math.min(...r.latencies) : 0;
-                        const maxMs = r && r.latencies.length ? Math.max(...r.latencies) : 0;
-                        return (
-                          <tr key={m.id} className="border-b border-gray-800/60 last:border-0">
-                            <td className="px-3 py-2">
-                              <span className="font-mono text-gray-200">{m.id}</span>
-                            </td>
-                            <td className="px-3 py-2 text-right">
-                              {rate === null ? (
-                                <span className="text-gray-600">—</span>
-                              ) : (
-                                <span className={cn(
-                                  "font-mono",
-                                  rate >= 100 ? "text-emerald-400" : rate > 0 ? "text-amber-400" : "text-red-400"
-                                )}>
-                                  {rate}% ({r!.success}/{r!.runs})
-                                </span>
-                              )}
-                            </td>
-                            <td className="px-3 py-2 text-right font-mono text-gray-300">
-                              {avgMs > 0 ? `${avgMs} ms` : <span className="text-gray-600">—</span>}
-                            </td>
-                            <td className="px-3 py-2 text-right font-mono text-xs text-gray-500">
-                              {minMs > 0 ? `${minMs}–${maxMs}` : "—"}
-                            </td>
-                            <td className="px-3 py-2">
-                              {!r || r.status === "idle" ? (
-                                <span className="text-xs text-gray-600">{t("speed_test.pending")}</span>
-                              ) : r.status === "testing" ? (
-                                <span className="flex items-center gap-1 text-xs text-gray-400">
-                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                  {t("speed_test.testing")} {r.runs}/{RUNS_PER_MODEL}
-                                </span>
-                              ) : r.success === r.runs ? (
-                                <span className="flex items-center gap-1 text-xs text-emerald-400">
-                                  <Check className="h-3.5 w-3.5" />
-                                  {t("speed_test.ok")}
-                                </span>
-                              ) : r.success > 0 ? (
-                                <span className="flex items-center gap-1 text-xs text-amber-400">
-                                  <Check className="h-3.5 w-3.5" />
-                                  {t("speed_test.partial")}
-                                </span>
-                              ) : (
-                                <span className="flex items-center gap-1 text-xs text-red-400" title={r.lastMessage}>
-                                  <X className="h-3.5 w-3.5" />
-                                  {r.lastMessage ? r.lastMessage.slice(0, 40) : t("speed_test.fail")}
-                                </span>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                {fetchError && (
+                  <div className="flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">
+                    <X className="mt-0.5 h-4 w-4 shrink-0" />{fetchError}
+                  </div>
+                )}
+                {fetchInfo && !fetchError && (
+                  <div className="flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-300">
+                    <Check className="h-4 w-4 shrink-0" />{fetchInfo}
+                    <button onClick={clearModels} className="ml-auto text-xs text-gray-400 underline hover:text-gray-200">
+                      {t("speed_test.clear")}
+                    </button>
+                  </div>
+                )}
+
+                {models.length === 0 ? (
+                  <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-gray-700 p-10 text-center">
+                    <Download className="h-7 w-7 text-gray-600" />
+                    <p className="text-sm text-gray-400">{t("speed_test.empty_catalog")}</p>
+                    <p className="text-xs text-gray-600">{t("speed_test.empty_catalog_desc")}</p>
+                  </div>
+                ) : (
+                  <div className="overflow-hidden rounded-lg border border-gray-800">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-gray-800 text-left text-xs uppercase tracking-wider text-gray-500">
+                          <th className="px-3 py-2 font-medium">{t("speed_test.col_model")}</th>
+                          <th className="px-3 py-2 font-medium text-right">{t("speed_test.col_success_rate")}</th>
+                          <th className="px-3 py-2 font-medium text-right">{t("speed_test.col_avg_latency")}</th>
+                          <th className="px-3 py-2 font-medium text-right">{t("speed_test.col_range")}</th>
+                          <th className="px-3 py-2 font-medium">{t("speed_test.col_status")}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {models.map((m) => {
+                          const r = results.get(m.id);
+                          const rate = r && r.runs > 0 ? Math.round((r.success / r.runs) * 100) : null;
+                          const avgMs = r ? avg(r.latencies) : 0;
+                          const minMs = r && r.latencies.length ? Math.min(...r.latencies) : 0;
+                          const maxMs = r && r.latencies.length ? Math.max(...r.latencies) : 0;
+                          return (
+                            <tr key={m.id} className="border-b border-gray-800/60 last:border-0">
+                              <td className="px-3 py-2">
+                                <span className="font-mono text-gray-200">{m.id}</span>
+                              </td>
+                              <td className="px-3 py-2 text-right">
+                                {rate === null ? (
+                                  <span className="text-gray-600">—</span>
+                                ) : (
+                                  <span className={cn(
+                                    "font-mono",
+                                    rate >= 100 ? "text-emerald-400" : rate > 0 ? "text-amber-400" : "text-red-400"
+                                  )}>
+                                    {rate}% ({r!.success}/{r!.runs})
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2 text-right font-mono text-gray-300">
+                                {avgMs > 0 ? `${avgMs} ms` : <span className="text-gray-600">—</span>}
+                              </td>
+                              <td className="px-3 py-2 text-right font-mono text-xs text-gray-500">
+                                {minMs > 0 ? `${minMs}–${maxMs}` : "—"}
+                              </td>
+                              <td className="px-3 py-2">
+                                {!r || r.status === "idle" ? (
+                                  <span className="text-xs text-gray-600">{t("speed_test.pending")}</span>
+                                ) : r.status === "testing" ? (
+                                  <span className="flex items-center gap-1 text-xs text-gray-400">
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    {t("speed_test.testing")} {r.runs}/{RUNS_PER_MODEL}
+                                  </span>
+                                ) : r.success === r.runs ? (
+                                  <span className="flex items-center gap-1 text-xs text-emerald-400">
+                                    <Check className="h-3.5 w-3.5" />
+                                    {t("speed_test.ok")}
+                                  </span>
+                                ) : r.success > 0 ? (
+                                  <span className="flex items-center gap-1 text-xs text-amber-400">
+                                    <Check className="h-3.5 w-3.5" />
+                                    {t("speed_test.partial")}
+                                  </span>
+                                ) : (
+                                  <span className="flex items-center gap-1 text-xs text-red-400" title={r.lastMessage}>
+                                    <X className="h-3.5 w-3.5" />
+                                    {r.lastMessage ? r.lastMessage.slice(0, 40) : t("speed_test.fail")}
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </>
             )}
           </div>
