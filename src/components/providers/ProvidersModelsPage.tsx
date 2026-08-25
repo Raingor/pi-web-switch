@@ -27,8 +27,6 @@ import {
   Download,
   SquareCheck,
   Copy,
-  ChevronDown,
-  ChevronUp,
   Sparkles,
   Mic,
   Wand2,
@@ -241,36 +239,22 @@ export function ProvidersModelsPage() {
   const { allProviders, auth, modelsJson, removeCustomProvider } = useConfigStore();
   const hasKey = (p: Provider) => p.hasAuth || !!p.apiKey || !!auth?.[p.id]?.key;
 
-  const builtinProviders = allProviders
-    .filter((p) => p.type === "builtin")
-    .sort((a, b) => {
-      const aKey = hasKey(a) ? 1 : 0;
-      const bKey = hasKey(b) ? 1 : 0;
-      if (aKey !== bKey) return bKey - aKey;
-      return a.name.localeCompare(b.name);
-    });
   const customProviders = allProviders.filter((p) => p.type === "custom");
-  const enabledModelRefs = new Set(useConfigStore.getState().settings?.enabledModels ?? []);
-  const configuredProviders = allProviders.filter((provider) => hasKey(provider)).length;
-  const totalModels = allProviders.reduce((sum, provider) => sum + provider.models.length, 0);
-  const enabledModelsCount = allProviders.reduce((sum, provider) => sum + provider.models.filter((model) => enabledModelRefs.has(`${provider.id}/${model.id}`)).length, 0);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importBump, setImportBump] = useState(0);
-  const [builtinExpanded, setBuiltinExpanded] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState(false);
 
-  // Keep a valid selection (default: first custom, else first builtin)
-  const selected = allProviders.find((p) => p.id === selectedId) ?? null;
-  const visibleBuiltinProviders = builtinExpanded ? builtinProviders : builtinProviders.slice(0, 10);
+  // Keep a valid custom-provider selection.
+  const selected = customProviders.find((p) => p.id === selectedId) ?? null;
   useEffect(() => {
-    if (!selected && !adding && allProviders.length > 0) {
-      setSelectedId(customProviders[0]?.id ?? allProviders[0]?.id ?? null);
+    if (!selected && !adding && customProviders.length > 0) {
+      setSelectedId(customProviders[0]?.id ?? null);
     }
-  }, [selected, adding, allProviders, customProviders]);
+  }, [selected, adding, customProviders]);
 
   const handleAddProvider = async (id: string, cfg: CustomProviderConfig): Promise<boolean> => {
     const ok = await useConfigStore.getState().addCustomProvider(id, cfg);
@@ -346,60 +330,12 @@ export function ProvidersModelsPage() {
         <div className="providers-header-signal"><span /> {t("providers_models.config_sync_ready")}</div>
       </div>
 
-      <div className="providers-readout-grid">
-        <div className="tech-panel providers-readout-card"><span>{t("providers_models.providers_indexed")}</span><strong>{allProviders.length}</strong><small>{configuredProviders} {t("providers_models.configured")}</small></div>
-        <div className="tech-panel providers-readout-card"><span>{t("providers_models.models_catalogued")}</span><strong>{totalModels}</strong><small>{enabledModelsCount} {t("providers_models.enabled")}</small></div>
-        <div className="tech-panel providers-readout-card"><span>{t("providers_models.builtin_custom")}</span><strong>{builtinProviders.length} / {customProviders.length}</strong><small>{t("providers_models.routing_sources")}</small></div>
-      </div>
-
       <EnabledModelsPanel />
 
       <div className="providers-console flex overflow-hidden rounded-xl border border-gray-800 bg-gray-900/50">
         {/* ─── Left: Provider List ─────────────────────── */}
         <div className="provider-rail w-60 shrink-0 border-r border-gray-800 p-3">
-          {builtinProviders.length > 0 && (
-            <>
-              <div className="flex items-center justify-between px-2 pb-2 pt-1">
-                <p className="text-xs font-medium uppercase tracking-wider text-gray-500">
-                  {t("providers.builtin")} ({builtinProviders.length})
-                </p>
-              </div>
-              <div className="space-y-0.5">
-                {visibleBuiltinProviders.map((p) => (
-                    <ProviderListItem
-                      key={p.id}
-                      provider={p}
-                      active={!adding && selectedId === p.id}
-                      hasKey={hasKey(p)}
-                      onClick={() => {
-                        setAdding(false);
-                        setSelectedId(p.id);
-                      }}
-                    />
-                ))}
-              </div>
-              {builtinProviders.length > 10 && (
-                <button
-                  onClick={() => setBuiltinExpanded(!builtinExpanded)}
-                  className="mt-1 flex w-full items-center justify-center gap-1 rounded-lg py-1.5 text-xs text-gray-500 transition-colors hover:bg-gray-800/70 hover:text-gray-300"
-                >
-                  {builtinExpanded ? (
-                    <>
-                      <ChevronUp className="h-3.5 w-3.5" />
-                      {t("providers_models.collapse")}
-                    </>
-                  ) : (
-                    <>
-                      <ChevronDown className="h-3.5 w-3.5" />
-                      {t("providers_models.expand", String(builtinProviders.length - 10))}
-                    </>
-                  )}
-                </button>
-              )}
-            </>
-          )}
-
-          <p className="px-2 pb-2 pt-4 text-xs font-medium uppercase tracking-wider text-gray-500">
+          <p className="px-2 pb-2 pt-1 text-xs font-medium uppercase tracking-wider text-gray-500">
             {t("providers_models.custom_providers")}
           </p>
           <div className="space-y-0.5">
