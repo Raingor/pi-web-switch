@@ -148,6 +148,40 @@ function piApiPlugin(): Plugin {
           res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify(data));
         },
+        "GET /api/pi/memory/config"(_, res) {
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify(pi.readHermesMemoryConfig() ?? {}));
+        },
+        "GET /api/pi/memory/status"(_, res) {
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify(pi.readMemoryStatus()));
+        },
+        "POST /api/pi/memory/config"(req, res) {
+          let body = "";
+          req.on("data", (chunk: string) => (body += chunk));
+          req.on("end", () => {
+            try {
+              const patch = JSON.parse(body);
+              const ok = pi.writeHermesMemoryConfig(patch);
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ success: ok }));
+            } catch {
+              res.statusCode = 400;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ success: false, error: "Invalid request body" }));
+            }
+          });
+        },
+        "POST /api/pi/memory/optimize"(_, res) {
+          pi.optimizeMemory().then((result: unknown) => {
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify(result));
+          }).catch((error: unknown) => {
+            res.statusCode = 500;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ success: false, error: error instanceof Error ? error.message : "Optimize failed" }));
+          });
+        },
         "POST /api/pi/memory/delete-entry"(req, res) {
           let body = "";
           req.on("data", (chunk: string) => (body += chunk));

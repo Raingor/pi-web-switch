@@ -1633,6 +1633,268 @@ export function readSessionPreview(filePath: string, limit = 20): { messages: Se
 
 const MEMORY_FILENAMES = ["MEMORY.md", "USER.md", "failures.md"];
 
+// ─── Hermes Memory Config (auto-write model + optimize) ──
+// The pi-hermes-memory extension reads ~/.pi/agent/hermes-memory-config.json
+// to decide which model performs automatic memory writes and consolidation
+// (`llmModelOverride`, `llmThinkingOverride`) and how long a consolidation run
+// may take (`consolidationTimeoutMs`). We read/merge-write just those keys so
+// unrelated fields the extension may add later are preserved.
+const HERMES_MEMORY_CONFIG_PATH = join(PI_DIR, "hermes-memory-config.json");
+const HERMES_EXTENSION_ENTRY = join(
+  PI_DIR, "npm", "node_modules", "pi-hermes-memory", "src", "index.ts"
+);
+const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+type ThinkingLevel = (typeof THINKING_LEVELS)[number];
+const OVERFLOW_STRATEGIES = ["auto-consolidate", "reject", "fifo-evict"] as const;
+type OverflowStrategy = (typeof OVERFLOW_STRATEGIES)[number];
+
+// Mirror pi-hermes-memory's own defaults (src/constants.ts) so the panel shows
+// the same effective limits the extension enforces when the keys are unset.
+const DEFAULT_MEMORY_CHAR_LIMIT = 5000;
+const DEFAULT_USER_CHAR_LIMIT = 5000;
+
+export interface HermesMemoryConfig {
+  llmModelOverride?: string;
+  llmThinkingOverride?: ThinkingLevel;
+  consolidationTimeoutMs?: number;
+  memoryCharLimit?: number;
+  userCharLimit?: number;
+  memoryOverflowStrategy?: OverflowStrategy;
+}
+
+export function readHermesMemoryConfig(): HermesMemoryConfig {
+  try {
+    if (!existsSync(HERMES_MEMORY_CONFIG_PATH)) return {};
+    const parsed = JSON.parse(readFileSync(HERMES_MEMORY_CONFIG_PATH, "utf-8")) as Record<string, unknown>;
+    const out: HermesMemoryConfig = {};
+    if (typeof parsed.llmModelOverride === "string" && parsed.llmModelOverride.trim()) {
+      out.llmModelOverride = parsed.llmModelOverride.trim();
+    }
+    if (typeof parsed.llmThinkingOverride === "string" && (THINKING_LEVELS as readonly string[]).includes(parsed.llmThinkingOverride)) {
+      out.llmThinkingOverride = parsed.llmThinkingOverride as ThinkingLevel;
+    }
+    if (typeof parsed.consolidationTimeoutMs === "number" && Number.isFinite(parsed.consolidationTimeoutMs)) {
+      out.consolidationTimeoutMs = parsed.consolidationTimeoutMs;
+    }
+    if (typeof parsed.memoryCharLimit === "number" && Number.isFinite(parsed.memoryCharLimit) && parsed.memoryCharLimit > 0) {
+      out.memoryCharLimit = parsed.memoryCharLimit;
+    }
+    if (typeof parsed.userCharLimit === "number" && Number.isFinite(parsed.userCharLimit) && parsed.userCharLimit > 0) {
+      out.userCharLimit = parsed.userCharLimit;
+    }
+    if (typeof parsed.memoryOverflowStrategy === "string" && (OVERFLOW_STRATEGIES as readonly string[]).includes(parsed.memoryOverflowStrategy)) {
+      out.memoryOverflowStrategy = parsed.memoryOverflowStrategy as OverflowStrategy;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/** Merge-write the auto-write model settings, preserving any other keys. */
+export function writeHermesMemoryConfig(patch: HermesMemoryConfig): boolean {
+  try {
+    let existing: Record<string, unknown> = {};
+    if (existsSync(HERMES_MEMORY_CONFIG_PATH)) {
+      try {
+        existing = JSON.parse(readFileSync(HERMES_MEMORY_CONFIG_PATH, "utf-8")) as Record<string, unknown>;
+      } catch {
+        existing = {};
+      }
+    }
+    // Empty string clears the override so the extension falls back to defaults.
+    if (patch.llmModelOverride !== undefined) {
+      const v = patch.llmModelOverride.trim();
+      if (v) existing.llmModelOverride = v;
+      else delete existing.llmModelOverride;
+    }
+    if (patch.llmThinkingOverride !== undefined) {
+      if ((THINKING_LEVELS as readonly string[]).includes(patch.llmThinkingOverride)) {
+        existing.llmThinkingOverride = patch.llmThinkingOverride;
+      }
+    }
+    if (patch.consolidationTimeoutMs !== undefined && Number.isFinite(patch.consolidationTimeoutMs)) {
+      existing.consolidationTimeoutMs = patch.consolidationTimeoutMs;
+    }
+    if (patch.memoryCharLimit !== undefined && Number.isFinite(patch.memoryCharLimit) && patch.memoryCharLimit > 0) {
+      existing.memoryCharLimit = patch.memoryCharLimit;
+    }
+    if (patch.userCharLimit !== undefined && Number.isFinite(patch.userCharLimit) && patch.userCharLimit > 0) {
+      existing.userCharLimit = patch.userCharLimit;
+    }
+    if (patch.memoryOverflowStrategy !== undefined && (OVERFLOW_STRATEGIES as readonly string[]).includes(patch.memoryOverflowStrategy)) {
+      existing.memoryOverflowStrategy = patch.memoryOverflowStrategy;
+    }
+    writeFileSync(HERMES_MEMORY_CONFIG_PATH, JSON.stringify(existing, null, 2), "utf-8");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Lightweight capacity snapshot for the memory page. Reports per-target usage
+ * against the effective char limits the extension enforces (failure gets 2x the
+ * memory limit). The extension measures capacity in CHARACTERS, not bytes, so
+ * we read each file and use its character length — byte size (statSync) would
+ * over-count ~3x for CJK text and show false "over limit" bars.
+ */
+export function readMemoryStatus(): {
+  targets: { filename: string; target: "memory" | "user" | "failure"; chars: number; limit: number }[];
+} {
+  const cfg = readHermesMemoryConfig();
+  const memLimit = cfg.memoryCharLimit ?? DEFAULT_MEMORY_CHAR_LIMIT;
+  const userLimit = cfg.userCharLimit ?? DEFAULT_USER_CHAR_LIMIT;
+  const map: { filename: string; target: "memory" | "user" | "failure"; limit: number }[] = [
+    { filename: "MEMORY.md", target: "memory", limit: memLimit },
+    { filename: "USER.md", target: "user", limit: userLimit },
+    { filename: "failures.md", target: "failure", limit: memLimit * 2 },
+  ];
+  return {
+    targets: map.map(({ filename, target, limit }) => {
+      const p = join(HERMES_DIR, filename);
+      let chars = 0;
+      try {
+        chars = existsSync(p) ? readFileSync(p, "utf-8").length : 0;
+      } catch {
+        chars = 0;
+      }
+      return { filename, target, chars, limit };
+    }),
+  };
+}
+
+/** Resolve a usable `pi` binary: PI_BINARY env → PATH → known install dirs. */
+function resolvePiBin(): string | null {
+  const home = homedir();
+  const candidates = [
+    process.env.PI_BINARY,
+    "pi",
+    `${home}/.npm-global/bin/pi`,
+    `${home}/.local/share/pnpm/pi`,
+  ].filter(Boolean) as string[];
+  for (const bin of candidates) {
+    try {
+      const out = spawnSync(bin, ["--version"], { encoding: "utf8", timeout: 15000 });
+      if (out.status === 0 && out.stdout.trim()) return bin;
+    } catch {
+      // try next
+    }
+  }
+  // Fall back to `which pi`
+  try {
+    const which = spawnSync("which", ["pi"], { encoding: "utf8", timeout: 5000 });
+    if (which.status === 0 && which.stdout.trim()) return which.stdout.trim();
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+function memoryFileSizes(): Record<string, number> {
+  const sizes: Record<string, number> = {};
+  for (const name of MEMORY_FILENAMES) {
+    const p = join(HERMES_DIR, name);
+    try {
+      sizes[name] = existsSync(p) ? statSync(p).size : 0;
+    } catch {
+      sizes[name] = 0;
+    }
+  }
+  return sizes;
+}
+
+export interface OptimizeMemoryResult {
+  success: boolean;
+  before: Record<string, number>;
+  after: Record<string, number>;
+  freedBytes: number;
+  message?: string;
+}
+
+/**
+ * One-click memory optimization. Runs pi's `/memory-consolidate` command in a
+ * headless child process with the pi-hermes-memory extension loaded, using the
+ * configured auto-write model override. Reports the byte delta across the three
+ * memory files. Long-running (the command spawns an LLM turn), so the caller
+ * should surface a spinner.
+ */
+export async function optimizeMemory(): Promise<OptimizeMemoryResult> {
+  const before = memoryFileSizes();
+  const bin = resolvePiBin();
+  if (!bin) {
+    return { success: false, before, after: before, freedBytes: 0, message: "pi binary not found" };
+  }
+  if (!existsSync(HERMES_EXTENSION_ENTRY)) {
+    return { success: false, before, after: before, freedBytes: 0, message: "pi-hermes-memory extension not found" };
+  }
+
+  const cfg = readHermesMemoryConfig();
+  const args = ["-p", "--no-session", "-e", HERMES_EXTENSION_ENTRY];
+  if (cfg.llmModelOverride) args.push("--model", cfg.llmModelOverride);
+  args.push("--thinking", cfg.llmThinkingOverride ?? "off");
+
+  // Compute per-target capacity so the prompt can name the over-limit targets
+  // explicitly. Weak/free models are conservative and skip merging when told
+  // only "merge duplicates"; giving them a concrete goal ("USER is at 105%,
+  // get it under the limit") is what actually makes them shrink memory.
+  const status = readMemoryStatus();
+  const capacityLines = status.targets.map((tg) => {
+    const pct = tg.limit > 0 ? Math.round((tg.chars / tg.limit) * 100) : 0;
+    const over = tg.chars > tg.limit;
+    return `- target "${tg.target}" (${tg.filename}): ${tg.chars}/${tg.limit} chars (${pct}%)${over ? " — OVER LIMIT, must shrink below the limit" : ""}`;
+  });
+  const overTargets = status.targets.filter((tg) => tg.chars > tg.limit).map((tg) => `"${tg.target}"`);
+
+  // Direct consolidation prompt rather than the /memory-consolidate slash
+  // command: the slash command spawns a *nested* child pi process per target
+  // (memory/user/failure/project), which routinely runs for 10+ minutes.
+  // Driving the memory tools directly in this single child is far faster.
+  args.push(
+    [
+      "Consolidate my long-term memory to reduce redundancy WITHOUT losing important facts.",
+      "Current capacity per target:",
+      ...capacityLines,
+      overTargets.length > 0
+        ? `The following targets are OVER their limit and MUST be reduced below it: ${overTargets.join(", ")}. This is the primary goal — you must actually remove or merge entries so each over-limit target ends up under its char limit.`
+        : "No target is over its limit; still merge any obvious duplicates and drop clearly stale entries.",
+      "For EACH target: call memory_search (with an empty or broad query) to list its current entries, then use memory_remove to drop outdated/superseded/duplicate entries and memory_replace/memory_add to merge related entries into fewer, more concise ones.",
+      "Always preserve user preferences and explicit corrections (highest priority). Prefer merging several similar entries into one tight entry over deleting unique facts.",
+      "Do not stop until every over-limit target is under its limit. When finished, reply with a one-line summary of what changed per target.",
+    ].join("\n")
+  );
+
+  const timeoutMs = cfg.consolidationTimeoutMs && cfg.consolidationTimeoutMs > 0
+    ? cfg.consolidationTimeoutMs
+    : 600000;
+
+  try {
+    const out = spawnSync(bin, args, {
+      encoding: "utf8",
+      timeout: timeoutMs,
+      maxBuffer: 1024 * 1024 * 8,
+    });
+    const after = memoryFileSizes();
+    const freedBytes = Object.values(before).reduce((a, b) => a + b, 0)
+      - Object.values(after).reduce((a, b) => a + b, 0);
+    if (out.error) {
+      const killed = (out.error as NodeJS.ErrnoException).code === "ETIMEDOUT";
+      return {
+        success: false,
+        before,
+        after,
+        freedBytes,
+        message: killed ? `consolidation timed out after ${Math.round(timeoutMs / 1000)}s` : String(out.error.message),
+      };
+    }
+    return { success: out.status === 0, before, after, freedBytes, message: out.status === 0 ? undefined : `exit ${out.status}` };
+  } catch (e) {
+    const after = memoryFileSizes();
+    return { success: false, before, after, freedBytes: 0, message: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+
 /** Strip the trailing `<!-- created=..., last=... -->` marker from a § section. */
 function sectionText(section: string): string {
   return section.replace(/<!--\s*created\s*=[^>]*-->\s*$/, "").trim();

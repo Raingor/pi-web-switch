@@ -16,6 +16,8 @@ import {
   Trash2,
   ChevronDown,
   ChevronRight,
+  Sparkles,
+  Settings2,
 } from "lucide-react";
 
 interface MemoryFile {
@@ -370,7 +372,7 @@ function MemoryFileSection({
 
 export function MemoryPage() {
   const { t } = useTranslation();
-  const { initialized } = useConfigStore();
+  const { initialized, allModels } = useConfigStore();
   const [files, setFiles] = useState<MemoryFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -378,6 +380,28 @@ export function MemoryPage() {
   const [filter, setFilter] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<{ filename: string; entry: MemoryEntry } | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  // One-click optimize (memory consolidation)
+  const [optimizing, setOptimizing] = useState(false);
+  const [optimizeMsg, setOptimizeMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [optimizeElapsed, setOptimizeElapsed] = useState(0);
+
+  // Auto-write memory model config
+  const [showConfig, setShowConfig] = useState(false);
+  const [cfg, setCfg] = useState<{ llmModelOverride: string; llmThinkingOverride: string; consolidationTimeoutMs: number; memoryCharLimit: number; userCharLimit: number; memoryOverflowStrategy: string }>(
+    { llmModelOverride: "", llmThinkingOverride: "off", consolidationTimeoutMs: 600000, memoryCharLimit: 5000, userCharLimit: 5000, memoryOverflowStrategy: "auto-consolidate" }
+  );
+  const [cfgSaving, setCfgSaving] = useState(false);
+  const [cfgMsg, setCfgMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  // Capacity status (per-target chars vs limit) for progress bars
+  const [status, setStatus] = useState<{ filename: string; target: string; chars: number; limit: number }[]>([]);
+  const loadStatus = useCallback(() => {
+    fetch("/api/pi/memory/status")
+      .then((r) => r.json())
+      .then((s: { targets?: { filename: string; target: string; chars: number; limit: number }[] }) => setStatus(s.targets ?? []))
+      .catch(() => {});
+  }, []);
 
   const loadAll = useCallback(() => {
     if (!initialized) return;
@@ -396,6 +420,86 @@ export function MemoryPage() {
   }, [initialized]);
 
   useEffect(() => { loadAll(); }, [loadAll]);
+  useEffect(() => { loadStatus(); }, [loadStatus]);
+
+  // Load the hermes auto-write model config once.
+  useEffect(() => {
+    fetch("/api/pi/memory/config")
+      .then((r) => r.json())
+      .then((c: { llmModelOverride?: string; llmThinkingOverride?: string; consolidationTimeoutMs?: number; memoryCharLimit?: number; userCharLimit?: number; memoryOverflowStrategy?: string }) =>
+        setCfg({
+          llmModelOverride: c.llmModelOverride ?? "",
+          llmThinkingOverride: c.llmThinkingOverride ?? "off",
+          consolidationTimeoutMs: c.consolidationTimeoutMs ?? 600000,
+          memoryCharLimit: c.memoryCharLimit ?? 5000,
+          userCharLimit: c.userCharLimit ?? 5000,
+          memoryOverflowStrategy: c.memoryOverflowStrategy ?? "auto-consolidate",
+        })
+      )
+      .catch(() => {});
+  }, []);
+
+  const formatBytes = (n: number) => {
+    const abs = Math.abs(n);
+    if (abs >= 1024) return `${(n / 1024).toFixed(1)} KB`;
+    return `${n} B`;
+  };
+
+  const handleOptimize = async () => {
+    setOptimizing(true);
+    setOptimizeMsg(null);
+    setOptimizeElapsed(0);
+    // While the consolidation child runs, poll capacity + elapsed so the user
+    // sees the bars move and a running timer instead of a frozen spinner.
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => {
+      setOptimizeElapsed(Math.round((Date.now() - startedAt) / 1000));
+      loadStatus();
+    }, 2000);
+    try {
+      const res = await fetch("/api/pi/memory/optimize", { method: "POST" });
+      const result = (await res.json()) as { success: boolean; freedBytes?: number; message?: string };
+      if (result.success) {
+        const freed = result.freedBytes ?? 0;
+        setOptimizeMsg({ ok: true, text: freed > 0 ? t("memory.optimize_done", formatBytes(freed)) : t("memory.optimize_none") });
+        loadAll();
+        loadStatus();
+      } else {
+        setOptimizeMsg({ ok: false, text: t("memory.optimize_failed", result.message ?? "") });
+      }
+    } catch (e) {
+      setOptimizeMsg({ ok: false, text: t("memory.optimize_failed", e instanceof Error ? e.message : "") });
+    } finally {
+      window.clearInterval(timer);
+      setOptimizing(false);
+    }
+  };
+
+  const handleSaveConfig = async () => {
+    setCfgSaving(true);
+    setCfgMsg(null);
+    try {
+      const res = await fetch("/api/pi/memory/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          llmModelOverride: cfg.llmModelOverride.trim(),
+          llmThinkingOverride: cfg.llmThinkingOverride,
+          consolidationTimeoutMs: cfg.consolidationTimeoutMs,
+          memoryCharLimit: cfg.memoryCharLimit,
+          userCharLimit: cfg.userCharLimit,
+          memoryOverflowStrategy: cfg.memoryOverflowStrategy,
+        }),
+      });
+      const { success } = (await res.json()) as { success: boolean };
+      setCfgMsg({ ok: !!success, text: success ? t("memory.config_saved") : t("memory.config_save_failed") });
+      if (success) loadStatus();
+    } catch {
+      setCfgMsg({ ok: false, text: t("memory.config_save_failed") });
+    } finally {
+      setCfgSaving(false);
+    }
+  };
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
@@ -472,16 +576,77 @@ export function MemoryPage() {
             {t("memory.summary", String(totalEntries), String(parsed.length))}
           </p>
         </div>
-        <button
-          onClick={loadAll}
-          className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors"
-          style={{ borderColor: "var(--card-border)", color: "var(--muted-text)", backgroundColor: "var(--card-bg)" }}
-          title={t("memory.refresh")}
-        >
-          <RefreshCw className={refreshing ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} />
-          {t("memory.refresh")}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleOptimize}
+            disabled={optimizing || parsed.length === 0}
+            className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50"
+            style={{ borderColor: "var(--card-border)", color: "var(--muted-text)", backgroundColor: "var(--card-bg)" }}
+            title={t("memory.optimize_hint")}
+          >
+            <Sparkles className={optimizing ? "h-3.5 w-3.5 animate-pulse" : "h-3.5 w-3.5"} />
+            {optimizing ? t("memory.optimizing") : t("memory.optimize")}
+          </button>
+          <button
+            onClick={() => { setCfgMsg(null); setShowConfig(true); }}
+            className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors"
+            style={{ borderColor: "var(--card-border)", color: "var(--muted-text)", backgroundColor: "var(--card-bg)" }}
+            title={t("memory.config")}
+          >
+            <Settings2 className="h-3.5 w-3.5" />
+            {t("memory.config")}
+          </button>
+          <button
+            onClick={loadAll}
+            className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors"
+            style={{ borderColor: "var(--card-border)", color: "var(--muted-text)", backgroundColor: "var(--card-bg)" }}
+            title={t("memory.refresh")}
+          >
+            <RefreshCw className={refreshing ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} />
+            {t("memory.refresh")}
+          </button>
+        </div>
       </div>
+
+      {(optimizing || optimizeMsg || status.length > 0) && (
+        <div className="tech-panel space-y-3 rounded-xl border px-4 py-3" style={{ borderColor: "var(--card-border)", backgroundColor: "var(--card-bg)" }}>
+          {/* Per-target capacity bars */}
+          <div className="space-y-2">
+            {status.map((s) => {
+              const pct = s.limit > 0 ? Math.min(100, Math.round((s.chars / s.limit) * 100)) : 0;
+              const over = s.chars > s.limit;
+              const barColor = over ? "#ef4444" : pct > 80 ? "#f59e0b" : "#10b981";
+              const label = FILE_LABEL_KEYS[s.filename] ? t(FILE_LABEL_KEYS[s.filename]!) : s.filename;
+              return (
+                <div key={s.filename}>
+                  <div className="mb-1 flex items-center justify-between text-[11px]" style={{ color: "var(--muted-text)" }}>
+                    <span>{label} <span style={{ color: "var(--subtle-text)" }}>· {s.filename}</span></span>
+                    <span style={{ color: over ? "#ef4444" : "var(--muted-text)" }}>
+                      {s.chars} / {s.limit} ({pct}%)
+                    </span>
+                  </div>
+                  <div className="h-2 w-full overflow-hidden rounded-full" style={{ backgroundColor: "var(--page-bg)" }}>
+                    <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, backgroundColor: barColor }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Optimize progress / result line */}
+          {optimizing && (
+            <div className="flex items-center gap-2 text-xs" style={{ color: "var(--muted-text)" }}>
+              <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-gray-500 border-t-transparent" />
+              <span>{t("memory.optimizing")} · {optimizeElapsed}s</span>
+            </div>
+          )}
+          {!optimizing && optimizeMsg && (
+            <div className="text-xs" style={{ color: optimizeMsg.ok ? "#10b981" : "#ef4444" }}>
+              {optimizeMsg.text}
+            </div>
+          )}
+        </div>
+      )}
 
       {parsed.length === 0 ? (
         <div className="memory-empty-state">
@@ -547,6 +712,123 @@ export function MemoryPage() {
           )}
         </>
       )}
+
+      {/* Auto-write memory model config */}
+      <Modal
+        open={showConfig}
+        onClose={() => !cfgSaving && setShowConfig(false)}
+        title={t("memory.config_title")}
+        size="md"
+      >
+        <div className="space-y-4">
+          <p className="text-xs" style={{ color: "var(--muted-text)" }}>{t("memory.config_desc")}</p>
+          <div>
+            <label className="mb-1 block text-xs" style={{ color: "var(--muted-text)" }}>{t("memory.config_model")}</label>
+            <input
+              type="text"
+              list="memory-model-options"
+              value={cfg.llmModelOverride}
+              onChange={(e) => setCfg({ ...cfg, llmModelOverride: e.target.value })}
+              placeholder={t("memory.config_model_default")}
+              className="w-full rounded-lg border px-3 py-1.5 text-sm outline-none focus:ring-1 focus:ring-blue-500"
+              style={{ backgroundColor: "var(--card-bg)", borderColor: "var(--card-border)", color: "var(--page-text)" }}
+            />
+            <datalist id="memory-model-options">
+              {allModels.map((m) => (
+                <option key={`${m.providerId}/${m.id}`} value={`${m.providerId}/${m.id}`}>{m.providerName} · {m.name ?? m.id}</option>
+              ))}
+            </datalist>
+          </div>
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="mb-1 block text-xs" style={{ color: "var(--muted-text)" }}>{t("memory.config_thinking")}</label>
+              <select
+                value={cfg.llmThinkingOverride}
+                onChange={(e) => setCfg({ ...cfg, llmThinkingOverride: e.target.value })}
+                className="w-full rounded-lg border px-3 py-1.5 text-sm outline-none focus:ring-1 focus:ring-blue-500"
+                style={{ backgroundColor: "var(--card-bg)", borderColor: "var(--card-border)", color: "var(--page-text)" }}
+              >
+                {["off", "minimal", "low", "medium", "high", "xhigh"].map((lvl) => (
+                  <option key={lvl} value={lvl}>{lvl}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex-1">
+              <label className="mb-1 block text-xs" style={{ color: "var(--muted-text)" }}>{t("memory.config_timeout")}</label>
+              <input
+                type="number"
+                min={60}
+                value={Math.round(cfg.consolidationTimeoutMs / 1000)}
+                onChange={(e) => setCfg({ ...cfg, consolidationTimeoutMs: Math.max(60, Number(e.target.value) || 0) * 1000 })}
+                className="w-full rounded-lg border px-3 py-1.5 text-sm outline-none focus:ring-1 focus:ring-blue-500"
+                style={{ backgroundColor: "var(--card-bg)", borderColor: "var(--card-border)", color: "var(--page-text)" }}
+              />
+            </div>
+          </div>
+          {/* Capacity limits */}
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="mb-1 block text-xs" style={{ color: "var(--muted-text)" }}>{t("memory.config_mem_limit")}</label>
+              <input
+                type="number"
+                min={1000}
+                step={500}
+                value={cfg.memoryCharLimit}
+                onChange={(e) => setCfg({ ...cfg, memoryCharLimit: Math.max(1000, Number(e.target.value) || 0) })}
+                className="w-full rounded-lg border px-3 py-1.5 text-sm outline-none focus:ring-1 focus:ring-blue-500"
+                style={{ backgroundColor: "var(--card-bg)", borderColor: "var(--card-border)", color: "var(--page-text)" }}
+              />
+              <p className="mt-1 text-[10px]" style={{ color: "var(--subtle-text)" }}>{t("memory.config_mem_limit_hint", String(cfg.memoryCharLimit * 2))}</p>
+            </div>
+            <div className="flex-1">
+              <label className="mb-1 block text-xs" style={{ color: "var(--muted-text)" }}>{t("memory.config_user_limit")}</label>
+              <input
+                type="number"
+                min={1000}
+                step={500}
+                value={cfg.userCharLimit}
+                onChange={(e) => setCfg({ ...cfg, userCharLimit: Math.max(1000, Number(e.target.value) || 0) })}
+                className="w-full rounded-lg border px-3 py-1.5 text-sm outline-none focus:ring-1 focus:ring-blue-500"
+                style={{ backgroundColor: "var(--card-bg)", borderColor: "var(--card-border)", color: "var(--page-text)" }}
+              />
+            </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs" style={{ color: "var(--muted-text)" }}>{t("memory.config_overflow")}</label>
+            <select
+              value={cfg.memoryOverflowStrategy}
+              onChange={(e) => setCfg({ ...cfg, memoryOverflowStrategy: e.target.value })}
+              className="w-full rounded-lg border px-3 py-1.5 text-sm outline-none focus:ring-1 focus:ring-blue-500"
+              style={{ backgroundColor: "var(--card-bg)", borderColor: "var(--card-border)", color: "var(--page-text)" }}
+            >
+              <option value="auto-consolidate">{t("memory.config_overflow_auto")}</option>
+              <option value="reject">{t("memory.config_overflow_reject")}</option>
+              <option value="fifo-evict">{t("memory.config_overflow_fifo")}</option>
+            </select>
+          </div>
+          <div className="flex items-center justify-end gap-3">
+            {cfgMsg && (
+              <span className="text-xs" style={{ color: cfgMsg.ok ? "#10b981" : "#ef4444" }}>{cfgMsg.text}</span>
+            )}
+            <button
+              onClick={() => setShowConfig(false)}
+              disabled={cfgSaving}
+              className="rounded-lg border px-4 py-2 text-sm"
+              style={{ borderColor: "var(--card-border)", color: "var(--muted-text)" }}
+            >
+              {t("memory.config_cancel")}
+            </button>
+            <button
+              onClick={handleSaveConfig}
+              disabled={cfgSaving}
+              className="rounded-lg px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+              style={{ backgroundColor: "#2563eb" }}
+            >
+              {cfgSaving ? t("memory.config_saving") : t("memory.config_save")}
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       {/* Delete entry confirm */}
       <Modal
