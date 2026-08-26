@@ -148,6 +148,22 @@ function piApiPlugin(): Plugin {
           res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify(data));
         },
+        "POST /api/pi/subagents/update-agent"(req, res) {
+          let body = "";
+          req.on("data", (chunk: string) => (body += chunk));
+          req.on("end", () => {
+            try {
+              const { fileName, model, thinking } = JSON.parse(body) as { fileName: string; model?: string; thinking?: string };
+              const ok = pi.updateAgentFields(fileName, { model, thinking });
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ success: ok }));
+            } catch {
+              res.statusCode = 400;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ success: false, error: "Invalid request body" }));
+            }
+          });
+        },
         "GET /api/pi/memory/config"(_, res) {
           res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify(pi.readHermesMemoryConfig() ?? {}));

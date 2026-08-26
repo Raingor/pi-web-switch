@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "@/lib/i18n";
+import { useConfigStore } from "@/store/config-store";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { formatTokens } from "@/lib/utils";
@@ -16,6 +17,9 @@ import {
   Loader2,
   Search,
   ExternalLink,
+  Pencil,
+  Check,
+  X,
 } from "lucide-react";
 
 const API_BASE = "/api/pi";
@@ -226,7 +230,7 @@ function AgentList({
       {/* Right: Agent detail */}
       <div className="min-w-0 flex-1 p-6">
         {selected ? (
-          <AgentDetail agent={selected} />
+          <AgentDetail agent={selected} onSaved={onRefresh} />
         ) : (
           <div className="flex h-40 items-center justify-center text-sm text-gray-500">
             {t("providers_models.select_hint")}
@@ -237,8 +241,47 @@ function AgentList({
   );
 }
 
-function AgentDetail({ agent }: { agent: AgentDef }) {
+function AgentDetail({ agent, onSaved }: { agent: AgentDef; onSaved: () => void }) {
   const { t } = useTranslation();
+  const { allModels } = useConfigStore();
+  const [editing, setEditing] = useState(false);
+  const [model, setModel] = useState(agent.model ?? "");
+  const [thinking, setThinking] = useState(agent.thinking ?? "");
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  // Reset the draft whenever a different agent is selected.
+  useEffect(() => {
+    setModel(agent.model ?? "");
+    setThinking(agent.thinking ?? "");
+    setEditing(false);
+    setMsg(null);
+  }, [agent.fileName]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setMsg(null);
+    try {
+      const res = await fetch(`${API_BASE}/subagents/update-agent`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileName: agent.fileName, model: model.trim(), thinking: thinking.trim() }),
+      });
+      const { success } = (await res.json()) as { success: boolean };
+      if (success) {
+        setMsg({ ok: true, text: t("subagents.saved") });
+        setEditing(false);
+        onSaved();
+      } else {
+        setMsg({ ok: false, text: t("subagents.save_failed") });
+      }
+    } catch {
+      setMsg({ ok: false, text: t("subagents.save_failed") });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
@@ -246,23 +289,94 @@ function AgentDetail({ agent }: { agent: AgentDef }) {
         <Badge variant={agent.package === "custom" ? "default" : "info"}>
           {agent.package}
         </Badge>
+        {agent.package === "custom" && !editing && (
+          <button
+            onClick={() => { setMsg(null); setEditing(true); }}
+            className="ml-auto flex items-center gap-1.5 rounded-lg border border-gray-700 px-2.5 py-1 text-xs text-gray-300 hover:bg-gray-800"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+            {t("subagents.edit")}
+          </button>
+        )}
       </div>
 
       <p className="text-sm text-gray-400">{agent.description}</p>
 
       <div className="grid grid-cols-2 gap-4 rounded-lg border border-gray-800 bg-gray-900/70 p-4">
-        {agent.model && (
-          <div>
-            <span className="text-xs text-gray-500">{t("subagents.model")}</span>
-            <p className="mt-0.5 text-sm text-gray-200 font-mono">{agent.model}</p>
+        {/* Model — editable for custom agents */}
+        <div className={editing ? "col-span-2" : ""}>
+          <span className="text-xs text-gray-500">{t("subagents.model")}</span>
+          {editing ? (
+            <>
+              <input
+                type="text"
+                list="agent-model-options"
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                placeholder={t("subagents.model_placeholder")}
+                className="mt-1 w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 font-mono text-sm text-gray-100 outline-none focus:ring-1 focus:ring-blue-500"
+              />
+              <datalist id="agent-model-options">
+                {allModels.map((m) => (
+                  <option key={`${m.providerId}/${m.id}`} value={`${m.providerId}/${m.id}`}>
+                    {m.providerName} · {m.name ?? m.id}
+                  </option>
+                ))}
+              </datalist>
+            </>
+          ) : (
+            <p className="mt-0.5 text-sm text-gray-200 font-mono">{agent.model || t("subagents.model_default")}</p>
+          )}
+        </div>
+
+        {/* Thinking — editable for custom agents */}
+        <div>
+          <span className="text-xs text-gray-500">{t("subagents.thinking")}</span>
+          {editing ? (
+            <select
+              value={thinking}
+              onChange={(e) => setThinking(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-gray-100 outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              <option value="">{t("subagents.thinking_default")}</option>
+              {["off", "minimal", "low", "medium", "high", "xhigh"].map((lvl) => (
+                <option key={lvl} value={lvl}>{lvl}</option>
+              ))}
+            </select>
+          ) : (
+            <p className="mt-0.5 text-sm text-gray-200">{agent.thinking || t("subagents.thinking_default")}</p>
+          )}
+        </div>
+
+        {editing && (
+          <div className="col-span-2 flex items-center gap-3">
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50"
+            >
+              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+              {saving ? t("subagents.saving") : t("subagents.save")}
+            </button>
+            <button
+              onClick={() => { setEditing(false); setModel(agent.model ?? ""); setThinking(agent.thinking ?? ""); }}
+              disabled={saving}
+              className="flex items-center gap-1.5 rounded-lg border border-gray-700 px-4 py-1.5 text-sm text-gray-300 hover:bg-gray-800"
+            >
+              <X className="h-3.5 w-3.5" />
+              {t("subagents.cancel")}
+            </button>
+            {msg && (
+              <span className={`text-xs ${msg.ok ? "text-emerald-400" : "text-red-400"}`}>{msg.text}</span>
+            )}
           </div>
         )}
-        {agent.thinking && (
-          <div>
-            <span className="text-xs text-gray-500">{t("subagents.thinking")}</span>
-            <p className="mt-0.5 text-sm text-gray-200">{agent.thinking}</p>
+        {!editing && msg && (
+          <div className="col-span-2">
+            <span className={`text-xs ${msg.ok ? "text-emerald-400" : "text-red-400"}`}>{msg.text}</span>
           </div>
         )}
+
         {agent.tools && (
           <div className="col-span-2">
             <span className="text-xs text-gray-500">{t("subagents.tools")}</span>

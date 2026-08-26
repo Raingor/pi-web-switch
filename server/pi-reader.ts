@@ -2754,6 +2754,60 @@ export function readSubagents(): SubagentsData {
   };
 }
 
+const AGENT_NAME_RE = /^[\w.-]+\.md$/;
+
+/**
+ * Patch a single agent's frontmatter field (model / thinking) in place while
+ * preserving the rest of the file byte-for-byte. Rewriting from the parsed
+ * AgentDef would be lossy (body is truncated to 500 chars in listAgents), so we
+ * edit the original file's YAML frontmatter line directly.
+ *
+ * - Updating `model` to a non-empty value replaces or inserts the line.
+ * - An empty string removes the field so the agent falls back to the default.
+ */
+export function updateAgentFields(
+  fileName: string,
+  patch: { model?: string; thinking?: string }
+): boolean {
+  try {
+    // Guard against path traversal: only bare *.md names in the agents dir.
+    if (!AGENT_NAME_RE.test(fileName)) return false;
+    const filePath = join(AGENTS_DIR, fileName);
+    if (!existsSync(filePath)) return false;
+
+    const raw = readFileSync(filePath, "utf-8");
+    if (raw.indexOf("---") !== 0) return false;
+    const second = raw.indexOf("---", 3);
+    if (second === -1) return false;
+
+    const fmBlock = raw.slice(3, second);
+    const rest = raw.slice(second); // starts at closing "---"
+    const lines = fmBlock.replace(/^\n/, "").split("\n");
+
+    const setField = (key: string, value: string | undefined) => {
+      const idx = lines.findIndex((l) => l.trimStart().toLowerCase().startsWith(`${key}:`));
+      if (value === undefined || value === "") {
+        // Remove the field entirely when cleared.
+        if (idx !== -1) lines.splice(idx, 1);
+        return;
+      }
+      const newLine = `${key}: ${value}`;
+      if (idx !== -1) lines[idx] = newLine;
+      else lines.push(newLine);
+    };
+
+    if (patch.model !== undefined) setField("model", patch.model.trim());
+    if (patch.thinking !== undefined) setField("thinking", patch.thinking.trim());
+
+    const newFm = lines.join("\n");
+    const out = `---\n${newFm}\n${rest}`;
+    writeFileSync(filePath, out, "utf-8");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // ─── Built-in Provider Catalog (from the local pi install) ───
 // pi ships its full model catalog (same source as pi.dev/models) inside
 // @earendil-works/pi-ai as dist/providers/data/*.json. Reading it locally
