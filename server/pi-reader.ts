@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, existsSync, statSync, unlinkSync, writeFileSync, mkdirSync, renameSync, chmodSync } from "fs";
 import { homedir, platform } from "os";
 import { join, resolve, dirname, relative, sep } from "path";
-import { spawnSync } from "child_process";
+import { spawnSync, spawn } from "child_process";
 import { DatabaseSync } from "node:sqlite";
 
 const PI_DIR = join(homedir(), ".pi", "agent");
@@ -1868,26 +1868,39 @@ export async function optimizeMemory(): Promise<OptimizeMemoryResult> {
     ? cfg.consolidationTimeoutMs
     : 600000;
 
+  // IMPORTANT: use async spawn, NOT spawnSync. This runs inside the Vite dev
+  // server's Node process; a multi-minute spawnSync would block the event loop,
+  // freeze the HMR WebSocket heartbeat, and make the browser's Vite client
+  // force a full page reload when the socket reconnects. Async spawn keeps the
+  // loop free so /api/pi/memory/status polling and HMR stay responsive.
   try {
-    const out = spawnSync(bin, args, {
-      encoding: "utf8",
-      timeout: timeoutMs,
-      maxBuffer: 1024 * 1024 * 8,
+    const status2: { code: number | null; killed: boolean; error?: Error } = await new Promise((resolvePromise) => {
+      const child = spawn(bin, args, { stdio: ["ignore", "ignore", "ignore"] });
+      let settled = false;
+      const finish = (r: { code: number | null; killed: boolean; error?: Error }) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(killTimer);
+        resolvePromise(r);
+      };
+      const killTimer = setTimeout(() => {
+        child.kill("SIGKILL");
+        finish({ code: null, killed: true });
+      }, timeoutMs);
+      child.on("error", (error) => finish({ code: null, killed: false, error }));
+      child.on("close", (code) => finish({ code, killed: false }));
     });
+
     const after = memoryFileSizes();
     const freedBytes = Object.values(before).reduce((a, b) => a + b, 0)
       - Object.values(after).reduce((a, b) => a + b, 0);
-    if (out.error) {
-      const killed = (out.error as NodeJS.ErrnoException).code === "ETIMEDOUT";
-      return {
-        success: false,
-        before,
-        after,
-        freedBytes,
-        message: killed ? `consolidation timed out after ${Math.round(timeoutMs / 1000)}s` : String(out.error.message),
-      };
+    if (status2.error) {
+      return { success: false, before, after, freedBytes, message: String(status2.error.message) };
     }
-    return { success: out.status === 0, before, after, freedBytes, message: out.status === 0 ? undefined : `exit ${out.status}` };
+    if (status2.killed) {
+      return { success: false, before, after, freedBytes, message: `consolidation timed out after ${Math.round(timeoutMs / 1000)}s` };
+    }
+    return { success: status2.code === 0, before, after, freedBytes, message: status2.code === 0 ? undefined : `exit ${status2.code}` };
   } catch (e) {
     const after = memoryFileSizes();
     return { success: false, before, after, freedBytes: 0, message: e instanceof Error ? e.message : String(e) };
