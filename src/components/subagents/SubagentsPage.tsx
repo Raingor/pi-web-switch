@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useTranslation } from "@/lib/i18n";
 import { useConfigStore } from "@/store/config-store";
 import { Badge } from "@/components/ui/Badge";
@@ -189,7 +189,10 @@ function AgentList({
   searchActive: boolean;
 }) {
   const { t } = useTranslation();
-  const [selected, setSelected] = useState<AgentDef | null>(null);
+  const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  // Resolve the selected agent from the live list so it reflects saved edits
+  // after a refresh (matching by fileName), instead of a stale captured object.
+  const selected = agents.find((a) => a.fileName === selectedFile) ?? null;
 
   if (agents.length === 0) {
     return (
@@ -208,7 +211,7 @@ function AgentList({
         {agents.map((agent) => (
           <button
             key={agent.fileName}
-            onClick={() => setSelected(agent)}
+            onClick={() => setSelectedFile(agent.fileName)}
             className={`w-full rounded-lg border px-3 py-3 text-left transition-colors ${
               selected?.fileName === agent.fileName
                 ? "border-blue-500/30 bg-gray-800 text-white"
@@ -243,7 +246,14 @@ function AgentList({
 
 function AgentDetail({ agent, onSaved }: { agent: AgentDef; onSaved: () => void }) {
   const { t } = useTranslation();
-  const { allModels } = useConfigStore();
+  const { allModels, allProviders } = useConfigStore();
+  // Eligible = custom providers + built-in providers with an API key saved.
+  const eligibleModels = useMemo(() => {
+    const usable = new Set(
+      allProviders.filter((p) => p.type === "custom" || p.hasAuth).map((p) => p.id)
+    );
+    return allModels.filter((m) => usable.has(m.providerId));
+  }, [allModels, allProviders]);
   const [editing, setEditing] = useState(false);
   const [model, setModel] = useState(agent.model ?? "");
   const [thinking, setThinking] = useState(agent.thinking ?? "");
@@ -307,23 +317,22 @@ function AgentDetail({ agent, onSaved }: { agent: AgentDef; onSaved: () => void 
         <div className={editing ? "col-span-2" : ""}>
           <span className="text-xs text-gray-500">{t("subagents.model")}</span>
           {editing ? (
-            <>
-              <input
-                type="text"
-                list="agent-model-options"
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-                placeholder={t("subagents.model_placeholder")}
-                className="mt-1 w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 font-mono text-sm text-gray-100 outline-none focus:ring-1 focus:ring-blue-500"
-              />
-              <datalist id="agent-model-options">
-                {allModels.map((m) => (
-                  <option key={`${m.providerId}/${m.id}`} value={`${m.providerId}/${m.id}`}>
-                    {m.providerName} · {m.name ?? m.id}
-                  </option>
-                ))}
-              </datalist>
-            </>
+            <select
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 font-mono text-sm text-gray-100 outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              <option value="">{t("subagents.model_default")}</option>
+              {/* Keep a saved-but-unavailable model selectable so it isn't lost. */}
+              {model && !eligibleModels.some((m) => `${m.providerId}/${m.id}` === model) && (
+                <option value={model}>{model}</option>
+              )}
+              {eligibleModels.map((m) => (
+                <option key={`${m.providerId}/${m.id}`} value={`${m.providerId}/${m.id}`}>
+                  {m.providerName} · {m.name ?? m.id}
+                </option>
+              ))}
+            </select>
           ) : (
             <p className="mt-0.5 text-sm text-gray-200 font-mono">{agent.model || t("subagents.model_default")}</p>
           )}

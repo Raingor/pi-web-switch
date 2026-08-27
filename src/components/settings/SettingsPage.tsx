@@ -91,7 +91,6 @@ export function SettingsPage() {
     auth,
     modelsJson,
     allProviders,
-    allModels,
     updateSettings,
     setTheme,
     addPackage,
@@ -265,13 +264,6 @@ export function SettingsPage() {
     updateSettings(clearModel ? { defaultProvider: v, defaultModel: undefined } : { defaultProvider: v || undefined });
   };
 
-  const enabledModels = settings?.enabledModels ?? [];
-  const themeLabelKey: Record<string, string> = {
-    light: "settings.light",
-    dark: "settings.dark",
-    "light/dark": "settings.system",
-  };
-
   const tabs: { key: SettingsTab; icon: typeof Palette; label: string }[] = [
     { key: "appearance", icon: Palette, label: t("settings.appearance") },
     { key: "models", icon: LayoutGrid, label: t("settings.tab_models") },
@@ -290,25 +282,6 @@ export function SettingsPage() {
         </div>
         <h1 className="mt-1 text-2xl font-bold text-white">{t("settings.title")}</h1>
         <p className="mt-1 text-sm text-gray-400">{t("settings.subtitle")}</p>
-        <div className="mt-4 grid max-w-lg grid-cols-3 gap-3">
-          <div className="rounded-xl border border-gray-800 bg-gray-900/50 px-4 py-3">
-            <div className="text-xl font-bold text-white">{allProviders.length}</div>
-            <div className="text-xs text-gray-500">{t("settings.stat_providers")}</div>
-          </div>
-          <div className="rounded-xl border border-gray-800 bg-gray-900/50 px-4 py-3">
-            <div className="text-xl font-bold text-white">
-              {enabledModels.length}
-              <small className="ml-0.5 text-xs font-normal text-gray-500">/ {allModels.length}</small>
-            </div>
-            <div className="text-xs text-gray-500">{t("settings.stat_enabled")}</div>
-          </div>
-          <div className="rounded-xl border border-gray-800 bg-gray-900/50 px-4 py-3">
-            <div className="pt-1 text-sm font-bold text-white">
-              {t(themeLabelKey[settings?.theme ?? "light/dark"] ?? "settings.system")}
-            </div>
-            <div className="mt-0.5 text-xs text-gray-500">{t("settings.stat_theme")}</div>
-          </div>
-        </div>
       </header>
 
       {/* ── Tab nav ──────────────────────────────────────── */}
