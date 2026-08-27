@@ -205,6 +205,18 @@ pi-web-switch/
 └── src/                   # React 前端
 ```
 
+## 💬 交流群
+
+有任何疑问、建议或 bug 反馈，欢迎加入 **Telegram 交流群**：
+
+👉 **[加入 pi-web-switch Telegram 交流群](https://t.me/+ODpy7_7NlOE4NzA1)**
+
+提问时请附上：
+
+1. 你的系统（macOS / Windows / Linux）
+2. 版本号 —— `npm view @raingor/pi-web-switch version`
+3. 清晰的问题描述，以及报错截图或日志
+
 ## 🔗 相关链接
 
 - **个人主页：** [raingor.github.io/my-blog](https://raingor.github.io/my-blog/)

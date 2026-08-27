@@ -167,6 +167,18 @@ pi-web-switch/
 └── src/                   # React フロントエンド
 ```
 
+## 💬 コミュニティ
+
+ご質問・ご提案・バグ報告は **Telegram グループ** へどうぞ：
+
+👉 **[pi-web-switch Telegram グループに参加](https://t.me/+ODpy7_7NlOE4NzA1)**
+
+問題を報告する際は以下を添えてください：
+
+1. OS（macOS / Windows / Linux）
+2. バージョン —— `npm view @raingor/pi-web-switch version`
+3. 具体的な問題の説明とエラーのスクリーンショットまたはログ
+
 ## 🔗 リンク
 
 - **ホームページ：** [raingor.github.io/my-blog](https://raingor.github.io/my-blog/)

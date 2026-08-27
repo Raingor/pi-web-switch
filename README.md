@@ -330,6 +330,18 @@ pi-web-switch/
 └── src/                   # React frontend
 ```
 
+## 💬 Community
+
+Join the **Telegram group** for questions, suggestions, and bug reports:
+
+👉 **[Join the pi-web-switch Telegram group](https://t.me/+ODpy7_7NlOE4NzA1)**
+
+When reporting an issue, please include:
+
+1. Your OS (macOS / Windows / Linux)
+2. Your version — `npm view @raingor/pi-web-switch version`
+3. A clear description plus any error screenshots or logs
+
 ## 🔗 Links
 
 - **Homepage:** [raingor.github.io/my-blog](https://raingor.github.io/my-blog/)
