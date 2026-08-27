@@ -11,6 +11,8 @@ import {
 } from "@/lib/config";
 import type { PiConfig, UpdateCheckResult } from "@/types";
 import { cn } from "@/lib/utils";
+import { RECOMMENDED_PACKAGES } from "@/data/recommended-packages";
+import { PackageBrowser } from "./PackageBrowser";
 import {
   Download,
   Upload,
@@ -102,6 +104,7 @@ export function SettingsPage() {
   const [newPackage, setNewPackage] = useState("");
   const [importError, setImportError] = useState("");
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [showPackageBrowser, setShowPackageBrowser] = useState(false);
   const [fontSize, setFontSize] = useState(() => {
     const saved = Number(localStorage.getItem(FONT_SIZE_KEY));
     return saved >= 12 && saved <= 24 ? saved : 16;
@@ -569,6 +572,15 @@ export function SettingsPage() {
           </Card>
 
           <Card icon={Package} title={t("settings.packages")}>
+            <div className="mb-4">
+              <button
+                onClick={() => setShowPackageBrowser(true)}
+                className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500"
+              >
+                <Plus className="h-4 w-4" />
+                {t("settings.browse_packages")}
+              </button>
+            </div>
             {(settings?.packages ?? []).length > 0 && (
               <div className="mb-4 flex flex-wrap gap-1.5">
                 {(settings?.packages ?? []).map((pkg) => (
@@ -590,33 +602,84 @@ export function SettingsPage() {
             {(settings?.packages ?? []).length === 0 && (
               <p className="mb-4 text-sm text-gray-500">{t("settings.no_packages")}</p>
             )}
-            <div className="flex max-w-md gap-2">
-              <input
-                type="text"
-                value={newPackage}
-                onChange={(e) => setNewPackage(e.target.value)}
-                placeholder={t("settings.package_placeholder")}
-                className="flex-1 rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-white placeholder-gray-500"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && newPackage.trim()) {
-                    addPackage(newPackage.trim());
-                    setNewPackage("");
-                  }
-                }}
-              />
-              <button
-                onClick={() => {
-                  if (newPackage.trim()) {
-                    addPackage(newPackage.trim());
-                    setNewPackage("");
-                  }
-                }}
-                className="flex items-center gap-1 rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-gray-300 hover:bg-gray-700"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                {t("settings.add")}
-              </button>
-            </div>
+
+            {/* Recommended packages — one-click install */}
+            {(() => {
+              const installed = new Set(settings?.packages ?? []);
+              const recommended = RECOMMENDED_PACKAGES.filter((p) => !installed.has(p.id));
+              if (recommended.length === 0) return null;
+              return (
+                <div className="mb-4">
+                  <p className="mb-2 text-xs font-medium" style={{ color: "var(--muted-text)" }}>
+                    {t("settings.recommended_packages")}
+                  </p>
+                  <div className="space-y-1.5">
+                    {recommended.map((pkg) => (
+                      <div
+                        key={pkg.id}
+                        className="flex items-center gap-3 rounded-lg border border-gray-700 bg-gray-800/50 px-3 py-2"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm text-gray-200">{pkg.name}</p>
+                          <p className="truncate text-xs text-gray-500">{t(pkg.descKey)}</p>
+                        </div>
+                        <button
+                          onClick={() => addPackage(pkg.id)}
+                          className="flex shrink-0 items-center gap-1 rounded-lg border border-blue-600/50 bg-blue-600/10 px-3 py-1.5 text-xs font-medium text-blue-400 hover:bg-blue-600/20"
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                          {t("settings.install")}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    onClick={() => {
+                      const list = settings?.packages ?? [];
+                      const toAdd = recommended.map((p) => p.id);
+                      updateSettings({ packages: [...list, ...toAdd] });
+                    }}
+                    className="mt-2 flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-700"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    {t("settings.install_all_recommended")}
+                  </button>
+                </div>
+              );
+            })()}
+
+            <details className="mb-1">
+              <summary className="cursor-pointer text-xs text-gray-500 hover:text-gray-300">
+                {t("settings.add_custom_package")}
+              </summary>
+              <div className="mt-2 flex max-w-md gap-2">
+                <input
+                  type="text"
+                  value={newPackage}
+                  onChange={(e) => setNewPackage(e.target.value)}
+                  placeholder={t("settings.package_placeholder")}
+                  className="flex-1 rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-white placeholder-gray-500"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && newPackage.trim()) {
+                      addPackage(newPackage.trim());
+                      setNewPackage("");
+                    }
+                  }}
+                />
+                <button
+                  onClick={() => {
+                    if (newPackage.trim()) {
+                      addPackage(newPackage.trim());
+                      setNewPackage("");
+                    }
+                  }}
+                  className="flex items-center gap-1 rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-gray-300 hover:bg-gray-700"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  {t("settings.add")}
+                </button>
+              </div>
+            </details>
           </Card>
 
           <Card icon={Download} title={t("settings.import_export")}>
@@ -654,6 +717,13 @@ export function SettingsPage() {
           </Card>
         </div>
       )}
+
+      <PackageBrowser
+        open={showPackageBrowser}
+        onClose={() => setShowPackageBrowser(false)}
+        installed={new Set(settings?.packages ?? [])}
+        onInstall={(id) => addPackage(id)}
+      />
 
       {/* Reset Confirm */}
       <Modal

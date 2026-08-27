@@ -148,6 +148,17 @@ function piApiPlugin(): Plugin {
           res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify(data));
         },
+        "GET /api/pi/packages/search"(req, res) {
+          const parsed = new URL(req.url ?? "", "http://localhost");
+          const q = parsed.searchParams.get("q") ?? "";
+          pi.searchPackages(q).then((results: unknown) => {
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ results }));
+          }).catch(() => {
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ results: [] }));
+          });
+        },
         "POST /api/pi/subagents/update-agent"(req, res) {
           let body = "";
           req.on("data", (chunk: string) => (body += chunk));

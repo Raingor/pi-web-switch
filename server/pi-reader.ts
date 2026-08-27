@@ -2754,6 +2754,50 @@ export function readSubagents(): SubagentsData {
   };
 }
 
+// ─── Package Search (npm registry) ─────────────────────────
+// pi packages are npm packages tagged for pi. The pi.dev/packages catalog is
+// SSR-only (no public JSON API — /api/packages returns 501), so we query the
+// public npm registry search endpoint directly, which supports fuzzy text and
+// returns name/description/downloads.
+
+export interface PackageSearchResult {
+  name: string;
+  description: string;
+  version: string;
+  downloads: number;
+  link: string;
+}
+
+export async function searchPackages(query: string): Promise<PackageSearchResult[]> {
+  const q = query.trim();
+  // Bias the search toward pi extensions. When the user types nothing we still
+  // surface the most popular pi packages.
+  const text = q ? `${q} pi` : "pi-extension";
+  const url = `https://registry.npmjs.org/-/v1/search?text=${encodeURIComponent(text)}&size=40`;
+  try {
+    const res = await fetchExternal(url, { signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS) });
+    if (!res.ok) return [];
+    const data = (await res.json()) as {
+      objects?: { package?: { name?: string; description?: string; version?: string; links?: { npm?: string } }; searchScore?: number }[];
+    };
+    const rows = (data.objects ?? [])
+      .map((o) => o.package)
+      .filter((p): p is NonNullable<typeof p> => !!p?.name)
+      // Keep pi-related packages only (name or description mentions pi).
+      .filter((p) => /(^|[@/-])pi([-/]|$)|pi coding|pi extension|pi agent/i.test(`${p.name} ${p.description ?? ""}`))
+      .map((p) => ({
+        name: p.name!,
+        description: p.description ?? "",
+        version: p.version ?? "",
+        downloads: 0,
+        link: p.links?.npm ?? `https://www.npmjs.com/package/${p.name}`,
+      }));
+    return rows;
+  } catch {
+    return [];
+  }
+}
+
 const AGENT_NAME_RE = /^[\w.-]+\.md$/;
 
 /**
