@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { Menu, RadioTower } from "lucide-react";
 import { Sidebar } from "./Sidebar";
+import { HelpButton } from "@/components/help/HelpButton";
 
 export function AppShell() {
   const location = useLocation();
@@ -52,6 +53,8 @@ export function AppShell() {
           )}
         </main>
       </div>
+
+        <HelpButton />
     </div>
   );
 }

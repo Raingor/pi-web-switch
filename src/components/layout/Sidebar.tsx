@@ -11,10 +11,14 @@ import {
   X,
   Orbit,
   Gauge,
+  Send,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTranslation, LANGUAGES } from "@/lib/i18n";
 import { useState } from "react";
+
+// Telegram group invite link (same as the help dialog).
+const TELEGRAM_GROUP_URL = "https://t.me/+ODpy7_7NlOE4NzA1";
 
 const navItems = [
   { to: "/", icon: LayoutDashboard, key: "nav.dashboard", code: "01" },
@@ -76,6 +80,16 @@ export function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
       </nav>
 
       <div className="sidebar-footer">
+        <a
+          href={TELEGRAM_GROUP_URL}
+          target="_blank"
+          rel="noreferrer"
+          className="sidebar-telegram"
+        >
+          <Send className="h-4 w-4" />
+          <span>{t("help.contact_join")}</span>
+        </a>
+
         <div className="node-status">
           <div className="node-status-icon"><Orbit className="h-4 w-4" /></div>
           <div>
