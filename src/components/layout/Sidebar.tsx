@@ -16,6 +16,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useTranslation, LANGUAGES } from "@/lib/i18n";
 import { useState } from "react";
+import { ChangelogButton } from "@/components/help/ChangelogButton";
 
 // Telegram group invite link (same as the help dialog).
 const TELEGRAM_GROUP_URL = "https://t.me/+ODpy7_7NlOE4NzA1";
@@ -122,7 +123,7 @@ export function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
 
         <div className="version-strip">
           <span>{t("app.version")}</span>
-          <span>BUILD // STABLE</span>
+          <ChangelogButton />
         </div>
       </div>
     </aside>

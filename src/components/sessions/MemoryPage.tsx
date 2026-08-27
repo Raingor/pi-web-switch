@@ -372,7 +372,7 @@ function MemoryFileSection({
 
 export function MemoryPage() {
   const { t } = useTranslation();
-  const { initialized, allModels } = useConfigStore();
+  const { initialized, allModels, allProviders } = useConfigStore();
   const [files, setFiles] = useState<MemoryFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -396,6 +396,16 @@ export function MemoryPage() {
 
   // Capacity status (per-target chars vs limit) for progress bars
   const [status, setStatus] = useState<{ filename: string; target: string; chars: number; limit: number }[]>([]);
+
+  // Models eligible as the memory-write model: custom providers, plus built-in
+  // providers that have an API key actually saved (hasAuth). Built-ins without
+  // a key can't run, so they're excluded from the dropdown.
+  const eligibleModels = useMemo(() => {
+    const usableProviderIds = new Set(
+      allProviders.filter((p) => p.type === "custom" || p.hasAuth).map((p) => p.id)
+    );
+    return allModels.filter((m) => usableProviderIds.has(m.providerId));
+  }, [allModels, allProviders]);
   const loadStatus = useCallback(() => {
     fetch("/api/pi/memory/status")
       .then((r) => r.json())
@@ -493,7 +503,11 @@ export function MemoryPage() {
       });
       const { success } = (await res.json()) as { success: boolean };
       setCfgMsg({ ok: !!success, text: success ? t("memory.config_saved") : t("memory.config_save_failed") });
-      if (success) loadStatus();
+      if (success) {
+        loadStatus();
+        // Close the modal shortly after showing the success message.
+        setTimeout(() => setShowConfig(false), 600);
+      }
     } catch {
       setCfgMsg({ ok: false, text: t("memory.config_save_failed") });
     } finally {
@@ -724,20 +738,25 @@ export function MemoryPage() {
           <p className="text-xs" style={{ color: "var(--muted-text)" }}>{t("memory.config_desc")}</p>
           <div>
             <label className="mb-1 block text-xs" style={{ color: "var(--muted-text)" }}>{t("memory.config_model")}</label>
-            <input
-              type="text"
-              list="memory-model-options"
+            <select
               value={cfg.llmModelOverride}
               onChange={(e) => setCfg({ ...cfg, llmModelOverride: e.target.value })}
-              placeholder={t("memory.config_model_default")}
               className="w-full rounded-lg border px-3 py-1.5 text-sm outline-none focus:ring-1 focus:ring-blue-500"
               style={{ backgroundColor: "var(--card-bg)", borderColor: "var(--card-border)", color: "var(--page-text)" }}
-            />
-            <datalist id="memory-model-options">
-              {allModels.map((m) => (
-                <option key={`${m.providerId}/${m.id}`} value={`${m.providerId}/${m.id}`}>{m.providerName} · {m.name ?? m.id}</option>
+            >
+              <option value="">{t("memory.config_model_default")}</option>
+              {/* If the saved model isn't in the current model list (e.g. a
+                  provider was removed), still show it so it isn't silently lost. */}
+              {cfg.llmModelOverride &&
+                !eligibleModels.some((m) => `${m.providerId}/${m.id}` === cfg.llmModelOverride) && (
+                  <option value={cfg.llmModelOverride}>{cfg.llmModelOverride}</option>
+                )}
+              {eligibleModels.map((m) => (
+                <option key={`${m.providerId}/${m.id}`} value={`${m.providerId}/${m.id}`}>
+                  {m.providerName} · {m.name ?? m.id}
+                </option>
               ))}
-            </datalist>
+            </select>
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
