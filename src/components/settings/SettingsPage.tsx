@@ -134,10 +134,16 @@ export function SettingsPage() {
     }
   };
 
-  // One-click update: npm install <name>@latest for every updatable extension,
-  // then re-check so the list reflects the new installed versions.
+  // Names of everything that can be updated: pi core (routed to `pi update`
+  // server-side) plus every outdated extension.
+  const updatableNames = [
+    ...(updateResult?.pi?.hasUpdate ? [updateResult.pi.name] : []),
+    ...(updateResult?.extensions ?? []).filter((e) => e.hasUpdate).map((e) => e.name),
+  ];
+
+  // One-click update, then re-check so the list reflects the new installed versions.
   const handleApplyUpdates = async () => {
-    const names = (updateResult?.extensions ?? []).filter((e) => e.hasUpdate).map((e) => e.name);
+    const names = updatableNames;
     if (names.length === 0) return;
     setApplying(true);
     setApplyMessage(null);
@@ -223,7 +229,18 @@ export function SettingsPage() {
   // ── Default model select: composite `providerId/modelId` values, but the
   // settings file stores the bare model id (that's what pi expects on disk).
   const modelValue = (providerId: string, modelId: string) => `${providerId}/${modelId}`;
-  const modelProviders = allProviders.filter((p) => p.models.length > 0);
+  // Only providers that are actually usable belong in the defaults lists: a saved
+  // API key (auth.json / models.json override) or a custom provider. A stale
+  // saved value is kept so the selects don't render blank.
+  const providerOptions = allProviders.filter(
+    (p) =>
+      p.type === "custom" ||
+      p.hasAuth ||
+      !!p.apiKey ||
+      !!auth?.[p.id]?.key ||
+      p.id === settings?.defaultProvider
+  );
+  const modelProviders = providerOptions.filter((p) => p.models.length > 0);
   const scopedId = settings?.defaultProvider;
   const groupedModelOptions = scopedId
     ? [...modelProviders.filter((p) => p.id === scopedId), ...modelProviders.filter((p) => p.id !== scopedId)]
@@ -404,7 +421,7 @@ export function SettingsPage() {
                 className={cn(selectCls, "w-56")}
               >
                 <option value="">{t("settings.none")}</option>
-                {allProviders.map((p) => (
+                {providerOptions.map((p) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </select>
@@ -466,7 +483,7 @@ export function SettingsPage() {
                 <RefreshCw className={cn("h-4 w-4", checkingUpdates && "animate-spin")} />
                 {t("settings.check_updates")}
               </button>
-              {(updateResult?.extensions ?? []).some((e) => e.hasUpdate) && (
+              {updatableNames.length > 0 && (
                 <button
                   onClick={handleApplyUpdates}
                   disabled={applying || checkingUpdates}

@@ -1954,8 +1954,8 @@ export interface UpdateCheckResult {
   checkedAt: number;
 }
 
-/** Discover the installed pi version: PI_BINARY env → PATH → known locations. */
-function getPiVersion(): string | null {
+/** Discover the pi executable: PI_BINARY env → PATH → known global-install locations. */
+function resolvePiBinary(): { bin: string; version: string } | null {
   const home = homedir();
   const candidates = [
     process.env.PI_BINARY,
@@ -1971,13 +1971,18 @@ function getPiVersion(): string | null {
       const out = spawnSync(bin, ["--version"], { encoding: "utf8", timeout: 15000 });
       if (out.status === 0) {
         const v = out.stdout.trim();
-        if (v) return v;
+        if (v) return { bin, version: v };
       }
     } catch {
       // try next candidate
     }
   }
   return null;
+}
+
+/** Installed pi version, or null when no pi executable could be found. */
+function getPiVersion(): string | null {
+  return resolvePiBinary()?.version ?? null;
 }
 
 function readJsonFile<T>(filePath: string): T | null {
@@ -2131,15 +2136,37 @@ export interface ApplyUpdateResult {
 }
 
 /**
- * One-click update: npm install <name>@latest inside ~/.pi/agent/npm.
- * Only packages already installed there are accepted (pi core is excluded —
- * its install method is unknown, so it must be updated via its installer).
+ * Update pi core itself via `pi update`.
+ *
+ * pi core is not installed under ~/.pi/agent/npm, so `npm install` there would
+ * be wrong. `pi update` with no target updates pi only — deliberately without
+ * `--extensions`, which would instead update the packages and leave pi alone.
+ */
+function applyPiCoreUpdate(): ApplyUpdateResult {
+  const name = PI_CORE_PACKAGE;
+  const pi = resolvePiBinary();
+  if (!pi) return { name, success: false, message: "pi executable not found" };
+  try {
+    const out = spawnSync(pi.bin, ["update"], { encoding: "utf8", timeout: 300000 });
+    if (out.status === 0) return { name, success: true };
+    const stderr = (out.stderr || out.stdout || "").trim().split("\n").slice(-3).join(" ");
+    return { name, success: false, message: stderr || `pi update exited with ${out.status}` };
+  } catch (e) {
+    return { name, success: false, message: String(e) };
+  }
+}
+
+/**
+ * One-click update. Extensions use `npm install <name>@latest` inside
+ * ~/.pi/agent/npm; pi core is routed to `pi update` instead, since it lives
+ * outside that directory and has its own updater.
  */
 export function applyExtensionUpdates(names: string[]): ApplyUpdateResult[] {
   const dir = join(PI_DIR, "npm");
   const installed = new Set(listInstalledExtensions().map((e) => e.name));
 
   return names.map((name) => {
+    if (name === PI_CORE_PACKAGE) return applyPiCoreUpdate();
     if (!installed.has(name)) {
       return { name, success: false, message: "not an installed extension" };
     }
