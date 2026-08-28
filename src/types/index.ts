@@ -75,6 +75,16 @@ export interface ProviderOAuth {
   name: string;
 }
 
+/**
+ * One entry in a custom provider's API key pool. Only the key referenced by
+ * `activeKeyId` is mirrored into `apiKey`, which is the field pi itself reads.
+ */
+export interface ProviderApiKey {
+  id: string;
+  label?: string;
+  key: string;
+}
+
 export interface Provider {
   id: string;
   name: string;
@@ -82,6 +92,8 @@ export interface Provider {
   baseUrl?: string;
   api?: ApiType;
   apiKey?: string;
+  apiKeys?: ProviderApiKey[];
+  activeKeyId?: string;
   authHeader?: boolean;
   headers?: Record<string, string>;
   models: Model[];
@@ -121,6 +133,8 @@ export interface CustomProviderConfig {
   baseUrl?: string;
   api?: ApiType;
   apiKey?: string;
+  apiKeys?: ProviderApiKey[];
+  activeKeyId?: string;
   authHeader?: boolean;
   headers?: Record<string, string>;
   models?: Model[];

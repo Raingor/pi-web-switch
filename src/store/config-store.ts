@@ -42,6 +42,8 @@ function getCustomProviders(modelsJson: PiModelsJson | null): Provider[] {
     baseUrl: cfg.baseUrl,
     api: cfg.api,
     apiKey: cfg.apiKey,
+    apiKeys: cfg.apiKeys,
+    activeKeyId: cfg.activeKeyId,
     authHeader: cfg.authHeader,
     headers: cfg.headers,
     compat: cfg.compat,

@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
 import { formatTokens, cn, formatCost, USD_TO_CNY } from "@/lib/utils";
 import { useCurrency } from "@/lib/currency";
-import type { ApiType, CustomProviderConfig, Model, Provider } from "@/types";
+import type { ApiType, CustomProviderConfig, Model, Provider, ProviderApiKey } from "@/types";
 import { MODEL_CATALOG, searchCatalog, catalogToModel, catalogEntryId, findCatalogEntry, guessModelMeta } from "@/data/model-catalog";
 import {
   Plus,
@@ -104,6 +104,38 @@ function deriveProviderId(name: string, baseUrl: string): string {
   } catch {
     return "";
   }
+}
+
+// ─── API Key Pool ─────────────────────────────────────────
+// pi only reads a provider's single `apiKey`, so the extra keys live alongside
+// it in models.json as `apiKeys` + `activeKeyId`, and `apiKey` is kept in sync
+// with whichever entry is active. Providers saved before this feature existed
+// only have `apiKey`, so they get adopted into a one-entry pool on read.
+
+function newKeyId(): string {
+  return `k${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+}
+
+function normalizeKeyPool(
+  pool: ProviderApiKey[] | undefined,
+  legacyKey: string | undefined
+): ProviderApiKey[] {
+  const list = (pool ?? []).filter((k) => k && typeof k.key === "string" && k.key !== "");
+  if (list.length > 0) {
+    // Adopt a key that was edited directly in models.json outside the pool.
+    if (legacyKey && !list.some((k) => k.key === legacyKey)) {
+      return [...list, { id: newKeyId(), key: legacyKey }];
+    }
+    return list;
+  }
+  return legacyKey ? [{ id: newKeyId(), key: legacyKey }] : [];
+}
+
+// Mask a key for display: keep enough on both ends to tell keys apart.
+function maskKey(key: string): string {
+  if (key.startsWith("$")) return key; // env var reference — not a secret
+  if (key.length <= 12) return `${key.slice(0, 3)}…`;
+  return `${key.slice(0, 7)}…${key.slice(-4)}`;
 }
 
 // ─── Freeform Import Parser ───────────────────────────────
@@ -601,16 +633,29 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provid
   const isCustom = provider.type === "custom";
   const savedKey = provider.apiKey ?? auth?.[provider.id]?.key ?? "";
 
+  // Custom providers keep a pool of keys in models.json (`apiKeys`) plus an
+  // `activeKeyId` pointer; `apiKey` always mirrors the active one because that
+  // is the only field pi itself reads.
+  const savedKeys = useMemo(
+    () => normalizeKeyPool(provider.apiKeys, provider.apiKey),
+    [provider.apiKeys, provider.apiKey]
+  );
+  const savedActiveKeyId =
+    savedKeys.find((k) => k.id === provider.activeKeyId)?.id ?? savedKeys[0]?.id ?? "";
+
   const [providerName, setProviderName] = useState(provider.name ?? "");
   const [baseUrl, setBaseUrl] = useState(provider.baseUrl ?? "");
   const [api, setApi] = useState<ApiType>(provider.api ?? "openai-completions");
   const [apiKey, setApiKey] = useState(savedKey);
+  const [keys, setKeys] = useState<ProviderApiKey[]>(savedKeys);
+  const [activeKeyId, setActiveKeyId] = useState(savedActiveKeyId);
+  const [newKeyValue, setNewKeyValue] = useState("");
+  const [revealedKeys, setRevealedKeys] = useState<Set<string>>(new Set());
   const [showKey, setShowKey] = useState(false);
   const [editModel, setEditModel] = useState<Model | null>(null);
   const [showAddModel, setShowAddModel] = useState(false);
   const [deleteModel, setDeleteModel] = useState<Model | null>(null);
   const [modelQuery, setModelQuery] = useState("");
-  const [modelSort, setModelSort] = useState<"default" | "family" | "price-asc" | "price-desc">("default");
   const [supportsDeveloperRole, setSupportsDeveloperRole] = useState(
     provider.compat?.supportsDeveloperRole ?? false
   );
@@ -618,6 +663,65 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provid
     provider.compat?.supportsFinishReason ?? true
   );
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [keyError, setKeyError] = useState<string | null>(null);
+
+  // Key actually used for outbound calls (test connection, fetch models).
+  const activeKey = keys.find((k) => k.id === activeKeyId)?.key ?? "";
+  const effectiveKey = isCustom ? activeKey : apiKey;
+
+  // Persist the pool immediately: `apiKey` mirrors the active entry so pi keeps
+  // working, and switching keys should not need a separate Save click.
+  const persistKeys = async (nextKeys: ProviderApiKey[], nextActiveId: string) => {
+    const active = nextKeys.find((k) => k.id === nextActiveId) ?? nextKeys[0];
+    setKeys(nextKeys);
+    setActiveKeyId(active?.id ?? "");
+    setKeyError(null);
+    const ok = await updateCustomProvider(provider.id, {
+      apiKeys: nextKeys.length > 0 ? nextKeys : undefined,
+      activeKeyId: active?.id,
+      apiKey: active?.key,
+    });
+    if (!ok) setKeyError(t("providers_models.save_failed"));
+    return ok;
+  };
+
+  const handleAddKey = async () => {
+    const value = newKeyValue.trim();
+    if (!value) return;
+    if (keys.some((k) => k.key === value)) {
+      setKeyError(t("providers_models.api_key_duplicate"));
+      return;
+    }
+    const entry: ProviderApiKey = { id: newKeyId(), key: value };
+    // First key added becomes active automatically.
+    const nextActive = keys.length === 0 ? entry.id : activeKeyId;
+    const ok = await persistKeys([...keys, entry], nextActive);
+    if (ok) setNewKeyValue("");
+  };
+
+  const handleRemoveKey = async (id: string) => {
+    const next = keys.filter((k) => k.id !== id);
+    // Removing the active key promotes the first remaining one.
+    const nextActive = id === activeKeyId ? next[0]?.id ?? "" : activeKeyId;
+    await persistKeys(next, nextActive);
+    setRevealedKeys((prev) => {
+      const s = new Set(prev);
+      s.delete(id);
+      return s;
+    });
+  };
+
+  const handleActivateKey = async (id: string) => {
+    if (id === activeKeyId) return;
+    await persistKeys(keys, id);
+  };
+
+  const toggleReveal = (id: string) =>
+    setRevealedKeys((prev) => {
+      const s = new Set(prev);
+      s.has(id) ? s.delete(id) : s.add(id);
+      return s;
+    });
 
   // ─── Quick add (inline, one-liner) ───
   const [quickId, setQuickId] = useState("");
@@ -669,7 +773,7 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provid
       const res = await fetch("/api/pi/provider-models", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ baseUrl: baseUrl.trim(), apiKey, providerId: provider.id }),
+        body: JSON.stringify({ baseUrl: baseUrl.trim(), apiKey: effectiveKey, providerId: provider.id }),
       });
       const data = await res.json();
       if (data.error) setFetchError(data.error);
@@ -721,7 +825,7 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provid
       const res = await fetch("/api/pi/model-test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ baseUrl: baseUrl.trim(), modelId, apiKey, apiType: api ?? undefined }),
+        body: JSON.stringify({ baseUrl: baseUrl.trim(), modelId, apiKey: effectiveKey, apiType: api ?? undefined }),
       });
       const data = await res.json();
       setModelTests((prev) => {
@@ -830,18 +934,18 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provid
 
   const dirty =
     (isCustom && (providerName !== (provider.name ?? "") || baseUrl !== (provider.baseUrl ?? "") || api !== (provider.api ?? "openai-completions") || supportsDeveloperRole !== (provider.compat?.supportsDeveloperRole ?? true) || supportsFinishReason !== (provider.compat?.supportsFinishReason ?? true))) ||
-    (!isCustom && (baseUrl !== (provider.baseUrl ?? "") || api !== (provider.api ?? "openai-completions"))) ||
-    apiKey !== savedKey;
+    (!isCustom && (baseUrl !== (provider.baseUrl ?? "") || api !== (provider.api ?? "openai-completions") || apiKey !== savedKey));
 
   const handleSave = async () => {
     setSaveState("saving");
     let ok = true;
     if (isCustom) {
+      // apiKey / apiKeys are owned by the key pool below and already persisted,
+      // so they are deliberately left out of this patch.
       const cfgPatch = {
         name: providerName || undefined,
         baseUrl: baseUrl || undefined,
         api,
-        apiKey: apiKey || undefined,
         compat: { ...provider.compat, supportsDeveloperRole, supportsFinishReason },
       };
       // pi's model picker shows the provider key, not the display name, so
@@ -879,27 +983,11 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provid
   };
 
   const q = modelQuery.trim().toLowerCase();
-  const baseModels = q
+  const visibleModels = q
     ? provider.models.filter(
         (m) => m.id.toLowerCase().includes(q) || (m.name ?? "").toLowerCase().includes(q)
       )
     : provider.models;
-
-  // Look up the catalog family for a model id (for sorting/grouping)
-  const familyOf = (id: string): string => findCatalogEntry(id)?.family ?? "—";
-
-  const visibleModels = useMemo(() => {
-    const arr = [...baseModels];
-    if (modelSort === "family") {
-      arr.sort((a, b) => familyOf(a.id).localeCompare(familyOf(b.id)));
-    } else if (modelSort === "price-asc" || modelSort === "price-desc") {
-      const price = (m: typeof arr[number]) => m.cost?.input ?? 0;
-      arr.sort((a, b) => price(a) - price(b));
-      if (modelSort === "price-desc") arr.reverse();
-    }
-    return arr;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [baseModels, modelSort]);
 
   return (
     <div className="space-y-5">
@@ -979,30 +1067,133 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provid
         </select>
       </div>
 
-      {/* API Key */}
-      <div>
-        <label className="block text-sm text-gray-400">{t("providers.api_key")}</label>
-        <div className="relative mt-1.5">
-          <input
-            type={showKey ? "text" : "password"}
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            placeholder="sk-... or $MY_API_KEY"
-            className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2.5 pr-10 text-sm text-white"
-          />
-          <button
-            onClick={() => setShowKey(!showKey)}
-            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-gray-500 hover:text-gray-300"
-          >
-            {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-          </button>
+      {/* API Key — custom providers get a switchable pool, builtins a single key */}
+      {isCustom ? (
+        <div>
+          <div className="flex items-center justify-between gap-3">
+            <label className="block text-sm text-gray-400">{t("providers.api_key")}</label>
+            {keys.length > 1 && (
+              <span className="text-xs text-gray-500">
+                {t("providers_models.api_key_count", String(keys.length))}
+              </span>
+            )}
+          </div>
+
+          {keys.length === 0 && (
+            <p className="mt-1.5 text-xs text-gray-500">{t("providers_models.api_key_empty")}</p>
+          )}
+
+          {keys.length > 0 && (
+            <div className="mt-1.5 space-y-1.5">
+              {keys.map((k) => {
+                const isActive = k.id === activeKeyId;
+                const revealed = revealedKeys.has(k.id);
+                return (
+                  <div
+                    key={k.id}
+                    className={cn(
+                      "flex items-center gap-2 rounded-lg border px-3 py-2",
+                      isActive ? "border-blue-500/60 bg-blue-500/5" : "border-gray-700 bg-gray-800"
+                    )}
+                  >
+                    <input
+                      type="radio"
+                      name={`active-key-${provider.id}`}
+                      checked={isActive}
+                      onChange={() => handleActivateKey(k.id)}
+                      className="text-blue-500"
+                      title={t("providers_models.api_key_use")}
+                    />
+                    <code className="min-w-0 flex-1 truncate font-mono text-xs text-gray-200">
+                      {revealed ? k.key : maskKey(k.key)}
+                    </code>
+                    {isActive && <Badge variant="success">{t("providers_models.api_key_active")}</Badge>}
+                    <button
+                      onClick={() => toggleReveal(k.id)}
+                      className="rounded-md p-1.5 text-gray-500 hover:text-gray-300"
+                      title={revealed ? t("providers_models.api_key_hide") : t("providers_models.api_key_show")}
+                    >
+                      {revealed ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                    <button
+                      onClick={() => handleRemoveKey(k.id)}
+                      className="rounded-md p-1.5 text-gray-500 hover:text-red-400"
+                      title={t("providers_models.api_key_delete")}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="mt-2 flex items-center gap-2">
+            <input
+              type={showKey ? "text" : "password"}
+              value={newKeyValue}
+              onChange={(e) => {
+                setNewKeyValue(e.target.value);
+                setKeyError(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleAddKey();
+              }}
+              placeholder="sk-... or $MY_API_KEY"
+              className="min-w-0 flex-1 rounded-lg border border-gray-700 bg-gray-800 px-3 py-2.5 text-sm text-white"
+            />
+            <button
+              onClick={() => setShowKey(!showKey)}
+              className="rounded-md p-2 text-gray-500 hover:text-gray-300"
+              title={showKey ? t("providers_models.api_key_hide") : t("providers_models.api_key_show")}
+            >
+              {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
+            <button
+              onClick={handleAddKey}
+              disabled={newKeyValue.trim() === ""}
+              className="flex shrink-0 items-center gap-1.5 rounded-lg border border-gray-700 px-3 py-2 text-sm text-gray-300 transition-colors hover:bg-gray-800 hover:text-white disabled:opacity-40"
+            >
+              <Plus className="h-4 w-4" />
+              {t("providers_models.api_key_add")}
+            </button>
+          </div>
+
+          {keyError && <p className="mt-1 text-xs text-red-400">{keyError}</p>}
+          {newKeyValue.trim().startsWith("$") && (
+            <p className="mt-1 text-xs text-sky-400">
+              {t("providers_models.api_key_env", newKeyValue.trim())}
+            </p>
+          )}
+          {keys.length > 1 && (
+            <p className="mt-1 text-xs text-gray-500">{t("providers_models.api_key_switch_hint")}</p>
+          )}
         </div>
-        {apiKey.trim().startsWith("$") && (
-          <p className="mt-1 text-xs text-sky-400">
-            {t("providers_models.api_key_env", apiKey.trim())}
-          </p>
-        )}
-      </div>
+      ) : (
+        <div>
+          <label className="block text-sm text-gray-400">{t("providers.api_key")}</label>
+          <div className="relative mt-1.5">
+            <input
+              type={showKey ? "text" : "password"}
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              placeholder="sk-... or $MY_API_KEY"
+              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2.5 pr-10 text-sm text-white"
+            />
+            <button
+              onClick={() => setShowKey(!showKey)}
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-gray-500 hover:text-gray-300"
+            >
+              {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
+          </div>
+          {apiKey.trim().startsWith("$") && (
+            <p className="mt-1 text-xs text-sky-400">
+              {t("providers_models.api_key_env", apiKey.trim())}
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Developer Role Support */}
       <div className="provider-compat-row flex items-center gap-2">
@@ -1060,7 +1251,7 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provid
           </span>
         )}
         {isCustom && baseUrl.trim() !== "" && (
-          <TestConnectionButton baseUrl={baseUrl} apiKey={apiKey} />
+          <TestConnectionButton baseUrl={baseUrl} apiKey={effectiveKey} />
         )}
       </div>
 
@@ -1104,22 +1295,6 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provid
               placeholder={t("models.search_placeholder")}
               className="w-full rounded-lg border border-gray-700 bg-gray-800 py-2 pl-9 pr-3 text-sm text-white"
             />
-          </div>
-        )}
-
-        {provider.models.length > 1 && (
-          <div className="mt-1.5 flex items-center gap-2">
-            <label className="text-xs text-gray-500">{t("providers_models.sort_by")}</label>
-            <select
-              value={modelSort}
-              onChange={(e) => setModelSort(e.target.value as typeof modelSort)}
-              className="rounded-lg border border-gray-700 bg-gray-800 px-2 py-1.5 text-xs text-gray-200"
-            >
-              <option value="default">{t("providers_models.sort_default")}</option>
-              <option value="family">{t("providers_models.sort_family")}</option>
-              <option value="price-asc">{t("providers_models.sort_price_asc")}</option>
-              <option value="price-desc">{t("providers_models.sort_price_desc")}</option>
-            </select>
           </div>
         )}
 
@@ -1906,11 +2081,15 @@ function AddProviderForm({
     if (!id || !baseUrl || idExists || urlInvalid) return;
     setSubmitting(true);
     setSubmitError(false);
+    // Seed the key pool so the detail panel can switch keys right away.
+    const seedKey = apiKey.trim() ? { id: newKeyId(), key: apiKey.trim() } : null;
     const ok = await onSubmit(id, {
       name: name.trim() || undefined,
       baseUrl,
       api,
-      apiKey: apiKey || undefined,
+      apiKey: seedKey?.key,
+      apiKeys: seedKey ? [seedKey] : undefined,
+      activeKeyId: seedKey?.id,
       models,
     });
     setSubmitting(false);
@@ -2242,17 +2421,32 @@ function ImportProviderModal({
         ...existingModels,
         ...newModels.filter((m) => !existingModels.some((e) => e.id === m.id)),
       ];
+      // An imported key joins the existing pool instead of replacing it; the
+      // active key only changes when the provider had none.
+      const pool = normalizeKeyPool(existingCfg?.apiKeys, existingCfg?.apiKey);
+      const incoming = apiKey.trim();
+      const nextPool =
+        incoming && !pool.some((k) => k.key === incoming)
+          ? [...pool, { id: newKeyId(), key: incoming }]
+          : pool;
+      const activeId =
+        nextPool.find((k) => k.id === existingCfg?.activeKeyId)?.id ?? nextPool[0]?.id;
       ok = await store.updateCustomProvider(id, {
         baseUrl: baseUrl.trim() || existingCfg?.baseUrl,
-        apiKey: apiKey || existingCfg?.apiKey,
+        apiKeys: nextPool.length > 0 ? nextPool : undefined,
+        activeKeyId: activeId,
+        apiKey: nextPool.find((k) => k.id === activeId)?.key,
         models: merged,
       });
     } else {
+      const seedKey = apiKey.trim() ? { id: newKeyId(), key: apiKey.trim() } : null;
       ok = await store.addCustomProvider(id, {
         name: name.trim() || undefined,
         baseUrl: baseUrl.trim(),
         api,
-        apiKey: apiKey || undefined,
+        apiKey: seedKey?.key,
+        apiKeys: seedKey ? [seedKey] : undefined,
+        activeKeyId: seedKey?.id,
         models: newModels,
       });
     }
