@@ -1,7 +1,8 @@
 import { readFileSync, readdirSync, existsSync, statSync, unlinkSync, writeFileSync, mkdirSync, renameSync, chmodSync } from "fs";
 import { homedir, platform } from "os";
-import { join, resolve, dirname, relative, sep } from "path";
+import { join, resolve, dirname, relative, sep, delimiter } from "path";
 import { spawnSync, spawn } from "child_process";
+import { randomUUID } from "crypto";
 import { DatabaseSync } from "node:sqlite";
 
 const PI_DIR = join(homedir(), ".pi", "agent");
@@ -1366,9 +1367,12 @@ interface SessionFileInfo {
   id: string;
   fileName: string;
   filePath: string;
+  projectPath?: string;
+  projectName?: string;
   timestamp: string;
   lastActive: string;
   name?: string;
+  firstMessage?: string;
   provider?: string;
   model?: string;
   messageCount: number;
@@ -1405,19 +1409,6 @@ export function listSessions(): ProjectGroup[] {
 
   for (const dir of dirs) {
     const dirName = dir.split("/").pop() || dir;
-    const { projectPath, projectName } = decodeProjectName(dirName);
-
-    if (!groups.has(projectPath)) {
-      groups.set(projectPath, {
-        projectPath,
-        projectName,
-        sessions: [],
-        totalSessions: 0,
-        lastActive: "",
-      });
-    }
-
-    const group = groups.get(projectPath)!;
     const files = readdirSync(dir)
       .filter((f) => f.endsWith(".jsonl"))
       .sort()
@@ -1427,20 +1418,35 @@ export function listSessions(): ProjectGroup[] {
       const filePath = join(dir, file);
       const session = parseSessionFileInfo(filePath);
       if (session) {
+        const decoded = decodeProjectName(dirName);
+        const projectPath = session.projectPath || decoded.projectPath;
+        const projectName = session.projectName || decoded.projectName;
+        if (!groups.has(projectPath)) {
+          groups.set(projectPath, { projectPath, projectName, sessions: [], totalSessions: 0, lastActive: "" });
+        }
+        const group = groups.get(projectPath)!;
         group.sessions.push(session);
       }
     }
-
-    group.totalSessions = group.sessions.length;
-    if (group.sessions.length > 0) {
-      group.lastActive = group.sessions[0]?.timestamp ?? ""; // already sorted newest-first
-    }
   }
 
-  // Sort groups by lastActive descending
+  for (const group of groups.values()) {
+    group.sessions.sort((a, b) => (b.lastActive || b.timestamp).localeCompare(a.lastActive || a.timestamp));
+    group.totalSessions = group.sessions.length;
+    group.lastActive = group.sessions[0]?.lastActive || group.sessions[0]?.timestamp || "";
+  }
+
+  // Keep project folders stable: deleting or archiving a session must not make
+  // every other group jump around. The current workspace stays first, then
+  // folders use a deterministic locale-aware name order.
+  const currentProjectPath = resolve(process.cwd());
   return Array.from(groups.values())
     .filter((g) => g.sessions.length > 0)
-    .sort((a, b) => b.lastActive.localeCompare(a.lastActive));
+    .sort((a, b) => {
+      if (a.projectPath === currentProjectPath) return -1;
+      if (b.projectPath === currentProjectPath) return 1;
+      return a.projectName.localeCompare(b.projectName, undefined, { sensitivity: "base" });
+    });
 }
 
 function parseSessionFileInfo(filePath: string): SessionFileInfo | null {
@@ -1450,7 +1456,9 @@ function parseSessionFileInfo(filePath: string): SessionFileInfo | null {
 
     let id = "";
     let timestamp = "";
+    let projectPath = "";
     let name: string | undefined;
+    let firstMessage: string | undefined;
     let provider = "unknown";
     let model = "unknown";
     let messageCount = 0;
@@ -1465,6 +1473,7 @@ function parseSessionFileInfo(filePath: string): SessionFileInfo | null {
         if (type === "session") {
           id = obj.id || "";
           timestamp = obj.timestamp || "";
+          projectPath = typeof obj.cwd === "string" ? obj.cwd : "";
           const ts = new Date(timestamp).getTime();
           firstTs = ts;
           lastTs = ts;
@@ -1475,6 +1484,20 @@ function parseSessionFileInfo(filePath: string): SessionFileInfo | null {
           model = obj.modelId || model;
         } else if (type === "message") {
           messageCount++;
+          if (!firstMessage && obj.message?.role === "user") {
+            const content = obj.message.content;
+            const text = Array.isArray(content)
+              ? content
+                  .filter((part: unknown) => typeof part === "object" && part !== null && (part as { type?: string }).type === "text")
+                  .map((part: unknown) => (part as { text?: unknown }).text)
+                  .filter((part: unknown): part is string => typeof part === "string")
+                  .join(" ")
+              : typeof content === "string"
+                ? content
+                : "";
+            const normalized = text.replace(/\s+/g, " ").trim();
+            if (normalized) firstMessage = normalized.slice(0, 96);
+          }
           const ts = new Date(obj.timestamp).getTime();
           if (ts > lastTs) lastTs = ts;
           if (firstTs === 0) firstTs = ts;
@@ -1486,14 +1509,18 @@ function parseSessionFileInfo(filePath: string): SessionFileInfo | null {
 
     const duration = lastTs > firstTs ? lastTs - firstTs : undefined;
     const fileName = filePath.split("/").pop() || filePath;
+    const projectName = projectPath.split("/").filter(Boolean).pop();
 
     return {
       id,
       fileName,
       filePath,
+      projectPath: projectPath || undefined,
+      projectName,
       timestamp,
       lastActive: lastTs > 0 ? new Date(lastTs).toISOString() : timestamp,
       name,
+      firstMessage,
       provider,
       model,
       messageCount,
@@ -1661,20 +1688,18 @@ export interface SessionPreviewMessage {
   role: string;
   text: string;
   timestamp: string;
+  kind?: "text" | "tool";
 }
 
-/** Read the first user/assistant messages of a session file (text parts only). */
-export function readSessionPreview(filePath: string, limit = 20): { messages: SessionPreviewMessage[]; total: number } | null {
+function readSessionMessages(filePath: string, limit?: number, truncateAt?: number): { messages: SessionPreviewMessage[]; total: number } | null {
   try {
     const resolved = resolve(filePath);
     const inSessions = resolved.startsWith(SESSIONS_DIR + sep);
     const inTrash = resolved.startsWith(TRASH_DIR + sep);
     if ((!inSessions && !inTrash) || !resolved.endsWith(".jsonl") || !existsSync(resolved)) return null;
-
-    const lines = readFileSync(resolved, "utf-8").split("\n").filter((l) => l.trim());
     const messages: SessionPreviewMessage[] = [];
     let total = 0;
-    for (const line of lines) {
+    for (const line of readFileSync(resolved, "utf-8").split("\n").filter((line) => line.trim())) {
       try {
         const obj = JSON.parse(line);
         if (obj.type !== "message") continue;
@@ -1682,32 +1707,37 @@ export function readSessionPreview(filePath: string, limit = 20): { messages: Se
         const role = msg.role || "";
         if (role !== "user" && role !== "assistant") continue;
         total++;
-        if (messages.length >= limit) continue;
-        // Extract text parts; fall back to a tool-call marker for pure tool turns
-        let text = "";
-        if (typeof msg.content === "string") {
-          text = msg.content;
-        } else if (Array.isArray(msg.content)) {
-          text = msg.content
-            .filter((c: any) => c?.type === "text" && c.text)
-            .map((c: any) => c.text)
-            .join("\n");
-          if (!text) {
-            const tools = msg.content.filter((c: any) => c?.type === "toolCall").length;
-            if (tools > 0) text = `[${tools} tool call${tools > 1 ? "s" : ""}]`;
-          }
-        }
-        text = text.trim();
-        if (text.length > 400) text = text.slice(0, 400) + "…";
-        messages.push({ role, text, timestamp: obj.timestamp || "" });
-      } catch {
-        // skip
-      }
+        if (limit !== undefined && messages.length >= limit) continue;
+        const text = typeof msg.content === "string"
+          ? msg.content
+          : Array.isArray(msg.content)
+            ? msg.content.filter((part: any) => part?.type === "text" && part.text).map((part: any) => part.text).join("\n")
+            : "";
+        const toolCount = Array.isArray(msg.content) && !text
+          ? msg.content.filter((part: any) => part?.type === "toolCall").length
+          : 0;
+        const output = (text || (toolCount ? `[${toolCount} tool call${toolCount > 1 ? "s" : ""}]` : "")).trim();
+        if (!output) continue;
+        messages.push({ role, text: truncateAt && output.length > truncateAt ? `${output.slice(0, truncateAt)}…` : output, timestamp: obj.timestamp || "", kind: toolCount ? "tool" : "text" });
+      } catch { /* skip malformed JSONL rows */ }
     }
     return { messages, total };
-  } catch {
-    return null;
+  } catch { return null; }
+}
+
+/** Read the first user/assistant messages of a session file (text parts only). */
+export function readSessionPreview(filePath: string, limit = 20): { messages: SessionPreviewMessage[]; total: number } | null {
+  return readSessionMessages(filePath, limit, 400);
+}
+
+/** Load all displayable user and assistant turns for a known local session id. */
+export function readSessionHistory(sessionId: string): { messages: SessionPreviewMessage[]; total: number } | null {
+  if (!/^[A-Za-z0-9_-]{1,100}$/.test(sessionId)) return null;
+  for (const group of listSessions()) {
+    const session = group.sessions.find((item) => item.id === sessionId);
+    if (session) return readSessionMessages(session.filePath);
   }
+  return null;
 }
 
 // ─── Memory Entry Deletion ───────────────────────────
@@ -2038,9 +2068,14 @@ export interface UpdateCheckResult {
 /** Discover the pi executable: PI_BINARY env → PATH → known global-install locations. */
 function resolvePiBinary(): { bin: string; version: string } | null {
   const home = homedir();
+  const projectNodeModules = `${resolve(process.cwd(), "node_modules")}${sep}`;
+  const pathBins = (process.env.PATH ?? "")
+    .split(delimiter)
+    .filter(Boolean)
+    .map((dir) => join(dir, process.platform === "win32" ? "pi.cmd" : "pi"));
   const candidates = [
     process.env.PI_BINARY,
-    "pi",
+    ...pathBins,
     `${home}/.npm-global/bin/pi`,
     `${home}/.npm-packages/bin/pi`,
     `${home}/.config/yarn/global/node_modules/.bin/pi`,
@@ -2048,6 +2083,10 @@ function resolvePiBinary(): { bin: string; version: string } | null {
   ].filter(Boolean) as string[];
 
   for (const bin of candidates) {
+    // Vite's `npm run dev` prepends this project's node_modules/.bin to PATH.
+    // That copy exists only to build this web app and cannot update the user's
+    // actual pi installation; prefer the next global/path candidate instead.
+    if (!process.env.PI_BINARY && resolve(bin).startsWith(projectNodeModules)) continue;
     try {
       const out = spawnSync(bin, ["--version"], { encoding: "utf8", timeout: 15000 });
       if (out.status === 0) {
@@ -2064,6 +2103,64 @@ function resolvePiBinary(): { bin: string; version: string } | null {
 /** Installed pi version, or null when no pi executable could be found. */
 function getPiVersion(): string | null {
   return resolvePiBinary()?.version ?? null;
+}
+
+export interface WebChatResult {
+  sessionId: string;
+  text: string;
+  error?: string;
+}
+
+const activeWebChats = new Map<string, { kill: (signal?: NodeJS.Signals) => boolean; stopped: boolean }>();
+
+export function stopWebChat(sessionId: string): boolean {
+  const active = activeWebChats.get(sessionId);
+  if (!active) return false;
+  active.stopped = true;
+  active.kill("SIGTERM");
+  return true;
+}
+
+/** Execute one non-interactive local pi turn, preserving its project session. */
+export async function runWebChat(
+  prompt: string,
+  requestedSessionId?: string,
+  onChunk?: (chunk: string) => void,
+  requestedCwd?: string,
+): Promise<WebChatResult> {
+  const pi = resolvePiBinary();
+  const sessionId = requestedSessionId && /^[A-Za-z0-9_-]{1,100}$/.test(requestedSessionId)
+    ? requestedSessionId
+    : `web-${randomUUID()}`;
+  if (!pi) return { sessionId, text: "", error: "pi executable not found" };
+  const currentCwd = resolve(process.cwd());
+  const selectedCwd = requestedCwd ? resolve(requestedCwd) : currentCwd;
+  if (!existsSync(selectedCwd) || !statSync(selectedCwd).isDirectory()) return { sessionId, text: "", error: "invalid project directory" };
+  return new Promise((resolvePromise) => {
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const child = spawn(pi.bin, ["--mode", "text", "--print", "--session-id", sessionId, prompt], {
+      cwd: selectedCwd, stdio: ["ignore", "pipe", "pipe"],
+    });
+    const active = { kill: child.kill.bind(child), stopped: false };
+    activeWebChats.set(sessionId, active);
+    const finish = (error?: string) => {
+      if (settled) return;
+      settled = true;
+      activeWebChats.delete(sessionId);
+      resolvePromise({ sessionId, text: stdout.trim(), error });
+    };
+    const timeout = setTimeout(() => { child.kill("SIGKILL"); finish("pi response timed out"); }, 600000);
+    child.stdout?.on("data", (chunk) => {
+      const text = String(chunk);
+      stdout += text;
+      onChunk?.(text);
+    });
+    child.stderr?.on("data", (chunk) => { stderr += String(chunk); });
+    child.on("error", (error) => { clearTimeout(timeout); finish(error.message); });
+    child.on("close", (code) => { clearTimeout(timeout); finish(code === 0 ? undefined : (active.stopped ? "generation stopped" : (stderr.trim() || `pi exited with ${code}`))); });
+  });
 }
 
 function readJsonFile<T>(filePath: string): T | null {
@@ -2216,6 +2313,59 @@ export interface ApplyUpdateResult {
   message?: string;
 }
 
+interface UpdateCommandResult {
+  code: number | null;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
+}
+
+/**
+ * Run package updates without blocking Vite's event loop. A synchronous child
+ * process makes its HMR socket miss heartbeats, which can reload the browser
+ * while the update is still running and discard unsaved form state.
+ */
+function runUpdateCommand(command: string, args: string[], timeoutMs: number, cwd?: string): Promise<UpdateCommandResult> {
+  return new Promise((resolvePromise) => {
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (result: UpdateCommandResult) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolvePromise(result);
+    };
+    let child;
+    try {
+      child = spawn(command, args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
+    } catch (error) {
+      finish({ code: null, stdout, stderr: error instanceof Error ? error.message : String(error), timedOut: false });
+      return;
+    }
+    child.stdout?.on("data", (chunk) => { stdout += String(chunk); });
+    child.stderr?.on("data", (chunk) => { stderr += String(chunk); });
+    timer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGKILL");
+    }, timeoutMs);
+    child.on("error", (error) => {
+      finish({ code: null, stdout, stderr: stderr || error.message, timedOut });
+    });
+    child.on("close", (code) => {
+      finish({ code, stdout, stderr, timedOut });
+    });
+  });
+}
+
+function updateFailureMessage(label: string, result: UpdateCommandResult): string {
+  if (result.timedOut) return `${label} timed out`;
+  const output = (result.stderr || result.stdout).trim().split("\n").slice(-3).join(" ");
+  return output || `${label} exited with ${result.code ?? "unknown"}`;
+}
+
 /**
  * Update pi core itself via `pi update`.
  *
@@ -2223,18 +2373,14 @@ export interface ApplyUpdateResult {
  * be wrong. `pi update` with no target updates pi only — deliberately without
  * `--extensions`, which would instead update the packages and leave pi alone.
  */
-function applyPiCoreUpdate(): ApplyUpdateResult {
+async function applyPiCoreUpdate(): Promise<ApplyUpdateResult> {
   const name = PI_CORE_PACKAGE;
   const pi = resolvePiBinary();
   if (!pi) return { name, success: false, message: "pi executable not found" };
-  try {
-    const out = spawnSync(pi.bin, ["update"], { encoding: "utf8", timeout: 300000 });
-    if (out.status === 0) return { name, success: true };
-    const stderr = (out.stderr || out.stdout || "").trim().split("\n").slice(-3).join(" ");
-    return { name, success: false, message: stderr || `pi update exited with ${out.status}` };
-  } catch (e) {
-    return { name, success: false, message: String(e) };
-  }
+  const result = await runUpdateCommand(pi.bin, ["update", "--self"], 300000);
+  return result.code === 0
+    ? { name, success: true }
+    : { name, success: false, message: updateFailureMessage("pi update", result) };
 }
 
 /**
@@ -2242,34 +2388,33 @@ function applyPiCoreUpdate(): ApplyUpdateResult {
  * ~/.pi/agent/npm; pi core is routed to `pi update` instead, since it lives
  * outside that directory and has its own updater.
  */
-export function applyExtensionUpdates(names: string[]): ApplyUpdateResult[] {
+export async function applyExtensionUpdates(names: string[]): Promise<ApplyUpdateResult[]> {
   const dir = join(PI_DIR, "npm");
   const installed = new Set(listInstalledExtensions().map((e) => e.name));
+  const results: ApplyUpdateResult[] = [];
 
-  return names.map((name) => {
-    if (name === PI_CORE_PACKAGE) return applyPiCoreUpdate();
+  for (const name of names) {
+    if (name === PI_CORE_PACKAGE) {
+      results.push(await applyPiCoreUpdate());
+      continue;
+    }
     if (!installed.has(name)) {
-      return { name, success: false, message: "not an installed extension" };
+      results.push({ name, success: false, message: "not an installed extension" });
+      continue;
     }
-    try {
-      // --legacy-peer-deps: peer deps (e.g. pi core) are provided by the pi host,
-      // not installed here — strict resolution would fail with ERESOLVE.
-      const out = spawnSync(
-        "npm",
-        ["install", `${name}@latest`, "--no-audit", "--no-fund", "--legacy-peer-deps"],
-        {
-          cwd: dir,
-          encoding: "utf8",
-          timeout: 120000,
-        }
-      );
-      if (out.status === 0) return { name, success: true };
-      const stderr = (out.stderr || "").trim().split("\n").slice(-3).join(" ");
-      return { name, success: false, message: stderr || `npm exited with ${out.status}` };
-    } catch (e) {
-      return { name, success: false, message: String(e) };
-    }
-  });
+    // --legacy-peer-deps: peer deps (e.g. pi core) are provided by the pi host,
+    // not installed here — strict resolution would fail with ERESOLVE.
+    const result = await runUpdateCommand(
+      "npm",
+      ["install", `${name}@latest`, "--no-audit", "--no-fund", "--legacy-peer-deps"],
+      120000,
+      dir
+    );
+    results.push(result.code === 0
+      ? { name, success: true }
+      : { name, success: false, message: updateFailureMessage("npm install", result) });
+  }
+  return results;
 }
 
 // ─── Provider Connection Test ────────────────────────────

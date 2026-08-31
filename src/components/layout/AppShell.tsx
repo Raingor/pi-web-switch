@@ -7,7 +7,7 @@ import { HelpButton } from "@/components/help/HelpButton";
 export function AppShell() {
   const location = useLocation();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const isFullHeightPage = location.pathname.startsWith("/chat");
+  const isFullHeightPage = location.pathname === "/" || location.pathname.startsWith("/chat");
 
   return (
     <div className="app-shell">

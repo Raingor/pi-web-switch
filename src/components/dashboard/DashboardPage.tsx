@@ -435,7 +435,6 @@ export function DashboardPage() {
   // Official Codex quotas use the locally logged-in OAuth session. The API
   // returns only a sanitized summary; OAuth credentials never reach the UI.
   useEffect(() => {
-    if (source !== "pi") return;
     let cancelled = false;
     const load = () => {
       fetch("/api/pi/codex-usage-status")
@@ -704,8 +703,7 @@ export function DashboardPage() {
             </button>
           ))}
         </div>
-        {source === "chatgpt" && <span className="dashboard-source-note">{t("dashboard.source_chatgpt_note")}</span>}
-        {source === "pi" && codexUsage && (
+        {codexUsage && (
           <div className="ml-auto flex flex-wrap items-center gap-2 text-xs" style={{ color: "var(--muted-text)" }}>
             <span className={cn("inline-flex items-center gap-1 font-medium", codexUsage.loggedIn ? "text-emerald-400" : "text-gray-500")}>
               <span className="h-1.5 w-1.5 rounded-full bg-current" />

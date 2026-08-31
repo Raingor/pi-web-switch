@@ -145,6 +145,44 @@ function piApiPlugin(): Plugin {
           res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify(sessions));
         },
+        "POST /api/pi/chat"(req, res) {
+          let body = "";
+          req.on("data", (chunk: string) => (body += chunk));
+          req.on("end", async () => {
+            try {
+              const { prompt, sessionId, projectPath } = JSON.parse(body) as { prompt?: string; sessionId?: string; projectPath?: string };
+              if (typeof prompt !== "string" || !prompt.trim()) throw new Error("missing prompt");
+              res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+              res.setHeader("Cache-Control", "no-cache, no-transform");
+              res.setHeader("Connection", "keep-alive");
+              const send = (event: string, data: unknown) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+              const result = await pi.runWebChat(prompt.trim(), sessionId, (chunk) => send("delta", chunk), projectPath);
+              if (result.error) send("error", result.error);
+              else send("done", { sessionId: result.sessionId });
+              res.end();
+            } catch (error) {
+              res.statusCode = 400;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ error: error instanceof Error ? error.message : "Invalid request" }));
+            }
+          });
+        },
+        "POST /api/pi/chat/stop"(req, res) {
+          let body = "";
+          req.on("data", (chunk: string) => (body += chunk));
+          req.on("end", () => {
+            try {
+              const { sessionId } = JSON.parse(body) as { sessionId?: string };
+              const stopped = typeof sessionId === "string" && pi.stopWebChat(sessionId);
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ stopped }));
+            } catch {
+              res.statusCode = 400;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ stopped: false }));
+            }
+          });
+        },
         "GET /api/pi/memory"(_, res) {
           const memory = pi.readMemoryFiles();
           res.setHeader("Content-Type", "application/json");
@@ -302,6 +340,17 @@ function piApiPlugin(): Plugin {
           res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify(preview));
         },
+        "GET /api/pi/session-history"(req, res) {
+          const parsedUrl = new URL(req.url!, "http://localhost");
+          const history = pi.readSessionHistory(parsedUrl.searchParams.get("id") || "");
+          if (!history) {
+            res.statusCode = 404;
+            res.setHeader("Content-Type", "application/json");
+            return res.end(JSON.stringify({ error: "Session not found" }));
+          }
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify(history));
+        },
         "GET /api/pi/check-updates"(_, res) {
           pi.checkUpdates()
             .then((result) => {
@@ -317,10 +366,10 @@ function piApiPlugin(): Plugin {
         "POST /api/pi/apply-updates"(req, res) {
           let body = "";
           req.on("data", (chunk: string) => (body += chunk));
-          req.on("end", () => {
+          req.on("end", async () => {
             try {
               const { names } = JSON.parse(body) as { names: string[] };
-              const results = pi.applyExtensionUpdates(Array.isArray(names) ? names : []);
+              const results = await pi.applyExtensionUpdates(Array.isArray(names) ? names : []);
               res.setHeader("Content-Type", "application/json");
               res.end(JSON.stringify({ results }));
             } catch {
@@ -435,31 +484,7 @@ function piApiPlugin(): Plugin {
             pi.clearUsageCache();
             pi.clearChatgptUsageCache();
           }
-
-          const now = new Date();
-          // Date buckets follow China time (UTC+8) regardless of system timezone
-          const localDateStr = (dt: Date) =>
-            new Intl.DateTimeFormat("en-CA", {
-              timeZone: "Asia/Shanghai",
-              year: "numeric",
-              month: "2-digit",
-              day: "2-digit",
-            }).format(dt);
-          let fromDate: string;
-          let toDate = localDateStr(now);
-
-          if (range === "today") {
-            fromDate = toDate;
-          } else if (range === "7d") {
-            const d = new Date(now); d.setDate(d.getDate() - 6); fromDate = localDateStr(d);
-          } else if (range === "30d") {
-            const d = new Date(now); d.setDate(d.getDate() - 29); fromDate = localDateStr(d);
-          } else if (range === "custom" && fromParam) {
-            fromDate = fromParam;
-            if (toParam) toDate = toParam;
-          } else {
-            fromDate = toDate;
-          }
+          const { fromDate, toDate } = resolveDateRange(range, fromParam, toParam);
 
           const allRecords = pi.readAllUsage();
           const usage = pi.getUsageByRange(allRecords, fromDate, toDate);
@@ -468,9 +493,9 @@ function piApiPlugin(): Plugin {
         }
 
         // Helper: resolve date range params
-        const resolveDateRange = (range: string, fromParam: string, toParam: string) => {
-          const now = new Date();
-          // Date buckets follow China time (UTC+8) regardless of system timezone
+        function resolveDateRange(range: string, fromParam: string, toParam: string) {
+          // Convert to a China-time calendar date first, then use UTC date
+          // arithmetic so a machine in another timezone cannot shift the range.
           const localDateStr = (dt: Date) =>
             new Intl.DateTimeFormat("en-CA", {
               timeZone: "Asia/Shanghai",
@@ -478,15 +503,20 @@ function piApiPlugin(): Plugin {
               month: "2-digit",
               day: "2-digit",
             }).format(dt);
+          let toDate = localDateStr(new Date());
+          const shiftDate = (date: string, days: number) => {
+            const [year, month, day] = date.split("-").map(Number);
+            const shifted = new Date(Date.UTC(year, (month ?? 1) - 1, day) - days * 86400000);
+            return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, "0")}-${String(shifted.getUTCDate()).padStart(2, "0")}`;
+          };
           let fromDate: string;
-          let toDate = localDateStr(now);
           if (range === "today") fromDate = toDate;
-          else if (range === "7d") { const d = new Date(now); d.setDate(d.getDate() - 6); fromDate = localDateStr(d); }
-          else if (range === "30d") { const d = new Date(now); d.setDate(d.getDate() - 29); fromDate = localDateStr(d); }
+          else if (range === "7d") fromDate = shiftDate(toDate, 6);
+          else if (range === "30d") fromDate = shiftDate(toDate, 29);
           else if (range === "custom" && fromParam) { fromDate = fromParam; if (toParam) toDate = toParam; }
           else fromDate = toDate;
           return { fromDate, toDate };
-        };
+        }
 
         // Handle GET /api/pi/chatgpt-usage-range using local Codex Desktop
         // rollout JSONL files under ~/.codex/sessions and archived_sessions.

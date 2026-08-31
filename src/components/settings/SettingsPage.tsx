@@ -117,7 +117,7 @@ export function SettingsPage() {
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [updateError, setUpdateError] = useState(false);
   const [applying, setApplying] = useState(false);
-  const [applyMessage, setApplyMessage] = useState<{ ok: number; failNames: string[] } | null>(null);
+  const [applyMessage, setApplyMessage] = useState<{ ok: number; failures: { name: string; message?: string }[] } | null>(null);
 
   const handleCheckUpdates = async () => {
     setCheckingUpdates(true);
@@ -157,8 +157,8 @@ export function SettingsPage() {
       const { results } = (await res.json()) as {
         results: { name: string; success: boolean; message?: string }[];
       };
-      const failNames = results.filter((r) => !r.success).map((r) => r.name);
-      setApplyMessage({ ok: results.length - failNames.length, failNames });
+      const failures = results.filter((r) => !r.success).map(({ name, message }) => ({ name, message }));
+      setApplyMessage({ ok: results.length - failures.length, failures });
       const check = await fetch("/api/pi/check-updates");
       if (check.ok) setUpdateResult(await check.json());
     } catch {
@@ -500,10 +500,13 @@ export function SettingsPage() {
                 {applyMessage.ok > 0 && (
                   <p className="text-sm text-emerald-400">{t("settings.update_success", String(applyMessage.ok))}</p>
                 )}
-                {applyMessage.failNames.length > 0 && (
-                  <p className="text-sm text-red-400">
-                    {t("settings.update_failed_names", String(applyMessage.failNames.length), applyMessage.failNames.join(", "))}
-                  </p>
+                {applyMessage.failures.length > 0 && (
+                  <div className="space-y-1 text-sm text-red-400">
+                    <p>{t("settings.update_failed_names", String(applyMessage.failures.length), applyMessage.failures.map((failure) => failure.name).join(", "))}</p>
+                    {applyMessage.failures.map((failure) => failure.message && (
+                      <p key={failure.name} className="break-words text-xs text-red-300">{failure.name}: {failure.message}</p>
+                    ))}
+                  </div>
                 )}
               </div>
             )}

@@ -733,6 +733,7 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provid
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [fetchedModels, setFetchedModels] = useState<FetchedModel[]>([]);
   const [fetchSelected, setFetchSelected] = useState<Set<string>>(new Set());
+  const [fetchQuery, setFetchQuery] = useState("");
   const [fetchImported, setFetchImported] = useState<number | null>(null);
 
   // ─── Per-Model Test State ───
@@ -741,6 +742,13 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provid
 
   const existingModelIds = new Set(provider.models.map((m) => m.id));
   const availableModels = fetchedModels.filter((m) => !existingModelIds.has(m.id));
+  const filteredAvailableModels = useMemo(() => {
+    const query = fetchQuery.trim().toLocaleLowerCase();
+    if (!query) return availableModels;
+    return availableModels.filter((model) =>
+      [model.id, model.name].some((value) => value?.toLocaleLowerCase().includes(query))
+    );
+  }, [availableModels, fetchQuery]);
   const isSelected = (id: string) => fetchSelected.has(id);
   const allSelected = availableModels.length > 0 && availableModels.every((m) => isSelected(m.id));
 
@@ -765,6 +773,7 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provid
     setFetchError(null);
     setFetchedModels([]);
     setFetchSelected(new Set());
+    setFetchQuery("");
     setFetchImported(null);
     try {
       const res = await fetch("/api/pi/provider-models", {
@@ -1463,7 +1472,7 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provid
       {/* Fetch Models Modal */}
       <Modal
         open={fetchOpen}
-        onClose={() => { setFetchOpen(false); setFetchedModels([]); setFetchSelected(new Set()); setFetchError(null); setFetchImported(null); }}
+        onClose={() => { setFetchOpen(false); setFetchedModels([]); setFetchSelected(new Set()); setFetchQuery(""); setFetchError(null); setFetchImported(null); }}
         title={t("providers_models.fetch_title")}
         size="xl"
       >
@@ -1486,6 +1495,18 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provid
           )}
           {!fetching && !fetchError && availableModels.length > 0 && (
             <>
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
+                <input
+                  autoFocus
+                  type="search"
+                  value={fetchQuery}
+                  onChange={(e) => setFetchQuery(e.target.value)}
+                  placeholder={t("models.search_placeholder")}
+                  aria-label={t("models.search_placeholder")}
+                  className="w-full rounded-lg border border-gray-700 bg-gray-800 py-2 pl-9 pr-3 text-sm text-white placeholder:text-gray-500 outline-none transition-colors focus:border-blue-500"
+                />
+              </div>
               <div className="flex items-center justify-between">
                 <span className="text-sm text-gray-400">
                   {t("providers_models.selected_count", String(fetchSelected.size), String(availableModels.length))}
@@ -1498,7 +1519,9 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provid
                 </button>
               </div>
               <div className="max-h-72 overflow-y-auto space-y-1.5 rounded-lg border border-gray-800 p-3">
-                {availableModels.map((m) => (
+                {filteredAvailableModels.length === 0 ? (
+                  <p className="py-6 text-center text-sm text-gray-500">{t("providers_models.no_match")}</p>
+                ) : filteredAvailableModels.map((m) => (
                   <div key={m.id} className="flex items-center gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-gray-800 cursor-pointer" onClick={() => toggleSelect(m.id)}>
                     <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded border"
                       style={{ backgroundColor: isSelected(m.id) ? "#3b82f6" : "transparent", borderColor: isSelected(m.id) ? "#3b82f6" : "#4b5563" }}
@@ -1537,7 +1560,7 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provid
                 {t("providers_models.import_done", String(fetchImported))}
               </span>
             )}
-            <button onClick={() => { setFetchOpen(false); setFetchedModels([]); setFetchSelected(new Set()); setFetchError(null); setFetchImported(null); }}
+            <button onClick={() => { setFetchOpen(false); setFetchedModels([]); setFetchSelected(new Set()); setFetchQuery(""); setFetchError(null); setFetchImported(null); }}
               className="rounded-lg px-4 py-2 text-sm text-gray-400 hover:bg-gray-800">
               {t("models.cancel")}
             </button>
