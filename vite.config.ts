@@ -183,6 +183,12 @@ function piApiPlugin(): Plugin {
             }
           });
         },
+        "POST /api/pi/chat/select-directory"(_, res) {
+          pi.chooseChatDirectory().then((path) => {
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ path }));
+          });
+        },
         "GET /api/pi/memory"(_, res) {
           const memory = pi.readMemoryFiles();
           res.setHeader("Content-Type", "application/json");

@@ -2121,6 +2121,18 @@ export function stopWebChat(sessionId: string): boolean {
   return true;
 }
 
+/** Open the platform folder picker for an explicit user-initiated chat workspace choice. */
+export function chooseChatDirectory(): Promise<string | null> {
+  if (platform() !== "darwin") return Promise.resolve(null);
+  return new Promise((resolvePromise) => {
+    let stdout = "";
+    const child = spawn("osascript", ["-e", "POSIX path of (choose folder with prompt \"选择 Pi 工作目录\")"], { stdio: ["ignore", "pipe", "ignore"] });
+    child.stdout?.on("data", (chunk) => { stdout += String(chunk); });
+    child.on("error", () => resolvePromise(null));
+    child.on("close", (code) => resolvePromise(code === 0 ? stdout.trim() || null : null));
+  });
+}
+
 /** Execute one non-interactive local pi turn, preserving its project session. */
 export async function runWebChat(
   prompt: string,
