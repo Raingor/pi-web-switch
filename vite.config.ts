@@ -49,6 +49,13 @@ function piApiPlugin(): Plugin {
           res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify(data ?? {}));
         },
+        "GET /api/pi/codex-usage-status"(req, res) {
+          const force = new URL(req.url ?? "", "http://localhost").searchParams.get("refresh") === "1";
+          pi.getCodexUsageStatus(force).then((status) => {
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify(status));
+          });
+        },
         "GET /api/pi/official-usage-config"(_, res) {
           const config = pi.readOfficialUsageConfig();
           res.setHeader("Content-Type", "application/json");

@@ -54,6 +54,87 @@ export function writeSettings(settings: any): boolean {
   }
 }
 
+export interface CodexUsageWindow {
+  windowSeconds: number;
+  usedPercent: number;
+  remainingPercent: number;
+  resetAfterSeconds: number | null;
+  resetAt: number | null;
+}
+
+export interface CodexUsageStatus {
+  loggedIn: boolean;
+  provider: "openai-codex";
+  planType?: string;
+  primary?: CodexUsageWindow;
+  secondary?: CodexUsageWindow;
+  checkedAt: string;
+  error?: string;
+}
+
+let codexUsageStatusCache: { value: CodexUsageStatus; at: number } | null = null;
+const CODEX_USAGE_STATUS_TTL_MS = 30_000;
+
+function codexUsageWindow(value: any): CodexUsageWindow | undefined {
+  if (!value || typeof value !== "object" || typeof value.limit_window_seconds !== "number") return undefined;
+  const usedPercent = Math.min(100, Math.max(0, Number(value.used_percent) || 0));
+  return {
+    windowSeconds: value.limit_window_seconds,
+    usedPercent,
+    remainingPercent: Math.max(0, 100 - usedPercent),
+    resetAfterSeconds: typeof value.reset_after_seconds === "number" ? value.reset_after_seconds : null,
+    resetAt: typeof value.reset_at === "number" ? value.reset_at : null,
+  };
+}
+
+/**
+ * Read the locally saved openai-codex OAuth session and query OpenAI's own
+ * Codex usage endpoint. Only a sanitized quota summary leaves the server;
+ * OAuth access/refresh tokens are never returned or written anywhere.
+ */
+export async function getCodexUsageStatus(force = false): Promise<CodexUsageStatus> {
+  if (!force && codexUsageStatusCache && Date.now() - codexUsageStatusCache.at < CODEX_USAGE_STATUS_TTL_MS) {
+    return codexUsageStatusCache.value;
+  }
+
+  const checkedAt = new Date().toISOString();
+  const codex = readAuth()?.["openai-codex"];
+  if (codex?.type !== "oauth" || typeof codex.access !== "string" || !codex.access || typeof codex.accountId !== "string" || !codex.accountId) {
+    return { loggedIn: false, provider: "openai-codex", checkedAt };
+  }
+
+  try {
+    const response = await fetch("https://chatgpt.com/backend-api/wham/usage", {
+      headers: {
+        Authorization: `Bearer ${codex.access}`,
+        "chatgpt-account-id": codex.accountId,
+      },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) {
+      const value: CodexUsageStatus = { loggedIn: true, provider: "openai-codex", checkedAt, error: `OpenAI returned ${response.status}` };
+      codexUsageStatusCache = { value, at: Date.now() };
+      return value;
+    }
+    const payload = await response.json() as any;
+    const rateLimit = payload?.rate_limit;
+    const value: CodexUsageStatus = {
+      loggedIn: true,
+      provider: "openai-codex",
+      planType: typeof payload?.plan_type === "string" ? payload.plan_type : undefined,
+      primary: codexUsageWindow(rateLimit?.primary_window),
+      secondary: codexUsageWindow(rateLimit?.secondary_window),
+      checkedAt,
+    };
+    codexUsageStatusCache = { value, at: Date.now() };
+    return value;
+  } catch {
+    const value: CodexUsageStatus = { loggedIn: true, provider: "openai-codex", checkedAt, error: "Unable to query OpenAI usage" };
+    codexUsageStatusCache = { value, at: Date.now() };
+    return value;
+  }
+}
+
 // ─── Official Usage Query ──────────────────────────────
 
 export type OfficialUsageAuthMode = "auto" | "bearer" | "x-api-key" | "api-key";

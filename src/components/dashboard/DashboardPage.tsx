@@ -14,6 +14,35 @@ import {
 
 // ─── Types ──────────────────────────────────────────────
 
+interface CodexUsageStatus {
+  loggedIn: boolean;
+  provider: "openai-codex";
+  planType?: string;
+  primary?: { windowSeconds: number; usedPercent: number; remainingPercent: number; resetAfterSeconds: number | null; resetAt: number | null };
+  secondary?: { windowSeconds: number; usedPercent: number; remainingPercent: number; resetAfterSeconds: number | null; resetAt: number | null };
+  checkedAt: string;
+  error?: string;
+}
+
+function formatRemainingTime(seconds: number | null | undefined): string | null {
+  if (typeof seconds !== "number" || seconds < 0) return null;
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+}
+
+function formatResetAt(unixSeconds: number | null | undefined, lang: string): string | null {
+  if (typeof unixSeconds !== "number" || unixSeconds <= 0) return null;
+  return new Intl.DateTimeFormat(lang, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(unixSeconds * 1000));
+}
+
 interface UsageRangeData {
   totalTokens: number;
   totalInput: number;
@@ -364,6 +393,7 @@ export function DashboardPage() {
   const [providerSort, setProviderSort] = useState<{ key: string; dir: SortDir }>({ key: "totalCost", dir: "desc" });
   const [modelSort, setModelSort] = useState<{ key: string; dir: SortDir }>({ key: "totalCost", dir: "desc" });
   const [prevTotals, setPrevTotals] = useState<{ tokens: number; cost: number } | null>(null);
+  const [codexUsage, setCodexUsage] = useState<CodexUsageStatus | null>(null);
 
   const customInvalid = range === "custom" && !!customFrom && !!customTo && customFrom > customTo;
 
@@ -401,6 +431,22 @@ export function DashboardPage() {
   }, [initialized, source, range, customFrom, customTo, customInvalid]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // Official Codex quotas use the locally logged-in OAuth session. The API
+  // returns only a sanitized summary; OAuth credentials never reach the UI.
+  useEffect(() => {
+    if (source !== "pi") return;
+    let cancelled = false;
+    const load = () => {
+      fetch("/api/pi/codex-usage-status")
+        .then((r) => r.json())
+        .then((status: CodexUsageStatus) => { if (!cancelled) setCodexUsage(status); })
+        .catch(() => { if (!cancelled) setCodexUsage(null); });
+    };
+    load();
+    const id = window.setInterval(load, 30_000);
+    return () => { cancelled = true; window.clearInterval(id); };
+  }, [source]);
 
   // Reset request-log pagination when the queried range or source changes
   useEffect(() => { setLogPage(1); }, [range, customFrom, customTo, source]);
@@ -659,6 +705,29 @@ export function DashboardPage() {
           ))}
         </div>
         {source === "chatgpt" && <span className="dashboard-source-note">{t("dashboard.source_chatgpt_note")}</span>}
+        {source === "pi" && codexUsage && (
+          <div className="ml-auto flex flex-wrap items-center gap-2 text-xs" style={{ color: "var(--muted-text)" }}>
+            <span className={cn("inline-flex items-center gap-1 font-medium", codexUsage.loggedIn ? "text-emerald-400" : "text-gray-500")}>
+              <span className="h-1.5 w-1.5 rounded-full bg-current" />
+              {codexUsage.loggedIn ? t("dashboard.codex_logged_in") : t("dashboard.codex_not_logged_in")}
+            </span>
+            {codexUsage.loggedIn && codexUsage.primary && codexUsage.secondary && (
+              <>
+                <span className="rounded border border-gray-700 px-2 py-1 font-mono">
+                  {t("dashboard.codex_5h")}: {t("dashboard.codex_remaining", `${codexUsage.primary.remainingPercent}%`)}
+                  {formatRemainingTime(codexUsage.primary.resetAfterSeconds) && ` · ${formatRemainingTime(codexUsage.primary.resetAfterSeconds)}`}
+                  {formatResetAt(codexUsage.primary.resetAt, lang) && ` · ${t("dashboard.codex_resets", formatResetAt(codexUsage.primary.resetAt, lang)!)}`}
+                </span>
+                <span className="rounded border border-gray-700 px-2 py-1 font-mono">
+                  {t("dashboard.codex_7d")}: {t("dashboard.codex_remaining", `${codexUsage.secondary.remainingPercent}%`)}
+                  {formatRemainingTime(codexUsage.secondary.resetAfterSeconds) && ` · ${formatRemainingTime(codexUsage.secondary.resetAfterSeconds)}`}
+                  {formatResetAt(codexUsage.secondary.resetAt, lang) && ` · ${t("dashboard.codex_resets", formatResetAt(codexUsage.secondary.resetAt, lang)!)}`}
+                </span>
+              </>
+            )}
+            {codexUsage.error && <span className="text-amber-400">{t("dashboard.codex_quota_unavailable")}</span>}
+          </div>
+        )}
       </div>
 
       {/* Custom Date Picker */}
