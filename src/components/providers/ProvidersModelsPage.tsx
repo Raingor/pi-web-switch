@@ -655,7 +655,6 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provid
   const [editModel, setEditModel] = useState<Model | null>(null);
   const [showAddModel, setShowAddModel] = useState(false);
   const [deleteModel, setDeleteModel] = useState<Model | null>(null);
-  const [modelQuery, setModelQuery] = useState("");
   const [supportsDeveloperRole, setSupportsDeveloperRole] = useState(
     provider.compat?.supportsDeveloperRole ?? false
   );
@@ -742,8 +741,6 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provid
 
   const existingModelIds = new Set(provider.models.map((m) => m.id));
   const availableModels = fetchedModels.filter((m) => !existingModelIds.has(m.id));
-  const [searchQuery, setSearchQuery] = useState("");
-  const filteredModels = availableModels.filter((m) => m.id.toLowerCase().includes(searchQuery.toLowerCase()));
   const isSelected = (id: string) => fetchSelected.has(id);
   const allSelected = availableModels.length > 0 && availableModels.every((m) => isSelected(m.id));
 
@@ -802,11 +799,8 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provid
         cost: m.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       } as Model);
     });
-    // Enable in a single batched write — per-model addEnabledModel calls race
-    // on the same settings snapshot and overwrite each other.
-    const list = settings?.enabledModels ?? [];
-    const refs = selected.map((m) => `${provider.id}/${m.id}`);
-    await updateSettings({ enabledModels: Array.from(new Set([...list, ...refs])) });
+    // Models are added disabled by default — the user enables them via the
+    // per-model toggle. (No write to settings.enabledModels here.)
     setFetchImported(selected.length);
     setTimeout(() => {
       setFetchOpen(false); setFetchedModels([]); setFetchSelected(new Set());
@@ -903,12 +897,10 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provid
       contextWindow: cw,
       maxTokens: mt,
       cost: match?.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      enabled: true,
+      enabled: false,
     };
     addModel(provider.id, model);
-    // Enable
-    const list = settings?.enabledModels ?? [];
-    await updateSettings({ enabledModels: Array.from(new Set([...list, `${provider.id}/${id}`])) });
+    // Added disabled by default — the user enables it via the toggle.
     setQuickId("");
     setQuickHint(null);
   };
@@ -982,12 +974,7 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provid
     if (ok) setTimeout(() => setSaveState("idle"), 2500);
   };
 
-  const q = modelQuery.trim().toLowerCase();
-  const visibleModels = q
-    ? provider.models.filter(
-        (m) => m.id.toLowerCase().includes(q) || (m.name ?? "").toLowerCase().includes(q)
-      )
-    : provider.models;
+  const visibleModels = provider.models;
 
   return (
     <div className="space-y-5">
@@ -1285,19 +1272,6 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provid
           )}
         </div>
 
-        {provider.models.length > 5 && (
-          <div className="relative mt-1.5">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
-            <input
-              type="text"
-              value={modelQuery}
-              onChange={(e) => setModelQuery(e.target.value)}
-              placeholder={t("models.search_placeholder")}
-              className="w-full rounded-lg border border-gray-700 bg-gray-800 py-2 pl-9 pr-3 text-sm text-white"
-            />
-          </div>
-        )}
-
         <div className="mt-1.5 space-y-2 rounded-lg border border-gray-800 p-3">
           {provider.models.length === 0 && (
             <p className="px-1 py-2 text-sm text-gray-500">{t("models.no_models")}</p>
@@ -1524,17 +1498,7 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provid
                 </button>
               </div>
               <div className="max-h-72 overflow-y-auto space-y-1.5 rounded-lg border border-gray-800 p-3">
-          <div className="relative mt-2">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
-            <input
-              type="text"
-              placeholder="Search models..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full rounded-lg border border-gray-700 bg-gray-800 py-2 pl-9 pr-3 text-sm text-white"
-            />
-          </div>
-                {filteredModels.map((m) => (
+                {availableModels.map((m) => (
                   <div key={m.id} className="flex items-center gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-gray-800 cursor-pointer" onClick={() => toggleSelect(m.id)}>
                     <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded border"
                       style={{ backgroundColor: isSelected(m.id) ? "#3b82f6" : "transparent", borderColor: isSelected(m.id) ? "#3b82f6" : "#4b5563" }}

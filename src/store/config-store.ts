@@ -402,7 +402,7 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
     }
     newProviders[providerId] = {
       ...newProviders[providerId],
-      models: [...(newProviders[providerId]!.models ?? []), { ...model, enabled: true }],
+      models: [...(newProviders[providerId]!.models ?? []), { ...model, enabled: false }],
     };
     const updated = { providers: newProviders };
     set({ modelsJson: updated });

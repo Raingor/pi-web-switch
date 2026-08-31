@@ -1,9 +1,9 @@
 import { useMemo, useState, useEffect } from "react";
-import { Gauge, Loader2, Zap, Check, X, RotateCcw, Download } from "lucide-react";
+import { Gauge, Loader2, Zap, Check, X, RotateCcw, Download, Plus, ListPlus } from "lucide-react";
 import { useTranslation } from "@/lib/i18n";
 import { useConfigStore } from "@/store/config-store";
 import { cn } from "@/lib/utils";
-import type { Provider } from "@/types";
+import type { Provider, Model } from "@/types";
 
 // Model returned by /api/pi/provider-models. Kept local to this page — these
 // are stored separately from the provider's configured/enabled models.
@@ -63,6 +63,41 @@ function saveCatalog(catalog: Record<string, FetchedModel[]>) {
   }
 }
 
+// LocalStorage key: per-provider speed-test results, so they survive
+// navigating away and back (the route unmounts this page).
+const RESULTS_KEY = "speedtest:model-results";
+// LocalStorage key: last selected provider on this page.
+const LAST_PROVIDER_KEY = "speedtest:last-provider";
+
+type AllResults = Record<string, Record<string, ModelResult>>;
+
+function loadResults(): AllResults {
+  try {
+    const raw = localStorage.getItem(RESULTS_KEY);
+    if (!raw) return {};
+    const all = JSON.parse(raw) as AllResults;
+    // Drop entries stuck in "testing" (page left mid-run) — they never finished.
+    for (const pid of Object.keys(all)) {
+      const kept = Object.fromEntries(
+        Object.entries(all[pid] ?? {}).filter(([, r]) => r.status === "done")
+      );
+      if (Object.keys(kept).length === 0) delete all[pid];
+      else all[pid] = kept;
+    }
+    return all;
+  } catch {
+    return {};
+  }
+}
+
+function saveResults(all: AllResults) {
+  try {
+    localStorage.setItem(RESULTS_KEY, JSON.stringify(all));
+  } catch {
+    /* ignore quota errors */
+  }
+}
+
 export function ModelSpeedTestPage() {
   const { t } = useTranslation();
   const { allProviders, auth } = useConfigStore();
@@ -79,21 +114,92 @@ export function ModelSpeedTestPage() {
   );
 
   const [selectedId, setSelectedId] = useState<string | null>(
-    testableProviders[0]?.id ?? null
+    () => localStorage.getItem(LAST_PROVIDER_KEY) ?? testableProviders[0]?.id ?? null
   );
   const selected = testableProviders.find((p) => p.id === selectedId) ?? testableProviders[0] ?? null;
+  useEffect(() => {
+    if (selected?.id) localStorage.setItem(LAST_PROVIDER_KEY, selected.id);
+  }, [selected?.id]);
 
   // Speed-test model catalog, persisted in localStorage.
   const [catalog, setCatalog] = useState<Record<string, FetchedModel[]>>({});
   useEffect(() => { setCatalog(loadCatalog()); }, []);
   const models = selected ? (catalog[selected.id] ?? []) : [];
 
-  const [results, setResults] = useState<Map<string, ModelResult>>(new Map());
+  // Results persisted per provider so they survive route changes; the map
+  // below is the current provider's slice.
+  const [allResults, setAllResults] = useState<AllResults>(() => loadResults());
+  useEffect(() => { saveResults(allResults); }, [allResults]);
+  const results = useMemo(
+    () => new Map(Object.entries(allResults[selected?.id ?? ""] ?? {})),
+    [allResults, selected]
+  );
+  // setResults scoped to the selected provider (drop-in for the old state setter).
+  const setResults = (
+    next: Map<string, ModelResult> | ((prev: Map<string, ModelResult>) => Map<string, ModelResult>)
+  ) => {
+    const pid = selected?.id ?? "";
+    setAllResults((prevAll) => {
+      const prevMap = new Map(Object.entries(prevAll[pid] ?? {}));
+      const nextMap = typeof next === "function" ? next(prevMap) : next;
+      return { ...prevAll, [pid]: Object.fromEntries(nextMap) };
+    });
+  };
   const [running, setRunning] = useState(false);
   const [speedMode, setSpeedMode] = useState<SpeedMode>("normal");
   const [fetching, setFetching] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [fetchInfo, setFetchInfo] = useState<string | null>(null);
+
+  // Add-to-provider support: models already configured under this provider.
+  const { addModel } = useConfigStore();
+  const configuredIds = useMemo(
+    () => new Set((selected?.models ?? []).map((m) => m.id)),
+    [selected]
+  );
+
+  const toModelDef = (m: FetchedModel): Model => {
+    const input: Model["input"] = ["text"];
+    if (m.vision) input.push("image");
+    if (m.audio) input.push("audio");
+    return {
+      id: m.id,
+      name: m.name,
+      reasoning: m.reasoning ?? false,
+      input,
+      contextWindow: m.contextWindow ?? 262144,
+      maxTokens: m.maxTokens ?? 32768,
+      cost: m.cost
+        ? {
+            input: m.cost.input ?? 0,
+            output: m.cost.output ?? 0,
+            cacheRead: m.cost.cacheRead ?? 0,
+            cacheWrite: m.cost.cacheWrite ?? 0,
+          }
+        : { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    };
+  };
+
+  // Models that passed 100% and are not configured yet — the batch-add set.
+  const passedNew = useMemo(
+    () =>
+      models.filter((m) => {
+        const r = results.get(m.id);
+        return !!r && r.runs > 0 && r.success === r.runs && !configuredIds.has(m.id);
+      }),
+    [models, results, configuredIds]
+  );
+
+  const addToProvider = async (m: FetchedModel) => {
+    if (!selected || configuredIds.has(m.id)) return;
+    // Added disabled by default — the user enables it on the providers page.
+    addModel(selected.id, toModelDef(m));
+  };
+
+  const addAllPassed = async () => {
+    if (!selected || running || passedNew.length === 0) return;
+    passedNew.forEach((m) => addModel(selected.id, toModelDef(m)));
+  };
 
   const setResult = (modelId: string, patch: Partial<ModelResult>) => {
     setResults((prev) => {
@@ -314,6 +420,15 @@ export function ModelSpeedTestPage() {
                       {t("speed_test.reset")}
                     </button>
                     <button
+                      onClick={addAllPassed}
+                      disabled={running || fetching || passedNew.length === 0}
+                      className="flex items-center gap-1.5 rounded-lg border border-emerald-600/40 bg-emerald-600/10 px-3 py-2 text-sm text-emerald-300 transition-colors hover:bg-emerald-600/20 disabled:cursor-not-allowed disabled:opacity-50"
+                      title={t("speed_test.add_all_passed_desc")}
+                    >
+                      <ListPlus className="h-4 w-4" />
+                      {t("speed_test.add_all_passed")} ({passedNew.length})
+                    </button>
+                    <button
                       onClick={runAll}
                       disabled={running || fetching || models.length === 0}
                       className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50"
@@ -355,6 +470,7 @@ export function ModelSpeedTestPage() {
                           <th className="px-3 py-2 font-medium text-right">{t("speed_test.col_avg_latency")}</th>
                           <th className="px-3 py-2 font-medium text-right">{t("speed_test.col_range")}</th>
                           <th className="px-3 py-2 font-medium">{t("speed_test.col_status")}</th>
+                          <th className="px-3 py-2 font-medium text-right">{t("speed_test.col_action")}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -411,6 +527,24 @@ export function ModelSpeedTestPage() {
                                     {r.lastMessage ? r.lastMessage.slice(0, 40) : t("speed_test.fail")}
                                   </span>
                                 )}
+                              </td>
+                              <td className="px-3 py-2 text-right">
+                                {rate === 100 &&
+                                  (configuredIds.has(m.id) ? (
+                                    <span className="inline-flex items-center gap-1 text-xs text-gray-500">
+                                      <Check className="h-3.5 w-3.5" />
+                                      {t("speed_test.exists")}
+                                    </span>
+                                  ) : (
+                                    <button
+                                      onClick={() => addToProvider(m)}
+                                      disabled={running || fetching}
+                                      className="inline-flex items-center gap-1 rounded-md border border-blue-600/50 bg-blue-600/10 px-2 py-1 text-xs font-medium text-blue-400 transition-colors hover:bg-blue-600/20 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                      <Plus className="h-3.5 w-3.5" />
+                                      {t("speed_test.add_to_provider")}
+                                    </button>
+                                  ))}
                               </td>
                             </tr>
                           );
