@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
 import { formatTokens, cn, formatCost, USD_TO_CNY } from "@/lib/utils";
 import { useCurrency } from "@/lib/currency";
-import type { ApiType, CustomProviderConfig, Model, Provider, ProviderApiKey } from "@/types";
+import type { ApiType, CustomProviderConfig, Model, PiModelsJson, Provider, ProviderApiKey } from "@/types";
 import { MODEL_CATALOG, searchCatalog, catalogToModel, catalogEntryId, findCatalogEntry, guessModelMeta } from "@/data/model-catalog";
 import {
   Plus,
@@ -13,6 +13,8 @@ import {
   Edit3,
   Eye,
   EyeOff,
+  Lock,
+  Unlock,
   Server,
   Shield,
   Box,
@@ -276,7 +278,7 @@ function EnabledModelsPanel() {
 
 export function ProvidersModelsPage() {
   const { t } = useTranslation();
-  const { allProviders, auth, modelsJson, removeCustomProvider } = useConfigStore();
+  const { allProviders, auth, modelsJson, removeCustomProvider, disableCustomProvider, enableCustomProvider } = useConfigStore();
   const hasKey = (p: Provider) => p.hasAuth || !!p.apiKey || !!auth?.[p.id]?.key;
 
   const customProviders = allProviders.filter((p) => p.type === "custom");
@@ -385,6 +387,14 @@ export function ProvidersModelsPage() {
                 provider={p}
                 active={!adding && selectedId === p.id}
                 hasKey={hasKey(p)}
+                disabled={!!modelsJson?._disabledProviders?.[p.id]}
+                onToggleDisabled={() => {
+                  if (modelsJson?._disabledProviders?.[p.id]) {
+                    enableCustomProvider(p.id);
+                  } else {
+                    disableCustomProvider(p.id);
+                  }
+                }}
                 onClick={() => {
                   setAdding(false);
                   setSelectedId(p.id);
@@ -426,6 +436,9 @@ export function ProvidersModelsPage() {
               onDelete={() => setDeleteConfirm(selected.id)}
               onDuplicate={() => handleDuplicateProvider(selected.id)}
               onRenamed={(newId) => setSelectedId(newId)}
+              modelsJson={modelsJson}
+              onEnable={enableCustomProvider}
+              onDisable={disableCustomProvider}
             />
           ) : (
             <div className="flex h-40 items-center justify-center text-sm text-gray-500">
@@ -499,18 +512,24 @@ function ProviderListItem({
   active,
   hasKey,
   onClick,
+  disabled,
+  onToggleDisabled,
 }: {
   provider: Provider;
   active: boolean;
   hasKey: boolean;
   onClick: () => void;
+  disabled?: boolean;
+  onToggleDisabled?: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <button
       onClick={onClick}
       className={cn(
         "provider-list-item flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-colors",
-        active ? "is-active border-gray-600 bg-gray-800 text-white" : "is-inactive border-transparent text-gray-300 hover:bg-gray-800/60"
+        active ? "is-active border-gray-600 bg-gray-800 text-white" : "is-inactive border-transparent text-gray-300 hover:bg-gray-800/60",
+        disabled && "opacity-50 grayscale"
       )}
     >
       {provider.type === "custom" ? (
@@ -519,6 +538,21 @@ function ProviderListItem({
         <Shield className="h-4 w-4 shrink-0 text-emerald-400" />
       )}
       <span className="min-w-0 flex-1 truncate">{provider.name}</span>
+      {onToggleDisabled && (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onToggleDisabled(); }}
+          className={cn(
+            "shrink-0 rounded p-1 transition-colors",
+            disabled
+              ? "text-gray-600 hover:text-gray-400"
+              : "text-emerald-400 hover:text-emerald-300"
+          )}
+          title={disabled ? t("providers_models.enable_provider") : t("providers_models.disable_provider")}
+        >
+          {disabled ? <Lock className="h-3.5 w-3.5" /> : <Unlock className="h-3.5 w-3.5" />}
+        </button>
+      )}
       <span
         className={cn("h-2 w-2 shrink-0 rounded-full", hasKey ? "bg-emerald-400" : "bg-gray-600")}
       />
@@ -591,7 +625,7 @@ function TestConnectionButton({ baseUrl, apiKey }: { baseUrl: string; apiKey?: s
 
 // ─── Provider Detail Panel ────────────────────────────────
 
-function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provider: Provider; onDelete: () => void; onDuplicate: () => void; onRenamed: (newId: string) => void }) {
+function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed, modelsJson, onEnable, onDisable }: { provider: Provider; onDelete: () => void; onDuplicate: () => void; onRenamed: (newId: string) => void; modelsJson: PiModelsJson | null; onEnable: (id: string) => Promise<boolean>; onDisable: (id: string) => Promise<boolean> }) {
   const { t } = useTranslation();
   const { currency } = useCurrency();
   const {
@@ -994,6 +1028,9 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provid
           {isCustom ? t("providers.custom") : t("providers.builtin")}
         </Badge>
         {savedKey && <Badge variant="success">{t("providers.configured")}</Badge>}
+        {isCustom && modelsJson?._disabledProviders?.[provider.id] && (
+          <Badge variant="warning">{t("providers_models.disabled")}</Badge>
+        )}
         {isCustom && (
           <button
             onClick={onDuplicate}
@@ -1001,6 +1038,34 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed }: { provid
             title={t("providers.duplicate_provider")}
           >
             <Copy className="h-4 w-4" />
+          </button>
+        )}
+        {isCustom && (
+          <button
+            onClick={() => {
+              if (modelsJson?._disabledProviders?.[provider.id]) {
+                onEnable(provider.id);
+              } else {
+                onDisable(provider.id);
+              }
+            }}
+            className={cn(
+              "rounded-lg p-2 transition-colors",
+              modelsJson?._disabledProviders?.[provider.id]
+                ? "text-gray-500 hover:bg-yellow-500/10 hover:text-yellow-400"
+                : "text-gray-500 hover:bg-emerald-500/10 hover:text-emerald-400"
+            )}
+            title={
+              modelsJson?._disabledProviders?.[provider.id]
+                ? t("providers_models.enable_provider")
+                : t("providers_models.disable_provider")
+            }
+          >
+            {modelsJson?._disabledProviders?.[provider.id] ? (
+              <Lock className="h-4 w-4" />
+            ) : (
+              <Unlock className="h-4 w-4" />
+            )}
           </button>
         )}
         {isCustom && (

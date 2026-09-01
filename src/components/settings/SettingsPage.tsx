@@ -86,7 +86,6 @@ function SettingRow({ label, children }: { label: string; children: React.ReactN
 
 export function SettingsPage() {
   const { t } = useTranslation();
-  const { mode, setMode } = useUiMode();
   const {
     settings,
     auth,

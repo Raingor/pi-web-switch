@@ -100,6 +100,7 @@ export interface Provider {
   models: Model[];
   oauth?: ProviderOAuth;
   compat?: ModelCompat;
+  disabled?: boolean;
 
   // Auth state
   hasAuth: boolean;
@@ -146,6 +147,7 @@ export interface CustomProviderConfig {
 
 export interface PiModelsJson {
   providers: Record<string, CustomProviderConfig>;
+  _disabledProviders?: Record<string, CustomProviderConfig>;
 }
 
 export interface PiConfig {

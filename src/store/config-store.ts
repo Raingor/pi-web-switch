@@ -35,22 +35,46 @@ async function apiPost(path: string, data: unknown): Promise<boolean> {
 
 function getCustomProviders(modelsJson: PiModelsJson | null): Provider[] {
   if (!modelsJson) return [];
-  return Object.entries(modelsJson.providers).map(([id, cfg]) => ({
-    id,
-    name: cfg.name ?? (id.charAt(0).toUpperCase() + id.slice(1)),
-    type: "custom" as const,
-    baseUrl: cfg.baseUrl,
-    api: cfg.api,
-    apiKey: cfg.apiKey,
-    apiKeys: cfg.apiKeys,
-    activeKeyId: cfg.activeKeyId,
-    authHeader: cfg.authHeader,
-    headers: cfg.headers,
-    compat: cfg.compat,
-    hasAuth: !!cfg.apiKey,
-    authMethod: (cfg.apiKey ? "file" : "none") as "file" | "none",
-    models: (cfg.models ?? []).map((m) => ({ ...m, enabled: true })),
-  }));
+  const disabled = new Set(Object.keys(modelsJson._disabledProviders ?? {}));
+  const result: Provider[] = [];
+  for (const [id, cfg] of Object.entries(modelsJson.providers)) {
+    result.push({
+      id,
+      name: cfg.name ?? (id.charAt(0).toUpperCase() + id.slice(1)),
+      type: "custom" as const,
+      baseUrl: cfg.baseUrl,
+      api: cfg.api,
+      apiKey: cfg.apiKey,
+      apiKeys: cfg.apiKeys,
+      activeKeyId: cfg.activeKeyId,
+      authHeader: cfg.authHeader,
+      headers: cfg.headers,
+      compat: cfg.compat,
+      hasAuth: !!cfg.apiKey,
+      authMethod: (cfg.apiKey ? "file" : "none") as "file" | "none",
+      models: (cfg.models ?? []).map((m) => ({ ...m, enabled: true })),
+    });
+  }
+  for (const [id, cfg] of Object.entries(modelsJson._disabledProviders ?? {})) {
+    result.push({
+      id,
+      name: cfg.name ?? (id.charAt(0).toUpperCase() + id.slice(1)),
+      type: "custom" as const,
+      baseUrl: cfg.baseUrl,
+      api: cfg.api,
+      apiKey: cfg.apiKey,
+      apiKeys: cfg.apiKeys,
+      activeKeyId: cfg.activeKeyId,
+      authHeader: cfg.authHeader,
+      headers: cfg.headers,
+      compat: cfg.compat,
+      hasAuth: !!cfg.apiKey,
+      authMethod: (cfg.apiKey ? "file" : "none") as "file" | "none",
+      models: (cfg.models ?? []).map((m) => ({ ...m, enabled: true })),
+      disabled: true,
+    });
+  }
+  return result;
 }
 
 function mergeProviders(
@@ -184,6 +208,8 @@ interface ConfigState {
   updateCustomProvider: (id: string, cfg: Partial<CustomProviderConfig>) => Promise<boolean>;
   renameCustomProvider: (oldId: string, newId: string, cfg?: Partial<CustomProviderConfig>) => Promise<boolean>;
   removeCustomProvider: (id: string) => Promise<boolean>;
+  disableCustomProvider: (id: string) => Promise<boolean>;
+  enableCustomProvider: (id: string) => Promise<boolean>;
 
   // Import/Export (to localStorage for backup, writes back to pi files)
   importConfig: (config: PiConfig) => Promise<void>;
@@ -516,6 +542,48 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
     if (ok) {
       set({ modelsJson: updated });
       const { auth, builtinProviders } = get();
+      const newAllProviders = mergeProviders(builtinProviders, auth ?? {}, updated);
+      const newAllModels = newAllProviders.flatMap((p) =>
+        p.models.map((m) => ({ ...m, providerId: p.id, providerName: p.name }))
+      );
+      set({ allProviders: newAllProviders, allModels: newAllModels });
+    }
+    return ok;
+  },
+
+  disableCustomProvider: async (id) => {
+    const { modelsJson, auth, builtinProviders } = get();
+    if (!modelsJson || !modelsJson.providers[id]) return false;
+    const provider = modelsJson.providers[id];
+    const newProviders = { ...modelsJson.providers };
+    delete newProviders[id];
+    const disabled = { ...(modelsJson._disabledProviders ?? {}), [id]: provider };
+    const updated = { providers: newProviders, _disabledProviders: disabled };
+    const ok = await apiPost("/models", updated);
+    if (ok) {
+      set({ modelsJson: updated });
+      const newAllProviders = mergeProviders(builtinProviders, auth ?? {}, updated);
+      const newAllModels = newAllProviders.flatMap((p) =>
+        p.models.map((m) => ({ ...m, providerId: p.id, providerName: p.name }))
+      );
+      set({ allProviders: newAllProviders, allModels: newAllModels });
+    }
+    return ok;
+  },
+
+  enableCustomProvider: async (id) => {
+    const { modelsJson, auth, builtinProviders } = get();
+    if (!modelsJson || !modelsJson._disabledProviders?.[id]) return false;
+    const provider = modelsJson._disabledProviders[id];
+    const newDisabled = { ...modelsJson._disabledProviders };
+    delete newDisabled[id];
+    const updated = {
+      providers: { ...modelsJson.providers, [id]: provider },
+      _disabledProviders: Object.keys(newDisabled).length > 0 ? newDisabled : undefined,
+    };
+    const ok = await apiPost("/models", updated);
+    if (ok) {
+      set({ modelsJson: updated });
       const newAllProviders = mergeProviders(builtinProviders, auth ?? {}, updated);
       const newAllModels = newAllProviders.flatMap((p) =>
         p.models.map((m) => ({ ...m, providerId: p.id, providerName: p.name }))

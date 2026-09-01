@@ -830,6 +830,8 @@ table { border-collapse: collapse; }
 .codex-conversation-row.is-active::before, .codex-conversation-row.is-active::after { background: var(--signal-cyan); }
 
 .ui-mode-switch { display: flex; gap: 4px; padding: 4px; border: 1px solid var(--card-border); border-radius: 10px; background: color-mix(in srgb, var(--card-bg-solid) 70%, transparent); }
+.sidebar-footer .ui-mode-switch { margin: 12px 14px; }
+.codex-sidebar-bottom .ui-mode-switch { margin: 4px 10px 8px; }
 .ui-mode-switch button { display: inline-flex; flex: 1; align-items: center; justify-content: center; gap: 5px; padding: 6px 8px; color: var(--muted-text); border: 0; border-radius: 7px; background: transparent; font-size: 11px; font-weight: 600; white-space: nowrap; }
 .ui-mode-switch button:hover { color: var(--page-text); background: var(--hover-bg); }
 .ui-mode-switch button.is-active { color: #fff; background: var(--signal-cyan); }
