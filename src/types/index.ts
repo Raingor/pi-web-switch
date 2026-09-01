@@ -116,6 +116,7 @@ export interface PiSettings {
   defaultProjectTrust?: string;
   theme?: "light" | "dark" | "light/dark";
   hideThinkingBlock?: boolean;
+  expandRunSteps?: boolean;
   retry?: { enabled: boolean };
   packages?: string[];
   terminal?: { showTerminalProgress?: boolean };

@@ -86,6 +86,7 @@ function SettingRow({ label, children }: { label: string; children: React.ReactN
 
 export function SettingsPage() {
   const { t } = useTranslation();
+  const { mode, setMode } = useUiMode();
   const {
     settings,
     auth,
@@ -363,6 +364,17 @@ export function SettingsPage() {
                   className="rounded border-gray-600 bg-gray-800 text-blue-500"
                 />
                 {t("settings.hide_thinking")}
+              </label>
+              <label className="flex items-center gap-2 text-sm text-gray-400">
+                <input
+                  type="checkbox"
+                  checked={settings?.expandRunSteps ?? true}
+                  onChange={(e) =>
+                    updateSettings({ expandRunSteps: e.target.checked })
+                  }
+                  className="rounded border-gray-600 bg-gray-800 text-blue-500"
+                />
+                {t("settings.expand_run_steps")}
               </label>
             </div>
           </Card>

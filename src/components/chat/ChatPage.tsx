@@ -160,6 +160,7 @@ export function ChatPage() {
   const [usageOpen, setUsageOpen] = useState(true);
   // Live steps for the in-flight turn (thinking / tool calls / tool results).
   const [runSteps, setRunSteps] = useState<RunStep[]>([]);
+  const [runStepOpenOverrides, setRunStepOpenOverrides] = useState<Record<number, boolean>>({});
   const defaultModelRef =
     settings?.defaultProvider && settings.defaultModel
       ? `${settings.defaultProvider}/${settings.defaultModel}`
@@ -316,6 +317,10 @@ export function ChatPage() {
   }, [selectedThinking, supportedThinkingOptions]);
 
   useEffect(() => {
+    setRunStepOpenOverrides({});
+  }, [settings?.expandRunSteps]);
+
+  useEffect(() => {
     if (
       activeModelProviderId &&
       modelGroups.some((group) => group.id === activeModelProviderId)
@@ -414,6 +419,7 @@ export function ChatPage() {
     setRunning(true);
     setRunStatus({ kind: "starting" });
     setRunSteps([]);
+    setRunStepOpenOverrides({});
     try {
       const res = await fetch("/api/pi/chat", {
         method: "POST",
@@ -753,6 +759,8 @@ export function ChatPage() {
               {runSteps.map((step, stepIndex) => (
                 <details
                   key={stepIndex}
+                  open={runStepOpenOverrides[stepIndex] ?? (settings?.expandRunSteps ?? true)}
+                  onToggle={(event) => setRunStepOpenOverrides((previous) => ({ ...previous, [stepIndex]: event.currentTarget.open }))}
                   className={cn(
                     "codex-run-step",
                     step.kind === "thinking" && "is-thinking",
