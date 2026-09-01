@@ -1,6 +1,12 @@
 // ─── Simplified Chinese Translations ────────────────────
 
 const zhCN: Record<string, string> = {
+  "chat.input_placeholder": "询问任何问题",
+  "chat.copy": "复制",
+  "chat.edit": "编辑",
+  "chat.save": "保存",
+  "chat.cancel": "取消",
+  "chat.save_failed": "保存失败，请重试。",
   "nav.dashboard": "仪表盘",
   "nav.models": "模型",
   "nav.providers": "提供商",

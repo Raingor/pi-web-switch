@@ -1,6 +1,12 @@
 // ─── Traditional Chinese Translations ───────────────────
 
 const zhTW: Record<string, string> = {
+  "chat.input_placeholder": "詢問任何問題",
+  "chat.copy": "複製",
+  "chat.edit": "編輯",
+  "chat.save": "儲存",
+  "chat.cancel": "取消",
+  "chat.save_failed": "儲存失敗，請重試。",
   "nav.dashboard": "儀表板",
   "nav.models": "模型",
   "nav.providers": "提供商",

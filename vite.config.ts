@@ -150,13 +150,13 @@ function piApiPlugin(): Plugin {
           req.on("data", (chunk: string) => (body += chunk));
           req.on("end", async () => {
             try {
-              const { prompt, sessionId, projectPath } = JSON.parse(body) as { prompt?: string; sessionId?: string; projectPath?: string };
+              const { prompt, sessionId, projectPath, model, thinking } = JSON.parse(body) as { prompt?: string; sessionId?: string; projectPath?: string; model?: string; thinking?: string };
               if (typeof prompt !== "string" || !prompt.trim()) throw new Error("missing prompt");
               res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
               res.setHeader("Cache-Control", "no-cache, no-transform");
               res.setHeader("Connection", "keep-alive");
               const send = (event: string, data: unknown) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-              const result = await pi.runWebChat(prompt.trim(), sessionId, (chunk) => send("delta", chunk), projectPath);
+              const result = await pi.runWebChat(prompt.trim(), sessionId, (chunk) => send("delta", chunk), projectPath, model, thinking);
               if (result.error) send("error", result.error);
               else send("done", { sessionId: result.sessionId });
               res.end();
@@ -356,6 +356,24 @@ function piApiPlugin(): Plugin {
           }
           res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify(history));
+        },
+        "POST /api/pi/session-message"(req, res) {
+          let body = "";
+          req.on("data", (chunk: string) => (body += chunk));
+          req.on("end", () => {
+            try {
+              const { sessionId, messageId, text } = JSON.parse(body) as { sessionId?: string; messageId?: string; text?: string };
+              const success = typeof sessionId === "string" && typeof messageId === "string" && typeof text === "string"
+                && pi.updateSessionUserMessage(sessionId, messageId, text);
+              res.statusCode = success ? 200 : 400;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ success }));
+            } catch {
+              res.statusCode = 400;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ success: false }));
+            }
+          });
         },
         "GET /api/pi/check-updates"(_, res) {
           pi.checkUpdates()

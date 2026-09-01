@@ -1685,6 +1685,7 @@ export function permanentlyDeleteTrash(trashPath: string): boolean {
 // ─── Session Preview ────────────────────────────────
 
 export interface SessionPreviewMessage {
+  id?: string;
   role: string;
   text: string;
   timestamp: string;
@@ -1718,7 +1719,7 @@ function readSessionMessages(filePath: string, limit?: number, truncateAt?: numb
           : 0;
         const output = (text || (toolCount ? `[${toolCount} tool call${toolCount > 1 ? "s" : ""}]` : "")).trim();
         if (!output) continue;
-        messages.push({ role, text: truncateAt && output.length > truncateAt ? `${output.slice(0, truncateAt)}…` : output, timestamp: obj.timestamp || "", kind: toolCount ? "tool" : "text" });
+        messages.push({ id: typeof obj.id === "string" ? obj.id : undefined, role, text: truncateAt && output.length > truncateAt ? `${output.slice(0, truncateAt)}…` : output, timestamp: obj.timestamp || "", kind: toolCount ? "tool" : "text" });
       } catch { /* skip malformed JSONL rows */ }
     }
     return { messages, total };
@@ -1738,6 +1739,55 @@ export function readSessionHistory(sessionId: string): { messages: SessionPrevie
     if (session) return readSessionMessages(session.filePath);
   }
   return null;
+}
+
+/** Replace the visible text of one user turn while preserving its message metadata and attachments. */
+export function updateSessionUserMessage(sessionId: string, messageId: string, text: string): boolean {
+  if (!/^[A-Za-z0-9_-]{1,100}$/.test(sessionId) || !/^[A-Za-z0-9_-]{1,100}$/.test(messageId)) return false;
+  const nextText = text.trim();
+  if (!nextText || nextText.length > 200_000) return false;
+
+  const session = listSessions().flatMap((group) => group.sessions).find((item) => item.id === sessionId);
+  if (!session) return false;
+  const filePath = resolve(session.filePath);
+  if (!filePath.startsWith(SESSIONS_DIR + sep) || !filePath.endsWith(".jsonl") || !existsSync(filePath)) return false;
+
+  try {
+    const lines = readFileSync(filePath, "utf-8").split("\n");
+    const index = lines.findIndex((line) => {
+      try {
+        const entry = JSON.parse(line);
+        return entry.type === "message" && entry.id === messageId && entry.message?.role === "user";
+      } catch {
+        return false;
+      }
+    });
+    if (index < 0) return false;
+
+    const entry = JSON.parse(lines[index]);
+    const content = entry.message.content;
+    if (typeof content === "string") {
+      entry.message.content = nextText;
+    } else if (Array.isArray(content)) {
+      let replaced = false;
+      entry.message.content = content.map((part: any) => {
+        if (!replaced && part?.type === "text") {
+          replaced = true;
+          return { ...part, text: nextText };
+        }
+        return part;
+      });
+      if (!replaced) entry.message.content.push({ type: "text", text: nextText });
+    } else {
+      entry.message.content = nextText;
+    }
+
+    lines[index] = JSON.stringify(entry);
+    writeFileSync(filePath, lines.join("\n"), "utf-8");
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // ─── Memory Entry Deletion ───────────────────────────
@@ -2139,6 +2189,8 @@ export async function runWebChat(
   requestedSessionId?: string,
   onChunk?: (chunk: string) => void,
   requestedCwd?: string,
+  requestedModel?: string,
+  requestedThinking?: string,
 ): Promise<WebChatResult> {
   const pi = resolvePiBinary();
   const sessionId = requestedSessionId && /^[A-Za-z0-9_-]{1,100}$/.test(requestedSessionId)
@@ -2152,7 +2204,14 @@ export async function runWebChat(
     let stdout = "";
     let stderr = "";
     let settled = false;
-    const child = spawn(pi.bin, ["--mode", "text", "--print", "--session-id", sessionId, prompt], {
+    const model = typeof requestedModel === "string" && /^[A-Za-z0-9._/-]+(?::(?:off|minimal|low|medium|high|xhigh|max))?$/.test(requestedModel)
+      ? requestedModel
+      : "";
+    const args = ["--mode", "text", "--print", "--session-id", sessionId];
+    if (model) args.push("--model", model);
+    if (["off", "minimal", "low", "medium", "high", "xhigh", "max"].includes(requestedThinking ?? "")) args.push("--thinking", requestedThinking!);
+    args.push(prompt);
+    const child = spawn(pi.bin, args, {
       cwd: selectedCwd, stdio: ["ignore", "pipe", "pipe"],
     });
     const active = { kill: child.kill.bind(child), stopped: false };
@@ -3127,6 +3186,8 @@ interface CatalogModel {
   id: string;
   name?: string;
   reasoning?: boolean;
+  thinkingLevelMap?: Record<string, string | null>;
+  compat?: Record<string, unknown>;
   input?: string[];
   contextWindow?: number;
   maxTokens?: number;
@@ -3209,6 +3270,8 @@ export function readBuiltinCatalog(): CatalogProvider[] | null {
           id: m.id,
           name: m.name,
           reasoning: !!m.reasoning,
+          thinkingLevelMap: m.thinkingLevelMap,
+          compat: m.compat,
           input: Array.isArray(m.input) ? m.input : ["text"],
           contextWindow: m.contextWindow,
           maxTokens: m.maxTokens,

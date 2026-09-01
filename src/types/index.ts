@@ -14,6 +14,7 @@ export interface ThinkingLevelMap {
   medium?: string | null;
   high?: string | null;
   xhigh?: string | null;
+  max?: string | null;
 }
 
 export interface ModelCompat {

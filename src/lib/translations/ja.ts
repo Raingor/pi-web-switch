@@ -1,6 +1,12 @@
 // ─── Japanese Translations ─────────────────────────────
 
 const ja: Record<string, string> = {
+  "chat.input_placeholder": "何でも質問してください",
+  "chat.copy": "コピー",
+  "chat.edit": "編集",
+  "chat.save": "保存",
+  "chat.cancel": "キャンセル",
+  "chat.save_failed": "保存に失敗しました。再試行してください。",
   "nav.dashboard": "ダッシュボード",
   "nav.models": "モデル",
   "nav.providers": "プロバイダー",

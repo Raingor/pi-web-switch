@@ -2,6 +2,12 @@
 // This is the source of truth — all other languages match these keys.
 
 const en: Record<string, string> = {
+  "chat.input_placeholder": "Ask anything",
+  "chat.copy": "Copy",
+  "chat.edit": "Edit",
+  "chat.save": "Save",
+  "chat.cancel": "Cancel",
+  "chat.save_failed": "Save failed, please retry.",
   // Sidebar
   "nav.dashboard": "Dashboard",
   "nav.models": "Models",
