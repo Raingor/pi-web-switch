@@ -1741,6 +1741,87 @@ export function readSessionHistory(sessionId: string): { messages: SessionPrevie
   return null;
 }
 
+/** Aggregate token usage for one session file, plus the model actually used. */
+export interface SessionUsageSummary {
+  sessionId: string;
+  providerId?: string;
+  modelId?: string;
+  requests: number;
+  totalInput: number;
+  totalOutput: number;
+  totalCacheRead: number;
+  totalCacheWrite: number;
+  totalTokens: number;
+  totalCost: number;
+  /** Prompt size of the most recent assistant turn — the live context usage. */
+  lastContextTokens: number;
+  contextWindow?: number;
+  cacheHitRate: number;
+}
+
+/** Context window for a provider/model, from models.json first, then pi's builtin catalog. */
+function lookupContextWindow(providerId?: string, modelId?: string): number | undefined {
+  if (!providerId || !modelId) return undefined;
+  const custom = readModels()?.providers?.[providerId]?.models;
+  if (Array.isArray(custom)) {
+    const hit = custom.find((m: any) => m?.id === modelId);
+    if (hit?.contextWindow) return hit.contextWindow;
+  }
+  const builtin = readBuiltinCatalog()?.find((p) => p.id === providerId);
+  return builtin?.models.find((m) => m.id === modelId)?.contextWindow;
+}
+
+export function readSessionUsage(sessionId: string): SessionUsageSummary | null {
+  if (!/^[A-Za-z0-9_-]{1,100}$/.test(sessionId)) return null;
+  const session = listSessions().flatMap((group) => group.sessions).find((item) => item.id === sessionId);
+  if (!session) return null;
+  const resolved = resolve(session.filePath);
+  if (!resolved.startsWith(SESSIONS_DIR + sep) || !resolved.endsWith(".jsonl") || !existsSync(resolved)) return null;
+
+  const summary: SessionUsageSummary = {
+    sessionId,
+    requests: 0,
+    totalInput: 0,
+    totalOutput: 0,
+    totalCacheRead: 0,
+    totalCacheWrite: 0,
+    totalTokens: 0,
+    totalCost: 0,
+    lastContextTokens: 0,
+    cacheHitRate: 0,
+  };
+
+  try {
+    for (const line of readFileSync(resolved, "utf-8").split("\n")) {
+      if (!line.trim()) continue;
+      let obj: any;
+      try { obj = JSON.parse(line); } catch { continue; }
+      const msg = obj?.message;
+      if (obj?.type !== "message" || msg?.role !== "assistant") continue;
+      const usage = msg.usage;
+      // Streaming rows repeat with zeroed usage; only completed turns carry totals.
+      if (!usage || typeof usage.input !== "number" || usage.input <= 0) continue;
+      summary.requests++;
+      summary.totalInput += usage.input ?? 0;
+      summary.totalOutput += usage.output ?? 0;
+      summary.totalCacheRead += usage.cacheRead ?? 0;
+      summary.totalCacheWrite += usage.cacheWrite ?? 0;
+      summary.totalCost += usage.cost?.total ?? 0;
+      summary.lastContextTokens = (usage.input ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
+      if (typeof msg.provider === "string") summary.providerId = msg.provider;
+      if (typeof msg.model === "string") summary.modelId = msg.model;
+    }
+  } catch {
+    return null;
+  }
+
+  summary.totalTokens = summary.totalInput + summary.totalOutput + summary.totalCacheRead + summary.totalCacheWrite;
+  const readable = summary.totalInput + summary.totalCacheRead;
+  summary.cacheHitRate = readable > 0 ? (summary.totalCacheRead / readable) * 100 : 0;
+  summary.contextWindow = lookupContextWindow(summary.providerId, summary.modelId);
+  return summary;
+}
+
 /** Replace the visible text of one user turn while preserving its message metadata and attachments. */
 export function updateSessionUserMessage(sessionId: string, messageId: string, text: string): boolean {
   if (!/^[A-Za-z0-9_-]{1,100}$/.test(sessionId) || !/^[A-Za-z0-9_-]{1,100}$/.test(messageId)) return false;
@@ -2119,17 +2200,36 @@ export interface UpdateCheckResult {
 function resolvePiBinary(): { bin: string; version: string } | null {
   const home = homedir();
   const projectNodeModules = `${resolve(process.cwd(), "node_modules")}${sep}`;
+  const exe = process.platform === "win32" ? "pi.cmd" : "pi";
   const pathBins = (process.env.PATH ?? "")
     .split(delimiter)
     .filter(Boolean)
-    .map((dir) => join(dir, process.platform === "win32" ? "pi.cmd" : "pi"));
+    .map((dir) => join(dir, exe));
+
+  // pi's own node runtime install (`~/.local/share/pi-node/<node-version>/bin/pi`)
+  // is not on PATH when the dev server is started from a non-login shell.
+  const piNodeBins: string[] = [];
+  const piNodeRoot = join(home, ".local", "share", "pi-node");
+  try {
+    for (const entry of readdirSync(piNodeRoot)) {
+      piNodeBins.push(join(piNodeRoot, entry, "bin", exe));
+    }
+  } catch {
+    // pi-node not installed here
+  }
+
   const candidates = [
     process.env.PI_BINARY,
     ...pathBins,
+    ...piNodeBins,
+    join(home, ".pi", "bin", exe),
     `${home}/.npm-global/bin/pi`,
     `${home}/.npm-packages/bin/pi`,
     `${home}/.config/yarn/global/node_modules/.bin/pi`,
     `${home}/.local/share/pnpm/pi`,
+    `${home}/.local/bin/pi`,
+    "/usr/local/bin/pi",
+    "/opt/homebrew/bin/pi",
   ].filter(Boolean) as string[];
 
   for (const bin of candidates) {
@@ -2153,6 +2253,11 @@ function resolvePiBinary(): { bin: string; version: string } | null {
 /** Installed pi version, or null when no pi executable could be found. */
 function getPiVersion(): string | null {
   return resolvePiBinary()?.version ?? null;
+}
+
+export interface WebChatStatus {
+  kind: "starting" | "thinking" | "tool" | "responding";
+  toolName?: string;
 }
 
 export interface WebChatResult {
@@ -2191,6 +2296,7 @@ export async function runWebChat(
   requestedCwd?: string,
   requestedModel?: string,
   requestedThinking?: string,
+  onStatus?: (status: WebChatStatus) => void,
 ): Promise<WebChatResult> {
   const pi = resolvePiBinary();
   const sessionId = requestedSessionId && /^[A-Za-z0-9_-]{1,100}$/.test(requestedSessionId)
@@ -2207,7 +2313,9 @@ export async function runWebChat(
     const model = typeof requestedModel === "string" && /^[A-Za-z0-9._/-]+(?::(?:off|minimal|low|medium|high|xhigh|max))?$/.test(requestedModel)
       ? requestedModel
       : "";
-    const args = ["--mode", "text", "--print", "--session-id", sessionId];
+    // JSON mode streams structured NDJSON events, which is what lets the UI
+    // distinguish "thinking" from tool work instead of only seeing final text.
+    const args = ["--mode", "json", "--print", "--session-id", sessionId];
     if (model) args.push("--model", model);
     if (["off", "minimal", "low", "medium", "high", "xhigh", "max"].includes(requestedThinking ?? "")) args.push("--thinking", requestedThinking!);
     args.push(prompt);
@@ -2223,14 +2331,45 @@ export async function runWebChat(
       resolvePromise({ sessionId, text: stdout.trim(), error });
     };
     const timeout = setTimeout(() => { child.kill("SIGKILL"); finish("pi response timed out"); }, 600000);
+
+    onStatus?.({ kind: "starting" });
+    let pending = "";
+    const handleEvent = (line: string) => {
+      let event: any;
+      try {
+        event = JSON.parse(line);
+      } catch {
+        return; // non-JSON warning lines (e.g. "creating a new session")
+      }
+      if (event.type === "tool_execution_start") {
+        onStatus?.({ kind: "tool", toolName: typeof event.toolName === "string" ? event.toolName : undefined });
+        return;
+      }
+      if (event.type !== "message_update") return;
+      const inner = event.assistantMessageEvent;
+      if (!inner || typeof inner.type !== "string") return;
+      if (inner.type === "thinking_start") onStatus?.({ kind: "thinking" });
+      else if (inner.type === "toolcall_start") onStatus?.({ kind: "tool", toolName: typeof inner.toolName === "string" ? inner.toolName : undefined });
+      else if (inner.type === "text_start") onStatus?.({ kind: "responding" });
+      else if (inner.type === "text_delta" && typeof inner.delta === "string") {
+        stdout += inner.delta;
+        onChunk?.(inner.delta);
+      }
+    };
+
     child.stdout?.on("data", (chunk) => {
-      const text = String(chunk);
-      stdout += text;
-      onChunk?.(text);
+      pending += String(chunk);
+      const lines = pending.split("\n");
+      pending = lines.pop() ?? "";
+      for (const line of lines) if (line.trim()) handleEvent(line);
     });
     child.stderr?.on("data", (chunk) => { stderr += String(chunk); });
     child.on("error", (error) => { clearTimeout(timeout); finish(error.message); });
-    child.on("close", (code) => { clearTimeout(timeout); finish(code === 0 ? undefined : (active.stopped ? "generation stopped" : (stderr.trim() || `pi exited with ${code}`))); });
+    child.on("close", (code) => {
+      clearTimeout(timeout);
+      if (pending.trim()) handleEvent(pending);
+      finish(code === 0 ? undefined : (active.stopped ? "generation stopped" : (stderr.trim() || `pi exited with ${code}`)));
+    });
   });
 }
 

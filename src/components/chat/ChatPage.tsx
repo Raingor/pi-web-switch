@@ -17,18 +17,22 @@ import {
   Copy,
   Folder,
   FolderOpen,
+  Gauge,
   Loader2,
   MessageSquare,
   Pencil,
   Send,
   Square,
   X,
+  Sun,
+  Moon,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n";
 import { useConfigStore } from "@/store/config-store";
+import { useSessionUsage } from "@/hooks/session-usage";
 
 interface Message {
   id?: string;
@@ -43,6 +47,27 @@ interface SessionHistory {
 interface ProjectGroup {
   projectPath: string;
   projectName: string;
+}
+interface SessionUsage {
+  sessionId: string;
+  providerId?: string;
+  modelId?: string;
+  requests: number;
+  totalInput: number;
+  totalOutput: number;
+  totalCacheRead: number;
+  totalCacheWrite: number;
+  totalTokens: number;
+  totalCost: number;
+  lastContextTokens: number;
+  contextWindow?: number;
+  cacheHitRate: number;
+}
+
+function formatTokens(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
+  return String(value);
 }
 
 const THINKING_OPTIONS = [
@@ -117,6 +142,14 @@ export function ChatPage() {
   const [savingMessage, setSavingMessage] = useState(false);
   const [editError, setEditError] = useState("");
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  // Live pi activity for the in-flight turn: thinking / tool work / responding.
+  const [runStatus, setRunStatus] = useState<{
+    kind: "starting" | "thinking" | "tool" | "responding";
+    toolName?: string;
+  } | null>(null);
+  // Session usage panel (floating, right side): tokens, cache, context share.
+  const [sessionUsage, setSessionUsage] = useState<SessionUsage | null>(null);
+  const [usageOpen, setUsageOpen] = useState(true);
   const defaultModelRef =
     settings?.defaultProvider && settings.defaultModel
       ? `${settings.defaultProvider}/${settings.defaultModel}`
@@ -335,6 +368,27 @@ export function ChatPage() {
       .catch(() => setProjects([]));
   }, [sessionId]);
 
+  // Session usage: refresh on session change, after each turn, and while running.
+  useEffect(() => {
+    if (!sessionId) {
+      setSessionUsage(null);
+      return;
+    }
+    let cancelled = false;
+    const load = () => {
+      fetch(`/api/pi/session-usage?session=${encodeURIComponent(sessionId)}`)
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data: SessionUsage | null) => {
+          if (!cancelled) setSessionUsage(data && data.sessionId ? data : null);
+        })
+        .catch(() => { if (!cancelled) setSessionUsage(null); });
+    };
+    load();
+    if (!running) return () => { cancelled = true; };
+    const id = window.setInterval(load, 4000);
+    return () => { cancelled = true; window.clearInterval(id); };
+  }, [sessionId, running]);
+
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     const text = prompt.trim();
@@ -348,6 +402,7 @@ export function ChatPage() {
     ]);
     setPrompt("");
     setRunning(true);
+    setRunStatus({ kind: "starting" });
     try {
       const res = await fetch("/api/pi/chat", {
         method: "POST",
@@ -385,6 +440,7 @@ export function ChatPage() {
           if (!eventType || !data) continue;
           const payload = JSON.parse(data);
           if (eventType === "delta") append(payload);
+          if (eventType === "status") setRunStatus(payload);
           if (eventType === "done") {
             preserveMessagesAfterCreate.current = true;
             setSearchParams({ session: payload.sessionId }, { replace: true });
@@ -415,6 +471,7 @@ export function ChatPage() {
       );
     } finally {
       setRunning(false);
+      setRunStatus(null);
       setActiveRunSessionId(null);
     }
   };
@@ -677,6 +734,20 @@ export function ChatPage() {
               </div>
             ),
           )}
+          {running && runStatus && runStatus.kind !== "responding" && (
+            <div className="codex-run-status">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <span>
+                {runStatus.kind === "thinking"
+                  ? t("chat.status_thinking")
+                  : runStatus.kind === "tool"
+                    ? runStatus.toolName
+                      ? t("chat.status_tool_named", runStatus.toolName)
+                      : t("chat.status_working")
+                    : t("chat.status_starting")}
+              </span>
+            </div>
+          )}
         </div>
         {showScrollToBottom && (
           <button
@@ -688,6 +759,96 @@ export function ChatPage() {
           >
             <ArrowDown className="h-4 w-4" />
           </button>
+        )}
+        {sessionUsage && (
+          <aside
+            className={cn("codex-usage-panel", !usageOpen && "is-collapsed")}
+          >
+            <button
+              type="button"
+              className="codex-usage-toggle"
+              onClick={() => setUsageOpen((open) => !open)}
+              title={
+                usageOpen ? t("chat.usage_collapse") : t("chat.usage_expand")
+              }
+            >
+              <Gauge className="h-3.5 w-3.5" />
+              {usageOpen && <span>{t("chat.usage_title")}</span>}
+              {usageOpen && <ChevronRight className="ml-auto h-3.5 w-3.5" />}
+            </button>
+            {usageOpen && (
+              <div className="codex-usage-body">
+                <div className="codex-usage-row is-model">
+                  <span>{t("chat.usage_model")}</span>
+                  <strong title={`${sessionUsage.providerId ?? ""}/${sessionUsage.modelId ?? ""}`}>
+                    {sessionUsage.modelId ?? "—"}
+                  </strong>
+                </div>
+                {sessionUsage.providerId && (
+                  <div className="codex-usage-row">
+                    <span>{t("chat.usage_provider")}</span>
+                    <strong>{sessionUsage.providerId}</strong>
+                  </div>
+                )}
+                {sessionUsage.contextWindow ? (
+                  <div className="codex-usage-context">
+                    <div className="codex-usage-row">
+                      <span>{t("chat.usage_context")}</span>
+                      <strong>
+                        {Math.min(
+                          100,
+                          Math.round(
+                            (sessionUsage.lastContextTokens /
+                              sessionUsage.contextWindow) *
+                              100,
+                          ),
+                        )}
+                        %
+                      </strong>
+                    </div>
+                    <div className="codex-usage-track">
+                      <span
+                        style={{
+                          width: `${Math.min(100, (sessionUsage.lastContextTokens / sessionUsage.contextWindow) * 100)}%`,
+                        }}
+                      />
+                    </div>
+                    <small>
+                      {formatTokens(sessionUsage.lastContextTokens)} /{" "}
+                      {formatTokens(sessionUsage.contextWindow)}
+                    </small>
+                  </div>
+                ) : null}
+                <div className="codex-usage-row">
+                  <span>{t("chat.usage_tokens")}</span>
+                  <strong>{formatTokens(sessionUsage.totalTokens)}</strong>
+                </div>
+                <div className="codex-usage-row">
+                  <span>{t("chat.usage_input")}</span>
+                  <strong>{formatTokens(sessionUsage.totalInput)}</strong>
+                </div>
+                <div className="codex-usage-row">
+                  <span>{t("chat.usage_output")}</span>
+                  <strong>{formatTokens(sessionUsage.totalOutput)}</strong>
+                </div>
+                <div className="codex-usage-row">
+                  <span>{t("chat.usage_cache")}</span>
+                  <strong>
+                    {formatTokens(sessionUsage.totalCacheRead)} ·{" "}
+                    {sessionUsage.cacheHitRate.toFixed(1)}%
+                  </strong>
+                </div>
+                <div className="codex-usage-row">
+                  <span>{t("chat.usage_requests")}</span>
+                  <strong>{sessionUsage.requests}</strong>
+                </div>
+                <div className="codex-usage-row is-cost">
+                  <span>{t("chat.usage_cost")}</span>
+                  <strong>${sessionUsage.totalCost.toFixed(4)}</strong>
+                </div>
+              </div>
+            )}
+          </aside>
         )}
       </div>
       <form onSubmit={submit} className="codex-composer">
