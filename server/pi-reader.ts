@@ -2260,6 +2260,15 @@ export interface WebChatStatus {
   toolName?: string;
 }
 
+/** One visible step of pi's work, streamed to the UI as it happens. */
+export interface WebChatStep {
+  kind: "thinking" | "tool" | "tool_result";
+  text?: string;
+  toolName?: string;
+  args?: string;
+  isError?: boolean;
+}
+
 export interface WebChatResult {
   sessionId: string;
   text: string;
@@ -2274,6 +2283,11 @@ export function stopWebChat(sessionId: string): boolean {
   active.stopped = true;
   active.kill("SIGTERM");
   return true;
+}
+
+/** Session ids with a pi child process currently running. */
+export function listActiveWebChats(): string[] {
+  return [...activeWebChats.keys()];
 }
 
 /** Open the platform folder picker for an explicit user-initiated chat workspace choice. */
@@ -2297,6 +2311,7 @@ export async function runWebChat(
   requestedModel?: string,
   requestedThinking?: string,
   onStatus?: (status: WebChatStatus) => void,
+  onStep?: (step: WebChatStep) => void,
 ): Promise<WebChatResult> {
   const pi = resolvePiBinary();
   const sessionId = requestedSessionId && /^[A-Za-z0-9_-]{1,100}$/.test(requestedSessionId)
@@ -2334,6 +2349,10 @@ export async function runWebChat(
 
     onStatus?.({ kind: "starting" });
     let pending = "";
+    // Accumulate streamed thinking / tool-argument text so each step can be
+    // emitted once, complete, instead of as hundreds of tiny deltas.
+    let thinkingBuffer = "";
+    const toolArgs = new Map<string, { toolName?: string; args: string }>();
     const handleEvent = (line: string) => {
       let event: any;
       try {
@@ -2345,12 +2364,50 @@ export async function runWebChat(
         onStatus?.({ kind: "tool", toolName: typeof event.toolName === "string" ? event.toolName : undefined });
         return;
       }
+      if (event.type === "tool_execution_end") {
+        const result = event.result?.content;
+        const text = Array.isArray(result)
+          ? result.filter((part: any) => part?.type === "text" && part.text).map((part: any) => part.text).join("\n")
+          : "";
+        onStep?.({
+          kind: "tool_result",
+          toolName: typeof event.toolName === "string" ? event.toolName : undefined,
+          text: text.length > 4000 ? `${text.slice(0, 4000)}…` : text,
+          isError: !!event.isError,
+        });
+        return;
+      }
       if (event.type !== "message_update") return;
       const inner = event.assistantMessageEvent;
       if (!inner || typeof inner.type !== "string") return;
-      if (inner.type === "thinking_start") onStatus?.({ kind: "thinking" });
-      else if (inner.type === "toolcall_start") onStatus?.({ kind: "tool", toolName: typeof inner.toolName === "string" ? inner.toolName : undefined });
-      else if (inner.type === "text_start") onStatus?.({ kind: "responding" });
+      if (inner.type === "thinking_start") {
+        thinkingBuffer = "";
+        onStatus?.({ kind: "thinking" });
+      } else if (inner.type === "thinking_delta" && typeof inner.delta === "string") {
+        thinkingBuffer += inner.delta;
+      } else if (inner.type === "thinking_end") {
+        const text = typeof inner.content === "string" && inner.content ? inner.content : thinkingBuffer;
+        thinkingBuffer = "";
+        if (text.trim()) onStep?.({ kind: "thinking", text: text.length > 8000 ? `${text.slice(0, 8000)}…` : text });
+      } else if (inner.type === "toolcall_start") {
+        const toolName = typeof inner.toolName === "string" ? inner.toolName : undefined;
+        if (typeof inner.id === "string") toolArgs.set(inner.id, { toolName, args: "" });
+        onStatus?.({ kind: "tool", toolName });
+      } else if (inner.type === "toolcall_delta" && typeof inner.delta === "string") {
+        const entry = [...toolArgs.values()].at(-1);
+        if (entry) entry.args += inner.delta;
+      } else if (inner.type === "toolcall_end") {
+        const call = inner.toolCall ?? {};
+        const id = typeof call.id === "string" ? call.id : undefined;
+        const entry = id ? toolArgs.get(id) : [...toolArgs.values()].at(-1);
+        const args = call.args !== undefined ? JSON.stringify(call.args) : (entry?.args ?? "");
+        if (id) toolArgs.delete(id);
+        onStep?.({
+          kind: "tool",
+          toolName: typeof call.name === "string" ? call.name : entry?.toolName,
+          args: args.length > 2000 ? `${args.slice(0, 2000)}…` : args,
+        });
+      } else if (inner.type === "text_start") onStatus?.({ kind: "responding" });
       else if (inner.type === "text_delta" && typeof inner.delta === "string") {
         stdout += inner.delta;
         onChunk?.(inner.delta);

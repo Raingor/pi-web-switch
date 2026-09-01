@@ -3,6 +3,9 @@
 
 const en: Record<string, string> = {
   "chat.input_placeholder": "Ask anything",
+  "chat.step_thinking": "Thinking",
+  "chat.step_tool": "Tool call: {0}",
+  "chat.step_result": "Tool result: {0}",
   "chat.usage_title": "Session usage",
   "chat.usage_collapse": "Collapse usage panel",
   "chat.usage_expand": "Expand usage panel",

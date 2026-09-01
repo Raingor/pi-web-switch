@@ -23,6 +23,7 @@ import {
   Pencil,
   Send,
   Square,
+  Wrench,
   X,
   Sun,
   Moon,
@@ -32,13 +33,20 @@ import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n";
 import { useConfigStore } from "@/store/config-store";
-import { useSessionUsage } from "@/hooks/session-usage";
 
 interface Message {
   id?: string;
   role: "user" | "assistant";
   text: string;
   kind?: "text" | "tool";
+}
+/** A streamed step of pi's work shown between the prompt and the answer. */
+interface RunStep {
+  kind: "thinking" | "tool" | "tool_result";
+  text?: string;
+  toolName?: string;
+  args?: string;
+  isError?: boolean;
 }
 interface SessionHistory {
   messages: Message[];
@@ -150,6 +158,8 @@ export function ChatPage() {
   // Session usage panel (floating, right side): tokens, cache, context share.
   const [sessionUsage, setSessionUsage] = useState<SessionUsage | null>(null);
   const [usageOpen, setUsageOpen] = useState(true);
+  // Live steps for the in-flight turn (thinking / tool calls / tool results).
+  const [runSteps, setRunSteps] = useState<RunStep[]>([]);
   const defaultModelRef =
     settings?.defaultProvider && settings.defaultModel
       ? `${settings.defaultProvider}/${settings.defaultModel}`
@@ -403,6 +413,7 @@ export function ChatPage() {
     setPrompt("");
     setRunning(true);
     setRunStatus({ kind: "starting" });
+    setRunSteps([]);
     try {
       const res = await fetch("/api/pi/chat", {
         method: "POST",
@@ -441,6 +452,8 @@ export function ChatPage() {
           const payload = JSON.parse(data);
           if (eventType === "delta") append(payload);
           if (eventType === "status") setRunStatus(payload);
+          if (eventType === "step")
+            setRunSteps((steps) => [...steps, payload as RunStep]);
           if (eventType === "done") {
             preserveMessagesAfterCreate.current = true;
             setSearchParams({ session: payload.sessionId }, { replace: true });
@@ -561,6 +574,7 @@ export function ChatPage() {
         <small>{sessionId ? "继续会话" : "本地工作区"}</small>
       </div>
       <div className="codex-message-pane">
+        <div className="codex-message-column">
         <div
           ref={messagesRef}
           onScroll={updateScrollToBottomVisibility}
@@ -734,6 +748,48 @@ export function ChatPage() {
               </div>
             ),
           )}
+          {runSteps.length > 0 && (
+            <div className="codex-run-steps">
+              {runSteps.map((step, stepIndex) => (
+                <details
+                  key={stepIndex}
+                  className={cn(
+                    "codex-run-step",
+                    step.kind === "thinking" && "is-thinking",
+                    step.isError && "is-error",
+                  )}
+                >
+                  <summary>
+                    {step.kind === "thinking" ? (
+                      <>
+                        <BrainCircuit className="h-3.5 w-3.5" />
+                        <span>{t("chat.step_thinking")}</span>
+                      </>
+                    ) : step.kind === "tool" ? (
+                      <>
+                        <Wrench className="h-3.5 w-3.5" />
+                        <span>
+                          {t("chat.step_tool", step.toolName ?? "tool")}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        {step.isError ? (
+                          <X className="h-3.5 w-3.5" />
+                        ) : (
+                          <Check className="h-3.5 w-3.5" />
+                        )}
+                        <span>
+                          {t("chat.step_result", step.toolName ?? "tool")}
+                        </span>
+                      </>
+                    )}
+                  </summary>
+                  <pre>{step.text || step.args || ""}</pre>
+                </details>
+              ))}
+            </div>
+          )}
           {running && runStatus && runStatus.kind !== "responding" && (
             <div className="codex-run-status">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -760,6 +816,7 @@ export function ChatPage() {
             <ArrowDown className="h-4 w-4" />
           </button>
         )}
+        </div>
         {sessionUsage && (
           <aside
             className={cn("codex-usage-panel", !usageOpen && "is-collapsed")}

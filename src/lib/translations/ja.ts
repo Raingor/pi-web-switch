@@ -2,6 +2,9 @@
 
 const ja: Record<string, string> = {
   "chat.input_placeholder": "何でも質問してください",
+  "chat.step_thinking": "思考過程",
+  "chat.step_tool": "ツール呼び出し: {0}",
+  "chat.step_result": "ツール結果: {0}",
   "chat.usage_title": "セッション使用量",
   "chat.usage_collapse": "使用量パネルを閉じる",
   "chat.usage_expand": "使用量パネルを開く",

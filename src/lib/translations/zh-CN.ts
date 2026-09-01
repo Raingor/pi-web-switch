@@ -2,6 +2,9 @@
 
 const zhCN: Record<string, string> = {
   "chat.input_placeholder": "询问任何问题",
+  "chat.step_thinking": "思考过程",
+  "chat.step_tool": "调用工具：{0}",
+  "chat.step_result": "工具结果：{0}",
   "chat.usage_title": "会话用量",
   "chat.usage_collapse": "收起用量面板",
   "chat.usage_expand": "展开用量面板",

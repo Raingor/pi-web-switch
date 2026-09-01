@@ -2,6 +2,9 @@
 
 const zhTW: Record<string, string> = {
   "chat.input_placeholder": "詢問任何問題",
+  "chat.step_thinking": "思考過程",
+  "chat.step_tool": "呼叫工具：{0}",
+  "chat.step_result": "工具結果：{0}",
   "chat.usage_title": "會話用量",
   "chat.usage_collapse": "收起用量面板",
   "chat.usage_expand": "展開用量面板",

@@ -56,6 +56,10 @@ function piApiPlugin(): Plugin {
             res.end(JSON.stringify(status));
           });
         },
+        "GET /api/pi/chat/active"(_, res) {
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ sessionIds: pi.listActiveWebChats() }));
+        },
         "GET /api/pi/session-usage"(req, res) {
           const sessionId = new URL(req.url ?? "", "http://localhost").searchParams.get("session") ?? "";
           const usage = pi.readSessionUsage(sessionId);
@@ -162,7 +166,7 @@ function piApiPlugin(): Plugin {
               res.setHeader("Cache-Control", "no-cache, no-transform");
               res.setHeader("Connection", "keep-alive");
               const send = (event: string, data: unknown) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-              const result = await pi.runWebChat(prompt.trim(), sessionId, (chunk) => send("delta", chunk), projectPath, model, thinking, (status) => send("status", status));
+              const result = await pi.runWebChat(prompt.trim(), sessionId, (chunk) => send("delta", chunk), projectPath, model, thinking, (status) => send("status", status), (step) => send("step", step));
               if (result.error) send("error", result.error);
               else send("done", { sessionId: result.sessionId });
               res.end();
