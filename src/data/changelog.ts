@@ -10,6 +10,17 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.9.0",
+    date: "2026-09-02",
+    itemKeys: [
+      "changelog.0_9_0_1",
+      "changelog.0_9_0_2",
+      "changelog.0_9_0_3",
+      "changelog.0_9_0_4",
+      "changelog.0_9_0_5",
+    ],
+  },
+  {
     version: "0.8.3",
     date: "2026-08-31",
     itemKeys: ["changelog.0_8_3_1", "changelog.0_8_3_2"],
