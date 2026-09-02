@@ -9,6 +9,7 @@ import type {
   CustomProviderConfig,
 } from "@/types";
 import { BUILTIN_PROVIDERS } from "@/data/builtin-providers";
+import { mergePiSettings } from "@/lib/pi-settings";
 
 // ─── API Helper ──────────────────────────────────────────
 
@@ -288,7 +289,7 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
   updateSettings: async (partial) => {
     const { settings } = get();
     if (!settings) return false;
-    const updated = { ...settings, ...partial };
+    const updated = mergePiSettings(settings, partial);
     const ok = await apiPost("/settings", updated);
     if (ok) set({ settings: updated });
     return ok;

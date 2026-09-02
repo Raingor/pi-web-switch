@@ -2,7 +2,6 @@ import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { useConfigStore } from "@/store/config-store";
 import { I18nProvider } from "@/lib/i18n";
-import { UiModeProvider } from "@/lib/ui-mode";
 import { useTranslation } from "@/lib/i18n";
 import translations from "@/lib/translations";
 import App from "@/App";
@@ -93,11 +92,9 @@ function InitGate({ children }: { children: React.ReactNode }) {
 function Root() {
   return (
     <I18nProvider translations={translations}>
-      <UiModeProvider>
-        <InitGate>
-          <App />
-        </InitGate>
-      </UiModeProvider>
+      <InitGate>
+        <App />
+      </InitGate>
     </I18nProvider>
   );
 }

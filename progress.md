@@ -52,6 +52,21 @@
 | 2026-08-31 | Chat navigation build failed: missing `MessageSquare` import | 1 | Added the lucide import |
 | 2026-08-31 | Usage-range build failed: custom range reassigns `toDate` | 1 | Restored mutable `toDate` for the custom end date |
 
+## Session: 2026-09-02
+
+### Phase 14: Pi CLI settings parity
+
+- **Status:** complete
+- Added the requirement to expose Pi's interactive `/settings` options in the basic web settings panel.
+- Began tracing the current local Pi `0.84.4` settings selector and persisted config keys.
+- Enumerated the current `/settings` selector and mapped its callbacks to `settings.json` fields, including all nested objects and fullscreen options.
+- Added a dedicated CLI Settings tab covering context/message delivery, images/terminal, network/startup, security/session tree, fullscreen TUI, warnings, and per-model thinking overrides.
+- Corrected `defaultProjectTrust` from the invalid web value `prompt` to Pi's current `ask | always | never` enum.
+- Added deep settings merge regression tests so editing one nested CLI preference cannot erase sibling values.
+- Added search-first model override selection to keep very large provider catalogs usable.
+- Reversible browser write test passed and restored the exact original `settings.json`; browser console is clean.
+- Final verification: TypeScript passed, 62 unit tests passed, and the Vite production build passed (existing large-chunk warning only).
+
 ## 5-Question Reboot Check
 
 | Question | Answer |

@@ -6,7 +6,7 @@ Verify and correct the usage-statistics date-range calculations, then build a br
 
 ## Current Phase
 
-Phase 5 — Verification and delivery
+Phase 14 — Pi CLI settings parity complete
 
 ## Phases
 
@@ -96,6 +96,14 @@ Phase 5 — Verification and delivery
 ### Phase 13: Stable project ordering
 
 - [x] Replace activity-based project-group sorting with stable folder ordering.
+- **Status:** complete
+
+### Phase 14: Pi CLI settings parity
+
+- [x] Enumerate the active Pi version's `/settings` menu and exact `settings.json` keys.
+- [x] Add safe read/write API support while preserving unrelated settings.
+- [x] Add a dedicated CLI Settings panel with matching controls and descriptions.
+- [x] Verify persistence with a reversible browser write, unit tests, and production build.
 - **Status:** complete
 
 ## Key Questions

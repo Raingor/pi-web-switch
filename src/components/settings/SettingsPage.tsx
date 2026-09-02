@@ -9,10 +9,13 @@ import {
   parseImportFile,
   saveLocalBackup,
 } from "@/lib/config";
-import type { PiConfig, UpdateCheckResult } from "@/types";
+import type { PiConfig, PiSettings, UpdateCheckResult } from "@/types";
 import { cn } from "@/lib/utils";
 import { RECOMMENDED_PACKAGES } from "@/data/recommended-packages";
 import { PackageBrowser } from "./PackageBrowser";
+import { SkillsPage } from "./SkillsPage";
+import { CommandsPage } from "./CommandsPage";
+import { PiCliSettingsPage } from "./PiCliSettingsPage";
 import {
   Download,
   Upload,
@@ -29,9 +32,12 @@ import {
   CloudDownload,
   RefreshCw,
   ZoomIn,
+  Sparkles,
+  Command,
+  Terminal,
 } from "lucide-react";
 
-type SettingsTab = "appearance" | "models" | "advanced";
+type SettingsTab = "appearance" | "models" | "cli" | "skills" | "commands" | "advanced";
 
 // Visual palette previews for the theme swatch picker (mirrors pi-desktop).
 const THEME_SWATCHES: {
@@ -284,6 +290,9 @@ export function SettingsPage() {
   const tabs: { key: SettingsTab; icon: typeof Palette; label: string }[] = [
     { key: "appearance", icon: Palette, label: t("settings.appearance") },
     { key: "models", icon: LayoutGrid, label: t("settings.tab_models") },
+    { key: "cli", icon: Terminal, label: "CLI 设置" },
+    { key: "skills", icon: Sparkles, label: "Skills" },
+    { key: "commands", icon: Command, label: "命令" },
     { key: "advanced", icon: Wrench, label: t("settings.tab_advanced") },
   ];
 
@@ -458,7 +467,7 @@ export function SettingsPage() {
             <SettingRow label={t("settings.default_thinking")}>
               <select
                 value={settings?.defaultThinkingLevel ?? "medium"}
-                onChange={(e) => updateSettings({ defaultThinkingLevel: e.target.value })}
+                onChange={(e) => updateSettings({ defaultThinkingLevel: e.target.value as PiSettings["defaultThinkingLevel"] })}
                 className={cn(selectCls, "w-56")}
               >
                 {["off", "minimal", "low", "medium", "high", "xhigh"].map((l) => (
@@ -468,11 +477,11 @@ export function SettingsPage() {
             </SettingRow>
             <SettingRow label={t("settings.project_trust")}>
               <select
-                value={settings?.defaultProjectTrust ?? "prompt"}
-                onChange={(e) => updateSettings({ defaultProjectTrust: e.target.value })}
+                value={settings?.defaultProjectTrust ?? "ask"}
+                onChange={(e) => updateSettings({ defaultProjectTrust: e.target.value as PiSettings["defaultProjectTrust"] })}
                 className={cn(selectCls, "w-56")}
               >
-                {["prompt", "always", "never"].map((v) => (
+                {["ask", "always", "never"].map((v) => (
                   <option key={v} value={v}>{v.charAt(0).toUpperCase() + v.slice(1)}</option>
                 ))}
               </select>
@@ -480,6 +489,12 @@ export function SettingsPage() {
           </Card>
         </div>
       )}
+
+      {activeTab === "skills" && <SkillsPage />}
+
+      {activeTab === "commands" && <CommandsPage />}
+
+      {activeTab === "cli" && <PiCliSettingsPage />}
 
       {/* ── Advanced ─────────────────────────────────────── */}
       {activeTab === "advanced" && (

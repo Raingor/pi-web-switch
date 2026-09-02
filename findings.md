@@ -63,3 +63,16 @@
 ## Visual/Browser Findings
 
 - No visual inspection required yet.
+
+## Pi CLI settings parity
+
+- User requires the settings shown by Pi's interactive `/settings` command to be editable from the web panel.
+- The implementation must follow the active local Pi `0.84.4` package rather than inventing unrelated preferences.
+- Existing web settings already cover theme and some defaults; the new panel should map the remaining CLI settings to their exact persisted keys and preserve unknown fields.
+- Pi `0.84.4` exposes settings for compaction; image display/resize/blocking; skill commands; editor/terminal layout; message steering/follow-up delivery; provider transport and HTTP idle timeout; thinking visibility; Mermaid rendering; cache/changelog/startup/telemetry notices; project trust; escape/tree behavior; warning controls; per-model thinking overrides; TUI/fullscreen behavior; and theme.
+- Exact nested keys include `compaction.enabled`, `terminal.showImages`, `terminal.imageWidthCells`, `terminal.clearOnShrink`, `terminal.showTerminalProgress`, `images.autoResize`, `images.blockImages`, `markdown.mermaid`, and `warnings.anthropicExtraUsage`.
+- Pi uses `defaultProjectTrust: "ask" | "always" | "never"`; the existing web selector's `"prompt"` fallback is not a valid current Pi value and should be corrected while adding parity.
+- HTTP idle timeout choices are 30 seconds, 1 minute, 2 minutes, 5 minutes, and disabled (`0`).
+- The web store previously shallow-merged settings; updating one nested terminal/image/warning value could therefore erase its siblings before writing the complete JSON document. `mergePiSettings` now preserves all known nested groups, including nested retry-provider fields.
+- The initial per-model picker exposed more than one thousand catalog models at once. A search-first picker now limits the rendered list to 80 matching/pinned models while retaining existing overrides.
+- Browser persistence verification changed `terminal.showImages`, confirmed `terminal.showTerminalProgress` remained intact, then restored the exact original settings document. The final settings page has no browser console warnings or errors.

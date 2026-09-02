@@ -44,6 +44,14 @@ function piApiPlugin(): Plugin {
             res.end(JSON.stringify({ success: ok }));
           });
         },
+        "GET /api/pi/skills"(_, res) {
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ skills: pi.listLocalSkills() }));
+        },
+        "GET /api/pi/commands"(_, res) {
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ commands: pi.listPiBuiltinCommands() }));
+        },
         "GET /api/pi/auth"(_, res) {
           const data = pi.readAuth();
           res.setHeader("Content-Type", "application/json");
