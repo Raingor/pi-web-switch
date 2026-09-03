@@ -137,34 +137,31 @@ npm run preview
 
 The dev server automatically serves pi configuration via Vite middleware at `/api/pi/*` — no separate backend process needed.
 
-## 🖥️ Desktop App (Electron)
+## 🖥️ Desktop App — pi-desktop
 
-pi-web-switch also runs as a **macOS menu bar app** (and a Windows/Linux tray app) — the app lives in your menu bar, and a single click on the tray icon pops up a compact usage summary (today's tokens / cost / requests + a 7-day sparkline + top providers). The full Dashboard is still available from the tray menu or by double-clicking the tray icon.
+pi-web-switch runs in the browser. If you want a **native macOS app** instead, use its sister project:
 
-```bash
-# Run in development (Vite dev server + Electron with HMR)
-npm run electron:dev
+> **[pi-desktop](https://github.com/Raingor/pi-desktop)** — a chat-first desktop client (Electron 43) derived from this project.
+> The main window is dedicated to conversation (project-grouped session list + chat area) and every configuration page lives in a separate full-screen settings workspace (General / Usage / Providers & Models / Subagents / Speed Test / Sessions / Memory).
+>
+> Beyond what this project offers, pi-desktop adds:
+> - **Menu bar residency** — click the tray icon for a usage popover (today / last 7 days tokens, cost, requests, mini sparkline, top providers) plus **official OpenAI Codex quota** (5-hour and weekly windows with remaining %, countdown, and exact reset time)
+> - **15 interface styles** — whole-UI reskinning via `html[data-style]` tokens: 9 pi originals plus 6 editor-assistant palettes (VS Code Dark Modern / Kiro / Claude / Codex / Gemini / Grok)
+> - **Model restore on session open** — reads the provider/model/thinking level back from session history, falling back to defaults when a model is no longer available
+> - **Session rename in the sidebar** — writes pi's native `session_info`, so `pi --resume` shows the same name in the terminal
+> - **Single-instance lock + local API cross-origin protection** — Host/Origin/Content-Type checks against DNS rebinding and form-style CSRF
+>
+> Download: **[Releases](https://github.com/Raingor/pi-desktop/releases/latest)** (x64 / arm64 DMG + ZIP). Not published to npm.
 
-# Build installers (DMG + ZIP for macOS, NSIS for Windows, AppImage for Linux) into release/
-npm run electron:build
+**Both read and write the same `~/.pi/agent/` config**, so a provider, model, or memory edited on either side takes effect immediately in the other and in the terminal `pi`. They can be used side by side without conflict.
 
-# Preview the production build without packaging
-npm run electron:preview
-```
-
-### 🍹 macOS menu bar mode
-
-The packaged macOS app runs as a **menu bar-only** app — it does not appear in the Dock, and `Cmd+Q` quits from the tray menu. This is wired in via `LSUIElement = true` in `electron-builder`'s `extendInfo`. In dev (`electron:dev`) the Dock icon still shows because that Info.plist key only applies to packaged builds; the tray icon works in both modes.
-
-| Tray interaction | What happens |
-|------------------|--------------|
-| Click | Toggle the usage popup (today + 7d tokens / cost / requests, sparkline, top providers) |
-| Right-click | Context menu: open Dashboard, refresh usage, quit |
-| Menu → "打开 Dashboard" | Open the full React Dashboard window |
-
-The popup auto-refreshes every 30 seconds while visible. The tray icon is a 16×16 template PNG (`build/trayIconTemplate.png`) that adapts to light/dark menu bars; regenerate it with `npm run tray:icon`.
-
-App icons live in `build/` (`icon.icns` / `icon.ico` / `icon.png`); in development the macOS dock icon is set at runtime from `public/icon-512.png`.
+| | pi-web-switch (this project) | pi-desktop |
+|---|---|---|
+| Form | Browser panel (Vite dev server) | Native macOS app (Electron) |
+| Focus | Configuration management — Dashboard / Providers / Sessions / Memory side by side | Chat-first — conversation in the main window, config in a settings workspace |
+| Menu bar | — | Tray popover with usage + Codex quota |
+| Themes | Light / Dark / System | 15 full interface styles |
+| Install | `npm run dev`, or `npm:@raingor/pi-web-switch` as a pi package | DMG / ZIP from Releases |
 
 ## 🏗️ Tech Stack
 
@@ -185,46 +182,48 @@ App icons live in `build/` (`icon.icns` / `icon.ico` / `icon.png`); in developme
 pi-web-switch/
 ├── index.html
 ├── package.json
-├── vite.config.ts          # Vite config + pi API plugin (middleware) + popup entry
+├── vite.config.ts          # Vite config + pi API plugin (middleware)
 ├── tsconfig.json
 ├── server/
 │   └── pi-reader.ts        # Server-side module: reads ~/.pi/agent/ files + parses sessions
-├── electron/               # Desktop app (macOS menu-bar / tray)
-│   ├── main.ts             # Main process: tray, popup window, IPC, local API server
-│   ├── api-server.ts       # Local HTTP server serving dist/ + /api/pi/* in packaged mode
-│   ├── preload.ts          # contextBridge: settings/auth/models/usage IPC
-│   ├── popup.html          # Menu-bar popup UI
-│   └── popup-render.ts     # Popup renderer (today/7d tokens, sparkline, top providers)
-├── scripts/
-│   └── generate-tray-icon.mjs  # Regenerates build/trayIconTemplate.png
-├── build/
-│   ├── trayIconTemplate.png    # 32x32 menu-bar template icon
-│   └── icon.icns / icon.ico / icon.png
+├── pi-package/
+│   ├── index.ts            # Extension entry: /pi-switch and /pi-usage commands
+│   └── skills/
 ├── public/
 │   └── pi.svg
 └── src/
     ├── main.tsx            # Entry point + theme sync + init gate + i18n provider
-    ├── App.tsx             # Router setup (6 routes)
+    ├── App.tsx             # Router setup
     ├── index.css           # Tailwind + CSS theme variables (light/dark)
     ├── types/index.ts      # All TypeScript interfaces
     ├── data/
-    │   └── builtin-providers.ts  # Hardcoded built-in provider definitions
+    │   ├── builtin-providers.ts   # Static built-in provider fallback catalog
+    │   ├── model-catalog.ts       # Smart model catalog + metadata autofill
+    │   └── changelog.ts           # Version changelog for the "What's new" dialog
     ├── store/
     │   └── config-store.ts # Zustand store (fetches from /api/pi/*)
+    ├── hooks/
+    │   └── useSessionUsage.ts     # Live session token/cost polling
     ├── lib/
     │   ├── utils.ts        # Formatting helpers (tokens, cost with USD/CNY)
     │   ├── i18n.tsx        # Multi-language system (React Context + hook)
     │   ├── currency.ts     # Currency switching (USD/CNY toggle)
     │   ├── config.ts       # Config import/export helpers
+    │   ├── pi-settings.ts  # Nested settings merge (keeps sibling CLI values)
+    │   ├── models-json.ts  # models.json payload builders (keeps disabled providers)
+    │   ├── provider-import.ts     # Freeform provider/key-pool import parser
     │   └── translations/   # Translation files (en, zh-CN, zh-TW, ja)
     └── components/
-        ├── layout/          # AppShell, Sidebar (6 nav items + language switcher)
+        ├── layout/          # AppShell, BasicSidebar (nav + language switcher)
         ├── ui/              # StatCard, Badge, Modal, EmptyState
+        ├── help/            # HelpButton, ChangelogButton
         ├── dashboard/       # DashboardPage + charts (hourly/daily granularity)
-        ├── models/          # ModelsPage + forms
-        ├── providers/       # ProvidersPage + forms
+        ├── chat/            # ChatPage (local pi conversation workspace)
+        ├── providers/       # ProvidersModelsPage + forms
+        ├── speedtest/       # ModelSpeedTestPage
+        ├── subagents/       # SubagentsPage (agents, chains, run history)
         ├── sessions/        # SessionsPage + MemoryPage
-        └── settings/        # SettingsPage
+        └── settings/        # SettingsPage, PiCliSettingsPage, SkillsPage, CommandsPage
 ```
 
 ## 💾 Data Source
@@ -250,7 +249,7 @@ Changes made in the UI are written back to these files in real time — the pi a
 
 ## 🧩 API Routes
 
-These endpoints at `/api/pi/*` are served by the Vite middleware in dev, and by the built-in HTTP server (`electron/api-server.ts`) in the packaged app — so the frontend works identically in both modes:
+These endpoints at `/api/pi/*` are served by the Vite middleware, so the frontend talks to your local pi install with no separate backend process:
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -313,7 +312,7 @@ Once installed, the following commands are available in your pi session:
 | `/pi-switch status` | Check if the dashboard is running |
 | `/pi-usage` | Print a quick usage summary (today + 7 days) in the terminal — tokens / cost / requests / daily sparkline, without launching the dashboard |
 
-The `/pi-usage` command reads `~/.pi/agent/sessions/*.jsonl` directly and aggregates today + last-7-days stats, so you can see your usage at a glance from any pi session. It mirrors what the macOS menu bar popup shows.
+The `/pi-usage` command reads `~/.pi/agent/sessions/*.jsonl` directly and aggregates today + last-7-days stats, so you can see your usage at a glance from any pi session.
 
 ### Package Structure
 
@@ -344,6 +343,7 @@ When reporting an issue, please include:
 
 ## 🔗 Links
 
+- **Sister project (native macOS app):** [github.com/Raingor/pi-desktop](https://github.com/Raingor/pi-desktop) · [Releases](https://github.com/Raingor/pi-desktop/releases/latest)
 - **Homepage:** [raingor.github.io/my-blog](https://raingor.github.io/my-blog/)
 - **GitHub:** [github.com/Raingor](https://github.com/Raingor)
 

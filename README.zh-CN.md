@@ -124,34 +124,31 @@ npm run build  # 构建生产版本
 npm run preview # 预览生产构建
 ```
 
-## 🖥️ 桌面应用（Electron）
+## 🖥️ 姊妹项目 — pi-desktop
 
-pi-web-switch 同样提供 **macOS 菜单栏应用**（以及 Windows/Linux 托盘应用）—— 应用驻留在顶部菜单栏，点击托盘图标即可弹出使用量摘要（今日 tokens / 成本 / 请求数 + 7 天 sparkline + Top 提供商）。完整仪表盘仍可从托盘菜单或双击图标打开。
+pi-web-switch 跑在浏览器里。如果你想要的是 **原生 macOS 应用**，可以用它的姊妹项目：
 
-```bash
-# 开发模式运行（Vite 开发服务器 + Electron，支持 HMR）
-npm run electron:dev
+> **[pi-desktop](https://github.com/Raingor/pi-desktop)** — 由本项目衍生的聊天优先桌面客户端（Electron 43）。
+> 主窗口专注对话（按项目分组的会话列表 + 对话区），所有配置收进独立的全屏设置工作台（通用 / 概览与使用统计 / 提供商与模型 / 子代理 / 模型测速 / 会话管理 / 记忆）。
+>
+> 相比本项目，pi-desktop 额外提供：
+> - **菜单栏常驻** — 单击托盘图标弹出用量浮窗（今日 / 近 7 日 token、成本、请求数、迷你折线、Top 提供商），并显示 **OpenAI Codex 官方额度**（5 小时窗口 + 每周窗口的剩余百分比、倒计时、准确重置时间）
+> - **15 套整体界面风格** — 通过 `html[data-style]` 令牌整体换肤：9 套 pi 原创 + 6 套编辑器助手配色（VS Code Dark Modern / Kiro / Claude / Codex / Gemini / Grok）
+> - **打开会话自动恢复模型** — 从会话历史读回当时的 provider/model/thinking，模型不可用时回落默认值
+> - **侧栏会话重命名** — 写 pi 原生 `session_info`，终端 `pi --resume` 看到同一个名字
+> - **单实例锁 + 本地 API 跳源防护** — Host/Origin/Content-Type 三重校验，防 DNS rebinding 与表单型 CSRF
+>
+> 下载：**[Releases](https://github.com/Raingor/pi-desktop/releases/latest)**（x64 / arm64 DMG + ZIP）。未发布到 npm。
 
-# 构建安装包（macOS DMG+ZIP / Windows NSIS / Linux AppImage）到 release/
-npm run electron:build
+**两者读写同一份 `~/.pi/agent/` 配置**，在任一端改的提供商、模型、记忆，在另一端和终端 `pi` 里都立刻生效，可并存使用不冲突。
 
-# 不打包预览生产构建
-npm run electron:preview
-```
-
-### 🍹 macOS 菜单栏模式
-
-打包后的 macOS 应用以 **纯菜单栏应用** 运行 —— 不出现在 Dock 中，`Cmd+Q` 从托盘菜单退出。通过 `electron-builder` 的 `extendInfo` 中 `LSUIElement = true` 实现。开发模式下（`electron:dev`）Dock 图标仍会显示（该 Info.plist 键仅对打包构建生效），托盘图标两种模式都可用。
-
-| 托盘交互 | 行为 |
-|----------|------|
-| 点击 | 切换使用量弹窗（今日 + 7 天 tokens / 成本 / 请求数、sparkline、Top 提供商） |
-| 右键 | 上下文菜单：打开 Dashboard、刷新使用量、退出 |
-| 菜单 → "打开 Dashboard" | 打开完整 React Dashboard 窗口 |
-
-弹窗可见时每 30 秒自动刷新。托盘图标是 32×32 template PNG（`build/trayIconTemplate.png`），自动适配明暗菜单栏；用 `npm run tray:icon` 重新生成。
-
-应用图标位于 `build/`（`icon.icns` / `icon.ico` / `icon.png`）；开发模式下会在运行时从 `public/icon-512.png` 设置 macOS 程序坞图标。
+| | pi-web-switch（本项目） | pi-desktop |
+|---|---|---|
+| 形态 | 浏览器面板（Vite 开发服务器） | 原生 macOS 应用（Electron） |
+| 侧重 | 配置管理 — 仪表盘 / 提供商 / 会话 / 记忆多页并列 | 聊天优先 — 主窗口对话，配置入设置工作台 |
+| 菜单栏 | — | 托盘浮窗（用量 + Codex 额度） |
+| 主题 | 浅色 / 深色 / 跟随系统 | 15 套整体界面风格 |
+| 安装 | `npm run dev`，或作为 pi 扩展包 `npm:@raingor/pi-web-switch` | 从 Releases 下载 DMG / ZIP |
 
 ## 🏗️ 技术栈
 
@@ -182,7 +179,7 @@ pi-web-switch 可安装为 **pi 编码代理扩展**，在 pi 会话中直接启
 | `/pi-switch status` | 查看运行状态 |
 | `/pi-usage` | 在终端打印使用量摘要（今日 + 7 天）—— tokens / 成本 / 请求数 / 每日 sparkline，无需启动仪表盘 |
 
-`/pi-usage` 命令直接读取 `~/.pi/agent/sessions/*.jsonl` 并聚合今日 + 最近 7 天统计，让你在任何 pi 会话中一眼看到使用量。它与 macOS 菜单栏弹窗显示的内容一致。
+`/pi-usage` 命令直接读取 `~/.pi/agent/sessions/*.jsonl` 并聚合今日 + 最近 7 天统计，让你在任何 pi 会话中一眼看到使用量。
 
 ### 包结构
 
@@ -196,12 +193,6 @@ pi-web-switch/
 │           └── SKILL.md   # 使用文档
 ├── server/
 │   └── pi-reader.ts       # 服务端：读取 ~/.pi/agent/ 文件
-├── electron/              # 桌面应用（macOS 菜单栏 / 托盘）
-│   ├── main.ts            # 主进程：托盘、弹窗、IPC、本地 API 服务器
-│   ├── api-server.ts      # 本地 HTTP 服务器（打包模式提供 dist/ + /api/pi/*）
-│   ├── preload.ts         # contextBridge：settings/auth/models/usage IPC
-│   ├── popup.html         # 菜单栏使用量弹窗
-│   └── popup-render.ts    # 弹窗渲染（今日/7 天 tokens、sparkline、Top 提供商）
 └── src/                   # React 前端
 ```
 
@@ -219,6 +210,7 @@ pi-web-switch/
 
 ## 🔗 相关链接
 
+- **姊妹项目（原生 macOS 应用）：** [github.com/Raingor/pi-desktop](https://github.com/Raingor/pi-desktop) · [Releases](https://github.com/Raingor/pi-desktop/releases/latest)
 - **个人主页：** [raingor.github.io/my-blog](https://raingor.github.io/my-blog/)
 - **GitHub：** [github.com/Raingor](https://github.com/Raingor)
 

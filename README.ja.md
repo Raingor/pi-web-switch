@@ -86,34 +86,31 @@ npm run dev    # 開発サーバー起動（~/.pi/agent/ を自動読込）
 npm run build  # プロダクションビルド
 ```
 
-## 🖥️ デスクトップアプリ（Electron）
+## 🖥️ 姉妹プロジェクト — pi-desktop
 
-pi-web-switch は **macOS メニューバーアプリ**（および Windows/Linux トレイアプリ）としても利用可能 — アプリはメニューバーに常駐し、トレイアイコンのクリックで使用量サマリー（今日の tokens / コスト / リクエスト数 + 7 日間の sparkline + Top プロバイダ）がポップアップします。フルダッシュボードはトレイメニュー or ダブルクリックで開けます。
+pi-web-switch はブラウザで動作します。**ネイティブ macOS アプリ** が欲しい場合は、姉妹プロジェクトをご利用ください：
 
-```bash
-# 開発モードで実行（Vite 開発サーバー + Electron、HMR 寂応）
-npm run electron:dev
+> **[pi-desktop](https://github.com/Raingor/pi-desktop)** — 本プロジェクトから派生したチャット優先のデスクトップクライアント（Electron 43）。
+> メインウィンドウは対話専用（プロジェクト別セッション一覧 + チャットエリア）で、設定はすべて独立した全画面設定ワークステーションに集約（一般 / 使用状況 / プロバイダとモデル / サブエージェント / 速度テスト / セッション管理 / メモリ）。
+>
+> 本プロジェクトに加えて、pi-desktop には次の機能があります：
+> - **メニューバー常駐** — トレイアイコンクリックで使用量ポップオーバー（今日 / 直近 7 日の token、コスト、リクエスト数、ミニ折れ線、Top プロバイダ）と **OpenAI Codex 公式クォータ**（5 時間ウィンドウ + 週次ウィンドウの残量、カウントダウン、正確なリセット時刻）を表示
+> - **15 種のインターフェーススタイル** — `html[data-style]` トークンで UI 全体をスキン変更：pi オリジナル 9 種 + エディタアシスタント配色 6 種（VS Code Dark Modern / Kiro / Claude / Codex / Gemini / Grok）
+> - **セッションを開くとモデルを自動復元** — セッション履歴から当時の provider/model/thinking を読み戻し、利用不可なら既定値にフォールバック
+> - **サイドバーでのセッションリネーム** — pi ネイティブの `session_info` に書き込み、ターミナルの `pi --resume` でも同じ名前が見える
+> - **単一インスタンスロック + ローカル API のクロスオリジン保護** — Host/Origin/Content-Type の 3 重検証で DNS rebinding とフォーム型 CSRF を防止
+>
+> ダウンロード：**[Releases](https://github.com/Raingor/pi-desktop/releases/latest)**（x64 / arm64 DMG + ZIP）。npm には未公開。
 
-# インストーラー（macOS DMG+ZIP / Windows NSIS / Linux AppImage）を release/ にビルド
-npm run electron:build
+**両方とも同じ `~/.pi/agent/` 設定を読み書きします**。どちらかで変更したプロバイダー・モデル・メモリはもう一方とターミナルの `pi` に即時反映され、並行して使っても競合しません。
 
-# パッケージ化せずプロダクションビルドをプレビュー
-npm run electron:preview
-```
-
-### 🍹 macOS メニューバーモード
-
-パッケージ化された macOS アプリは **メニューバー専用アプリ** として実行 — Dock に表示されず、`Cmd+Q` でトレイメニューから終了。`electron-builder` の `extendInfo` で `LSUIElement = true` を設定して実装。開発モード（`electron:dev`）では Dock アイコンが表示されます（この Info.plist キーはパッケージビルドにのみ適用）。トレイアイコンは両モードで動作します。
-
-| トレイ操作 | 動作 |
-|------------|------|
-| クリック | 使用量ポップアップの切替（今日 + 7 日 tokens / コスト / リクエスト数、sparkline、Top プロバイダ） |
-| 右クリック | コンテキストメニュー：Dashboard を開く、使用量を更新、終了 |
-| メニュー → "開く Dashboard" | フル React Dashboard ウィンドウを開く |
-
-ポップアップは表示中 30 秒ごとに自動更新。トレイアイコンは 32×32 template PNG（`build/trayIconTemplate.png`）で明暗メニューバーに自動適合；`npm run tray:icon` で再生成。
-
-アプリアイコンは `build/`（`icon.icns` / `icon.ico` / `icon.png`）にあり；開発モードでは実行時に `public/icon-512.png` から macOS の Dock アイコンを設定します。
+| | pi-web-switch（本プロジェクト） | pi-desktop |
+|---|---|---|
+| 形態 | ブラウザパネル（Vite 開発サーバー） | ネイティブ macOS アプリ（Electron） |
+| 主眼 | 設定管理 — ダッシュボード / プロバイダ / セッション / メモリを並列表示 | チャット優先 — メインは対話、設定はワークステーションへ |
+| メニューバー | — | トレイポップオーバー（使用量 + Codex クォータ） |
+| テーマ | ライト / ダーク / システム追従 | 15 種の全体スタイル |
+| 導入 | `npm run dev`、または pi パッケージ `npm:@raingor/pi-web-switch` | Releases から DMG / ZIP |
 
 ## 🏗️ 技術スタック
 
@@ -144,7 +141,7 @@ pi-web-switch は **pi コーディングエージェント拡張** としてイ
 | `/pi-switch status` | 実行状態を確認 |
 | `/pi-usage` | 使用量サマリー（今日 + 7 日）を端末に印字 — tokens / コスト / リクエスト数 / デイリー sparkline、ダッシュボード起動不要 |
 
-`/pi-usage` コマンドは `~/.pi/agent/sessions/*.jsonl` を直接読み込み、今日 + 直近 7 日の統計を集約します。どの pi セッションからでも一目で使用量を確認可能。macOS メニューバーポップアップと同じ内容を表示します。
+`/pi-usage` コマンドは `~/.pi/agent/sessions/*.jsonl` を直接読み込み、今日 + 直近 7 日の統計を集約します。どの pi セッションからでも一目で使用量を確認可能。
 
 ### パッケージ構造
 
@@ -158,12 +155,6 @@ pi-web-switch/
 │           └── SKILL.md   # 使用ドキュメント
 ├── server/
 │   └── pi-reader.ts       # サーバーサイド：~/.pi/agent/ 読み取り
-├── electron/              # デスクトップアプリ（macOS メニューバー / トレイ）
-│   ├── main.ts            # メインプロセス：トレイ、ポップアップ、IPC、ローカル API サーバー
-│   ├── api-server.ts      # ローカル HTTP サーバー（パッケージ版で dist/ + /api/pi/* を提供）
-│   ├── preload.ts         # contextBridge：settings/auth/models/usage IPC
-│   ├── popup.html         # メニューバー使用量ポップアップ
-│   └── popup-render.ts    # ポップアップ描画（今日/7 日 tokens、sparkline、Top プロバイダ）
 └── src/                   # React フロントエンド
 ```
 
@@ -181,6 +172,7 @@ pi-web-switch/
 
 ## 🔗 リンク
 
+- **姉妹プロジェクト（ネイティブ macOS アプリ）：** [github.com/Raingor/pi-desktop](https://github.com/Raingor/pi-desktop) · [Releases](https://github.com/Raingor/pi-desktop/releases/latest)
 - **ホームページ：** [raingor.github.io/my-blog](https://raingor.github.io/my-blog/)
 - **GitHub：** [github.com/Raingor](https://github.com/Raingor)
 

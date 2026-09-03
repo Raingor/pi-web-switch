@@ -10,6 +10,7 @@ import type {
 } from "@/types";
 import { BUILTIN_PROVIDERS } from "@/data/builtin-providers";
 import { mergePiSettings } from "@/lib/pi-settings";
+import { withProviders, withProviderRemoved } from "@/lib/models-json";
 
 // ─── API Helper ──────────────────────────────────────────
 
@@ -381,7 +382,7 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
       ...modelsJson.providers,
       [providerId]: { ...p, models: newModels },
     };
-    const updated = { providers: newProviders };
+    const updated = withProviders(modelsJson, newProviders);
     set({ modelsJson: updated });
     // Persist
     apiPost("/models", updated);
@@ -413,7 +414,7 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
       existingModels.push(updates as Model);
     }
     newProviders[providerId] = { ...newProviders[providerId], models: existingModels };
-    const updated = { providers: newProviders };
+    const updated = withProviders(modelsJson, newProviders);
     set({ modelsJson: updated });
     apiPost("/models", updated);
     const { auth, builtinProviders } = get();
@@ -431,7 +432,7 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
       ...newProviders[providerId],
       models: [...(newProviders[providerId]!.models ?? []), { ...model, enabled: false }],
     };
-    const updated = { providers: newProviders };
+    const updated = withProviders(modelsJson, newProviders);
     set({ modelsJson: updated });
     apiPost("/models", updated);
     const { auth, builtinProviders } = get();
@@ -452,7 +453,7 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
       ...modelsJson.providers,
       [providerId]: { ...p, models: newModels },
     };
-    const updated = { providers: newProviders };
+    const updated = withProviders(modelsJson, newProviders);
     set({ modelsJson: updated });
     apiPost("/models", updated);
     const { auth, builtinProviders } = get();
@@ -465,7 +466,7 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
     const { modelsJson } = get();
     if (!modelsJson) return false;
     const newProviders = { ...modelsJson.providers, [id]: cfg };
-    const updated = { providers: newProviders };
+    const updated = withProviders(modelsJson, newProviders);
     const ok = await apiPost("/models", updated);
     if (ok) {
       set({ modelsJson: updated });
@@ -484,7 +485,7 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
       ...modelsJson.providers,
       [id]: { ...existing, ...cfg },
     };
-    const updated = { providers: newProviders };
+    const updated = withProviders(modelsJson, newProviders);
     const ok = await apiPost("/models", updated);
     if (ok) {
       set({ modelsJson: updated });
@@ -504,7 +505,7 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
     for (const [k, v] of Object.entries(modelsJson.providers)) {
       newProviders[k === oldId ? newId : k] = k === oldId ? { ...existing, ...cfg } : v;
     }
-    const updated = { providers: newProviders };
+    const updated = withProviders(modelsJson, newProviders);
     const ok = await apiPost("/models", updated);
     if (!ok) return false;
     set({ modelsJson: updated });
@@ -537,8 +538,7 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
   removeCustomProvider: async (id) => {
     const { modelsJson } = get();
     if (!modelsJson) return false;
-    const { [id]: _, ...rest } = modelsJson.providers;
-    const updated = { providers: rest };
+    const updated = withProviderRemoved(modelsJson, id);
     const ok = await apiPost("/models", updated);
     if (ok) {
       set({ modelsJson: updated });
