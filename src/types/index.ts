@@ -59,10 +59,6 @@ export type ApiType =
   | "openai-completions"
   | "openai-responses"
   | "anthropic-messages"
-  // OpenAI-compatible generation endpoints (Agnes AI and similar gateways):
-  // images → POST /v1/images/generations, videos → POST /v1/videos
-  | "openai-images"
-  | "openai-videos"
   // Still valid values because pi's builtin catalog uses them, but no longer
   // offered in the provider picker.
   | "google-generative-ai"

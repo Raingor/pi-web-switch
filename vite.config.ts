@@ -479,23 +479,56 @@ function piApiPlugin(): Plugin {
             }
           });
         },
+        "GET /api/pi/agnes-config"(_, res) {
+          // Never echo the key back — the UI only needs to know it is stored.
+          const config = pi.readAgnesConfig();
+          const key: string = config.apiKey;
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({
+            baseUrl: config.baseUrl,
+            hasKey: !!key,
+            maskedKey: key ? (key.length > 12 ? `${key.slice(0, 7)}…${key.slice(-4)}` : "••••••••") : "",
+          }));
+        },
+        "POST /api/pi/agnes-config"(req, res) {
+          let body = "";
+          req.on("data", (chunk: string) => (body += chunk));
+          req.on("end", () => {
+            try {
+              const input = JSON.parse(body) as { apiKey?: string; baseUrl?: string };
+              const ok = pi.writeAgnesConfig(input);
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ success: ok }));
+            } catch {
+              res.statusCode = 400;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ success: false, message: "Invalid request body" }));
+            }
+          });
+        },
         "POST /api/pi/image-generate"(req, res) {
           let body = "";
           req.on("data", (chunk: string) => (body += chunk));
           req.on("end", () => {
             try {
               const input = JSON.parse(body);
-              if (!input?.baseUrl || !input?.model || !input?.prompt) {
-                throw new Error("missing baseUrl, model or prompt");
-              }
-              pi.generateImage(input).then((result: unknown) => {
+              // Credentials stay server-side: the browser only sends generation args.
+              const agnes = pi.readAgnesConfig();
+              const baseUrl = input?.baseUrl || agnes.baseUrl;
+              const apiKey = input?.apiKey || agnes.apiKey;
+              if (!apiKey) throw new Error("missing api key");
+              if (!input?.model || !input?.prompt) throw new Error("missing model or prompt");
+              pi.generateImage({ ...input, baseUrl, apiKey }).then((result: unknown) => {
                 res.setHeader("Content-Type", "application/json");
                 res.end(JSON.stringify(result));
               });
-            } catch {
+            } catch (error) {
               res.statusCode = 400;
               res.setHeader("Content-Type", "application/json");
-              res.end(JSON.stringify({ success: false, message: "Invalid request body" }));
+              res.end(JSON.stringify({
+                success: false,
+                message: error instanceof Error ? error.message : "Invalid request body",
+              }));
             }
           });
         },
@@ -505,36 +538,42 @@ function piApiPlugin(): Plugin {
           req.on("end", () => {
             try {
               const input = JSON.parse(body);
-              if (!input?.baseUrl || !input?.model || !input?.prompt) {
-                throw new Error("missing baseUrl, model or prompt");
-              }
-              pi.createVideoTask(input).then((result: unknown) => {
+              const agnes = pi.readAgnesConfig();
+              const baseUrl = input?.baseUrl || agnes.baseUrl;
+              const apiKey = input?.apiKey || agnes.apiKey;
+              if (!apiKey) throw new Error("missing api key");
+              if (!input?.model || !input?.prompt) throw new Error("missing model or prompt");
+              pi.createVideoTask({ ...input, baseUrl, apiKey }).then((result: unknown) => {
                 res.setHeader("Content-Type", "application/json");
                 res.end(JSON.stringify(result));
               });
-            } catch {
+            } catch (error) {
               res.statusCode = 400;
               res.setHeader("Content-Type", "application/json");
-              res.end(JSON.stringify({ success: false, message: "Invalid request body" }));
+              res.end(JSON.stringify({
+                success: false,
+                message: error instanceof Error ? error.message : "Invalid request body",
+              }));
             }
           });
         },
         "GET /api/pi/video-status"(req, res) {
           // A GET so the UI can poll on an interval without sending a body.
           const params = new URL(req.url ?? "", "http://localhost").searchParams;
-          const baseUrl = params.get("baseUrl") ?? "";
+          const agnes = pi.readAgnesConfig();
+          const baseUrl = params.get("baseUrl") || agnes.baseUrl;
           const videoId = params.get("videoId") ?? "";
-          if (!baseUrl || !videoId) {
+          if (!videoId) {
             res.statusCode = 400;
             res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ success: false, message: "missing baseUrl or videoId" }));
+            res.end(JSON.stringify({ success: false, message: "missing videoId" }));
             return;
           }
           pi.pollVideoTask(
             baseUrl,
             videoId,
             params.get("model") ?? undefined,
-            params.get("apiKey") ?? undefined
+            params.get("apiKey") || agnes.apiKey || undefined
           ).then((result: unknown) => {
             res.setHeader("Content-Type", "application/json");
             res.end(JSON.stringify(result));

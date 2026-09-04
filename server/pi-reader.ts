@@ -3161,6 +3161,52 @@ export async function testModel(
   }
 }
 
+// ─── Agnes Generation Credentials ─────────────────────────
+// The generation zone targets one gateway, so its key lives in its own 0600
+// file instead of models.json — pi never reads it and it is not a chat provider.
+
+const AGNES_CONFIG_FILE = "agnes-config.json";
+const AGNES_DEFAULT_BASE_URL = "https://apihub.agnes-ai.com/v1";
+
+export interface AgnesConfig {
+  apiKey: string;
+  baseUrl: string;
+}
+
+function agnesConfigPath(): string {
+  return piPath(AGNES_CONFIG_FILE);
+}
+
+export function readAgnesConfig(): AgnesConfig {
+  try {
+    if (!existsSync(agnesConfigPath())) return { apiKey: "", baseUrl: AGNES_DEFAULT_BASE_URL };
+    const parsed = JSON.parse(readFileSync(agnesConfigPath(), "utf-8")) as Record<string, unknown>;
+    const apiKey = typeof parsed.apiKey === "string" ? parsed.apiKey.trim() : "";
+    const baseUrl = typeof parsed.baseUrl === "string" && parsed.baseUrl.trim() ? parsed.baseUrl.trim() : AGNES_DEFAULT_BASE_URL;
+    return { apiKey, baseUrl };
+  } catch {
+    return { apiKey: "", baseUrl: AGNES_DEFAULT_BASE_URL };
+  }
+}
+
+/** Persist the generation key with owner-only permissions. */
+export function writeAgnesConfig(config: Partial<AgnesConfig>): boolean {
+  try {
+    const current = readAgnesConfig();
+    const apiKey = typeof config.apiKey === "string" ? config.apiKey.trim() : current.apiKey;
+    const baseUrlInput = typeof config.baseUrl === "string" && config.baseUrl.trim() ? config.baseUrl.trim() : current.baseUrl;
+    const url = new URL(baseUrlInput);
+    if (!/^https?:$/.test(url.protocol)) return false;
+    mkdirSync(PI_DIR, { recursive: true });
+    const payload: AgnesConfig = { apiKey, baseUrl: baseUrlInput };
+    writeFileSync(agnesConfigPath(), JSON.stringify(payload, null, 2), { encoding: "utf-8", mode: 0o600 });
+    chmodSync(agnesConfigPath(), 0o600);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // ─── Image / Video Generation ─────────────────────────────
 // OpenAI-compatible generation endpoints (Agnes AI and similar gateways).
 // Images are synchronous; video is an async task that must be polled.

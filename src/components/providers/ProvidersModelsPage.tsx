@@ -40,8 +40,8 @@ import {
   Wand2,
 } from "lucide-react";
 
-// Selectable API types for the provider picker. Chat APIs first, then the
-// OpenAI-compatible generation endpoints (image / video).
+// Selectable API types for the provider picker — chat APIs only. Image and
+// video generation live in their own Agnes zone (/generate), not here.
 //
 // Google / Bedrock / Mistral were dropped from this list on request. Their
 // values stay valid in `ApiType` because pi's builtin catalog still uses them,
@@ -53,8 +53,6 @@ const API_TYPES: { value: ApiType; label: string }[] = [
   { value: "openai-codex-responses", label: "OpenAI Codex Responses" },
   { value: "azure-openai-responses", label: "Azure OpenAI Responses" },
   { value: "anthropic-messages", label: "Anthropic Messages" },
-  { value: "openai-images", label: "Images · 生图 (/images/generations)" },
-  { value: "openai-videos", label: "Videos · 生视频 (/videos)" },
 ];
 
 /**

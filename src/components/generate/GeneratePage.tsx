@@ -1,8 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Download, Film, Image as ImageIcon, Loader2, Sparkles, Wand2 } from "lucide-react";
-import { useConfigStore } from "@/store/config-store";
+import { useEffect, useRef, useState } from "react";
+import { Check, Download, Eye, EyeOff, Film, Image as ImageIcon, KeyRound, Loader2, Sparkles, Wand2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { Provider } from "@/types";
 
 // Shape returned by /api/pi/image-generate, /video-create and /video-status
 // (see server/pi-reader.ts GenerateResult).
@@ -19,10 +17,18 @@ interface GenerateResult {
   retryable?: boolean;
 }
 
-// Documented tiers/ratios for the OpenAI-compatible images endpoint.
+interface AgnesConfigView {
+  baseUrl: string;
+  hasKey: boolean;
+  maskedKey: string;
+}
+
+// Documented tiers/ratios for the images endpoint.
+const IMAGE_MODELS = ["agnes-image-2.5-flash", "agnes-image-2.1-flash"] as const;
 const IMAGE_SIZES = ["1K", "2K", "3K", "4K"] as const;
 const IMAGE_RATIOS = ["1:1", "3:4", "4:3", "16:9", "9:16", "2:3", "3:2", "21:9"] as const;
 // Videos: Flash tiers only accept 720P, so size is fixed and only ratio varies.
+const VIDEO_MODELS = ["agnes-video-2.5-flash", "agnes-video-2.5"] as const;
 const VIDEO_RATIOS = ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"] as const;
 const VIDEO_SECONDS = ["4", "5", "6", "7", "8", "9", "10", "11", "12"] as const;
 const VIDEO_MODES = [
@@ -35,14 +41,6 @@ const VIDEO_MODES = [
 const POLL_INTERVAL_MS = 8000;
 const DONE_STATES = /^(completed|succeeded|success)$/i;
 const FAILED_STATES = /^(failed|error|cancelled|canceled)$/i;
-
-/** Resolve the key pi itself would use: active pool entry, then apiKey, then auth.json. */
-function resolveProviderKey(provider: Provider | undefined, authKey: string | undefined): string {
-  if (!provider) return "";
-  const pool = provider.apiKeys ?? [];
-  const active = pool.find((entry) => entry.id === provider.activeKeyId) ?? pool[0];
-  return active?.key || provider.apiKey || authKey || "";
-}
 
 const inputCls =
   "w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-100 outline-none placeholder:text-gray-600 focus:border-blue-500";
@@ -67,27 +65,54 @@ function parseLines(raw: string): string[] {
 }
 
 export function GeneratePage() {
-  const { allProviders, auth } = useConfigStore();
   const [tab, setTab] = useState<"image" | "video">("image");
 
-  // Any provider with an endpoint can serve these routes — the generation APIs
-  // are separate from the chat api type stored on the provider.
-  const usableProviders = useMemo(
-    () => allProviders.filter((provider) => !!provider.baseUrl),
-    [allProviders],
-  );
-  const [providerId, setProviderId] = useState("");
-  useEffect(() => {
-    if (usableProviders.some((provider) => provider.id === providerId)) return;
-    setProviderId(usableProviders[0]?.id ?? "");
-  }, [providerId, usableProviders]);
-  const provider = usableProviders.find((entry) => entry.id === providerId);
-  const apiKey = resolveProviderKey(provider, auth?.[providerId]?.key);
+  // ── Agnes credentials ──
+  // The key is stored server-side in ~/.pi/agent/agnes-config.json (0600) and
+  // never sent back to the browser, so requests below carry no credentials.
+  const [config, setConfig] = useState<AgnesConfigView | null>(null);
+  const [keyDraft, setKeyDraft] = useState("");
+  const [showKey, setShowKey] = useState(false);
+  const [savingKey, setSavingKey] = useState(false);
+  const [keySaved, setKeySaved] = useState(false);
+  const [keyError, setKeyError] = useState("");
 
-  const [imageModel, setImageModel] = useState("agnes-image-2.5-flash");
-  const [videoModel, setVideoModel] = useState("agnes-video-2.5-flash");
+  const loadConfig = () => {
+    fetch("/api/pi/agnes-config")
+      .then((res) => res.json())
+      .then((data: AgnesConfigView) => setConfig(data))
+      .catch(() => setConfig({ baseUrl: "", hasKey: false, maskedKey: "" }));
+  };
+  useEffect(loadConfig, []);
+
+  const saveKey = async () => {
+    const apiKey = keyDraft.trim();
+    if (!apiKey) return;
+    setSavingKey(true);
+    setKeyError("");
+    try {
+      const res = await fetch("/api/pi/agnes-config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey }),
+      });
+      const data = (await res.json()) as { success: boolean };
+      if (!data.success) throw new Error();
+      setKeyDraft("");
+      setKeySaved(true);
+      window.setTimeout(() => setKeySaved(false), 2000);
+      loadConfig();
+    } catch {
+      setKeyError("保存失败");
+    } finally {
+      setSavingKey(false);
+    }
+  };
+
+  const ready = !!config?.hasKey;
 
   // ── Image state ──
+  const [imageModel, setImageModel] = useState<string>(IMAGE_MODELS[0]);
   const [imagePrompt, setImagePrompt] = useState("");
   const [imageSize, setImageSize] = useState<string>("1K");
   const [imageRatio, setImageRatio] = useState<string>("1:1");
@@ -97,6 +122,7 @@ export function GeneratePage() {
   const [imageResult, setImageResult] = useState<GenerateResult | null>(null);
 
   // ── Video state ──
+  const [videoModel, setVideoModel] = useState<string>(VIDEO_MODELS[0]);
   const [videoPrompt, setVideoPrompt] = useState("");
   const [videoMode, setVideoMode] = useState<"text" | "keyframe" | "reference">("text");
   const [videoSeconds, setVideoSeconds] = useState<string>("5");
@@ -118,7 +144,7 @@ export function GeneratePage() {
   useEffect(() => stopPolling, []);
 
   const runImage = async () => {
-    if (!provider?.baseUrl || !imageModel.trim() || !imagePrompt.trim()) return;
+    if (!ready || !imageModel.trim() || !imagePrompt.trim()) return;
     setImageBusy(true);
     setImageResult(null);
     try {
@@ -126,8 +152,6 @@ export function GeneratePage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          baseUrl: provider.baseUrl,
-          apiKey,
           model: imageModel.trim(),
           prompt: imagePrompt.trim(),
           size: imageSize,
@@ -145,8 +169,8 @@ export function GeneratePage() {
   };
 
   /** Poll one task tick, then reschedule until it finishes or fails hard. */
-  const pollVideo = (videoId: string, model: string, baseUrl: string) => {
-    const params = new URLSearchParams({ baseUrl, videoId, model, apiKey });
+  const pollVideo = (videoId: string, model: string) => {
+    const params = new URLSearchParams({ videoId, model });
     pollTimer.current = window.setTimeout(async () => {
       let next: GenerateResult;
       try {
@@ -154,41 +178,41 @@ export function GeneratePage() {
         next = (await res.json()) as GenerateResult;
       } catch {
         // Network blip — keep the task alive and try again.
-        pollVideo(videoId, model, baseUrl);
+        pollVideo(videoId, model);
         return;
       }
-      // Rate limits and gateway errors are transient; keep the previous state.
+      // Rate limits and gateway errors are transient; keep showing progress.
       if (!next.success && next.retryable) {
         setVideoResult((prev) => ({ ...(prev ?? {}), ...next, success: true, message: undefined }));
-        pollVideo(videoId, model, baseUrl);
+        pollVideo(videoId, model);
         return;
       }
       setVideoResult(next);
       const finished =
-        !!next.videoUrl || !next.success || FAILED_STATES.test(next.taskStatus ?? "") || DONE_STATES.test(next.taskStatus ?? "");
+        !!next.videoUrl ||
+        !next.success ||
+        FAILED_STATES.test(next.taskStatus ?? "") ||
+        DONE_STATES.test(next.taskStatus ?? "");
       if (finished) {
         setVideoBusy(false);
         stopPolling();
         return;
       }
-      pollVideo(videoId, model, baseUrl);
+      pollVideo(videoId, model);
     }, POLL_INTERVAL_MS);
   };
 
   const runVideo = async () => {
-    if (!provider?.baseUrl || !videoModel.trim() || !videoPrompt.trim()) return;
+    if (!ready || !videoModel.trim() || !videoPrompt.trim()) return;
     stopPolling();
     setVideoBusy(true);
     setVideoResult(null);
-    const baseUrl = provider.baseUrl;
     const model = videoModel.trim();
     try {
       const res = await fetch("/api/pi/video-create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          baseUrl,
-          apiKey,
           model,
           prompt: videoPrompt.trim(),
           mode: videoMode,
@@ -204,7 +228,7 @@ export function GeneratePage() {
       const created = (await res.json()) as GenerateResult;
       setVideoResult(created);
       if (created.success && created.videoId) {
-        pollVideo(created.videoId, model, baseUrl);
+        pollVideo(created.videoId, model);
       } else {
         setVideoBusy(false);
       }
@@ -214,8 +238,6 @@ export function GeneratePage() {
     }
   };
 
-  const providerModelIds = provider?.models.map((model) => model.id) ?? [];
-
   return (
     <div className="skills-page" style={{ maxWidth: 960 }}>
       <header className="skills-page-heading">
@@ -223,41 +245,57 @@ export function GeneratePage() {
           <Sparkles className="h-5 w-5" />
         </div>
         <div>
-          <p className="skills-page-kicker">GENERATION</p>
+          <p className="skills-page-kicker">AGNES GENERATION</p>
           <h1>生图 / 生视频</h1>
-          <p>直接调用提供商的 OpenAI 兼容生成端点：图片走 /images/generations，视频走 /videos 异步任务。</p>
+          <p>Agnes AI 专区，填入一个 API Key 即可生成。与提供商与模型页面的聊天配置互不影响。</p>
         </div>
       </header>
 
-      {/* Provider + model are shared by both tabs. */}
-      <div className="mb-4 grid gap-3 rounded-xl border border-gray-800 bg-gray-900/50 p-4 md:grid-cols-2">
-        <Field label="提供商" hint={provider?.baseUrl}>
-          <select value={providerId} onChange={(e) => setProviderId(e.target.value)} className={inputCls}>
-            {usableProviders.length === 0 && <option value="">没有可用提供商</option>}
-            {usableProviders.map((entry) => (
-              <option key={entry.id} value={entry.id}>
-                {entry.name}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field
-          label={tab === "image" ? "图片模型" : "视频模型"}
-          hint={apiKey ? "已解析到 API Key" : "该提供商没有可用 Key，请求可能被拒绝"}
-        >
-          <input
-            list="generate-model-options"
-            value={tab === "image" ? imageModel : videoModel}
-            onChange={(e) => (tab === "image" ? setImageModel(e.target.value) : setVideoModel(e.target.value))}
-            placeholder={tab === "image" ? "agnes-image-2.5-flash" : "agnes-video-2.5-flash"}
-            className={inputCls}
-          />
-          <datalist id="generate-model-options">
-            {providerModelIds.map((id) => (
-              <option key={id} value={id} />
-            ))}
-          </datalist>
-        </Field>
+      {/* ── Agnes API Key ── */}
+      <div className="mb-4 rounded-xl border border-gray-800 bg-gray-900/50 p-4">
+        <div className="flex items-center gap-2">
+          <KeyRound className="h-4 w-4 text-emerald-400" />
+          <h2 className="text-sm font-semibold text-gray-200">Agnes API Key</h2>
+          {config?.hasKey ? (
+            <span className="rounded-full border border-emerald-800 bg-emerald-500/10 px-2 py-0.5 font-mono text-[11px] text-emerald-400">
+              {config.maskedKey}
+            </span>
+          ) : (
+            <span className="rounded-full border border-gray-700 px-2 py-0.5 text-[11px] text-gray-500">未配置</span>
+          )}
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <div className="relative min-w-[260px] flex-1">
+            <input
+              type={showKey ? "text" : "password"}
+              value={keyDraft}
+              onChange={(e) => setKeyDraft(e.target.value)}
+              placeholder={config?.hasKey ? "输入新 Key 以替换" : "sk-…"}
+              autoComplete="off"
+              className={cn(inputCls, "pr-10 font-mono")}
+            />
+            <button
+              type="button"
+              onClick={() => setShowKey((prev) => !prev)}
+              title={showKey ? "隐藏" : "显示"}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-500 hover:text-gray-300"
+            >
+              {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
+          </div>
+          <button
+            onClick={saveKey}
+            disabled={savingKey || !keyDraft.trim()}
+            className="flex items-center gap-2 rounded-lg border border-gray-700 px-4 py-2 text-sm text-gray-200 transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {savingKey ? <Loader2 className="h-4 w-4 animate-spin" /> : keySaved ? <Check className="h-4 w-4 text-emerald-400" /> : null}
+            {keySaved ? "已保存" : "保存"}
+          </button>
+        </div>
+        <p className="mt-2 text-[11px] text-gray-600">
+          保存到 ~/.pi/agent/agnes-config.json（权限 0600），仅服务端读取，不会回传浏览器。端点 {config?.baseUrl || "—"}
+        </p>
+        {keyError && <p className="mt-1 text-xs text-red-400">{keyError}</p>}
       </div>
 
       <div className="mb-4 flex gap-2">
@@ -284,6 +322,26 @@ export function GeneratePage() {
       {tab === "image" ? (
         <div className="space-y-4">
           <div className="space-y-3 rounded-xl border border-gray-800 bg-gray-900/50 p-4">
+            <div className="grid gap-3 md:grid-cols-2">
+              <Field label="模型">
+                <input list="agnes-image-models" value={imageModel} onChange={(e) => setImageModel(e.target.value)} className={cn(inputCls, "font-mono")} />
+                <datalist id="agnes-image-models">
+                  {IMAGE_MODELS.map((id) => (
+                    <option key={id} value={id} />
+                  ))}
+                </datalist>
+              </Field>
+              <Field label="返回格式">
+                <select
+                  value={imageFormat}
+                  onChange={(e) => setImageFormat(e.target.value as "url" | "b64_json")}
+                  className={inputCls}
+                >
+                  <option value="url">图片 URL</option>
+                  <option value="b64_json">Base64</option>
+                </select>
+              </Field>
+            </div>
             <Field label="提示词">
               <textarea
                 value={imagePrompt}
@@ -293,7 +351,7 @@ export function GeneratePage() {
                 className={cn(inputCls, "resize-y")}
               />
             </Field>
-            <div className="grid gap-3 md:grid-cols-3">
+            <div className="grid gap-3 md:grid-cols-2">
               <Field label="尺寸档位">
                 <select value={imageSize} onChange={(e) => setImageSize(e.target.value)} className={inputCls}>
                   {IMAGE_SIZES.map((size) => (
@@ -312,16 +370,6 @@ export function GeneratePage() {
                   ))}
                 </select>
               </Field>
-              <Field label="返回格式">
-                <select
-                  value={imageFormat}
-                  onChange={(e) => setImageFormat(e.target.value as "url" | "b64_json")}
-                  className={inputCls}
-                >
-                  <option value="url">图片 URL</option>
-                  <option value="b64_json">Base64</option>
-                </select>
-              </Field>
             </div>
             <Field label="参考图（可选，一行一个 URL 或 data URI）" hint="填写后为图生图；多张则为多图合成">
               <textarea
@@ -334,11 +382,11 @@ export function GeneratePage() {
             </Field>
             <button
               onClick={runImage}
-              disabled={imageBusy || !provider?.baseUrl || !imagePrompt.trim() || !imageModel.trim()}
+              disabled={imageBusy || !ready || !imagePrompt.trim() || !imageModel.trim()}
               className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {imageBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
-              {imageBusy ? "生成中…（可能需要数十秒）" : "生成图片"}
+              {imageBusy ? "生成中…（可能需要数十秒）" : ready ? "生成图片" : "请先保存 API Key"}
             </button>
           </div>
 
@@ -381,16 +429,15 @@ export function GeneratePage() {
       ) : (
         <div className="space-y-4">
           <div className="space-y-3 rounded-xl border border-gray-800 bg-gray-900/50 p-4">
-            <Field label="提示词" hint="参考模式可用 <Picture 1> / <Audio 1> 指代素材">
-              <textarea
-                value={videoPrompt}
-                onChange={(e) => setVideoPrompt(e.target.value)}
-                rows={3}
-                placeholder="画面内容、镜头运动、光照氛围"
-                className={cn(inputCls, "resize-y")}
-              />
-            </Field>
-            <div className="grid gap-3 md:grid-cols-4">
+            <div className="grid gap-3 md:grid-cols-2">
+              <Field label="模型">
+                <input list="agnes-video-models" value={videoModel} onChange={(e) => setVideoModel(e.target.value)} className={cn(inputCls, "font-mono")} />
+                <datalist id="agnes-video-models">
+                  {VIDEO_MODELS.map((id) => (
+                    <option key={id} value={id} />
+                  ))}
+                </datalist>
+              </Field>
               <Field label="生成模式">
                 <select
                   value={videoMode}
@@ -404,6 +451,17 @@ export function GeneratePage() {
                   ))}
                 </select>
               </Field>
+            </div>
+            <Field label="提示词" hint="参考模式可用 <Picture 1> / <Audio 1> 指代素材">
+              <textarea
+                value={videoPrompt}
+                onChange={(e) => setVideoPrompt(e.target.value)}
+                rows={3}
+                placeholder="画面内容、镜头运动、光照氛围"
+                className={cn(inputCls, "resize-y")}
+              />
+            </Field>
+            <div className="grid gap-3 md:grid-cols-3">
               <Field label="时长（秒）">
                 <select value={videoSeconds} onChange={(e) => setVideoSeconds(e.target.value)} className={inputCls}>
                   {VIDEO_SECONDS.map((seconds) => (
@@ -461,11 +519,11 @@ export function GeneratePage() {
 
             <button
               onClick={runVideo}
-              disabled={videoBusy || !provider?.baseUrl || !videoPrompt.trim() || !videoModel.trim()}
+              disabled={videoBusy || !ready || !videoPrompt.trim() || !videoModel.trim()}
               className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {videoBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Film className="h-4 w-4" />}
-              {videoBusy ? "生成中…（通常 2–4 分钟）" : "创建视频任务"}
+              {videoBusy ? "生成中…（通常 2–4 分钟）" : ready ? "创建视频任务" : "请先保存 API Key"}
             </button>
           </div>
 
