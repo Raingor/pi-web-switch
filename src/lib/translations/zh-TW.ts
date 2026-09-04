@@ -109,6 +109,7 @@ const zhTW: Record<string, string> = {
   "mode.chat": "Chat 版",
   "nav.speed_test": "模型測速",
   "nav.chat": "對話",
+  "nav.generate": "生圖 / 生影片",
   "speed_test.title": "模型測速",
   "speed_test.subtitle": "依供應商取得全部模型，一鍵測速，查看每個模型的呼叫速率與成功率。",
   "speed_test.runs_note": "每個模型測試 {0} 次",

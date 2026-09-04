@@ -110,6 +110,7 @@ const ja: Record<string, string> = {
   "mode.chat": "Chat 版",
   "nav.speed_test": "モデル速度テスト",
   "nav.chat": "チャット",
+  "nav.generate": "画像 / 動画生成",
   "speed_test.title": "モデル速度テスト",
   "speed_test.subtitle": "プロバイダーごとに全モデルを取得し、ワンクリックで各モデルの応答速度と成功率を確認します。",
   "speed_test.runs_note": "モデルごとに {0} 回テスト",

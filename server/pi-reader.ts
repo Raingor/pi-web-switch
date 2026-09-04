@@ -3161,6 +3161,300 @@ export async function testModel(
   }
 }
 
+// ─── Image / Video Generation ─────────────────────────────
+// OpenAI-compatible generation endpoints (Agnes AI and similar gateways).
+// Images are synchronous; video is an async task that must be polled.
+
+export interface GenerateResult {
+  success: boolean;
+  status?: number;
+  latencyMs?: number;
+  message?: string;
+  /** Image results: resolved URL or data: URI, in request order. */
+  images?: string[];
+  /** Video task id used for polling (`video_id`, not `id`/`task_id`). */
+  videoId?: string;
+  /** Task state reported by the provider, e.g. queued / in_progress / completed. */
+  taskStatus?: string;
+  /** Task completion percentage (0–100) when the provider reports it. */
+  progress?: number;
+  /** Best-effort extracted video URL once a task completes. */
+  videoUrl?: string;
+  /** Poll again later: transient failure (rate limit / 5xx), not a dead task. */
+  retryable?: boolean;
+  /** Raw provider payload, so the UI can surface fields we do not model yet. */
+  raw?: unknown;
+}
+
+/** Resolve an api key the same way pi does, expanding `$ENV_VAR` references. */
+function resolveGenerationKey(apiKey?: string): string {
+  const key = apiKey ?? "";
+  return key.startsWith("$") ? process.env[key.slice(1)] ?? "" : key;
+}
+
+function generationUrl(baseUrl: string, path: string): URL | null {
+  try {
+    const url = new URL(baseUrl.replace(/\/+$/, "") + path);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    return url;
+  } catch {
+    return null;
+  }
+}
+
+function generationFailure(e: any, started: number): GenerateResult {
+  const latencyMs = Date.now() - started;
+  const message = e?.name === "TimeoutError" ? "timeout" : e?.cause?.code || e?.message || String(e);
+  return { success: false, latencyMs, message };
+}
+
+/** Pull the provider's error text out of a non-2xx JSON body. */
+async function generationHttpError(res: Response, started: number): Promise<GenerateResult> {
+  const latencyMs = Date.now() - started;
+  try {
+    const data = (await res.json()) as any;
+    // Agnes returns `detail` for validation errors and `error.message` otherwise.
+    const message = data?.error?.message || data?.detail || data?.message || `HTTP ${res.status}`;
+    return { success: false, status: res.status, latencyMs, message: String(message).slice(0, 400), raw: data };
+  } catch {
+    return { success: false, status: res.status, latencyMs, message: `HTTP ${res.status}` };
+  }
+}
+
+export interface ImageGenerateOptions {
+  baseUrl: string;
+  model: string;
+  prompt: string;
+  apiKey?: string;
+  /** Tier (`1K`–`4K`) or an explicit `WxH`; unsupported sizes get normalized. */
+  size?: string;
+  /** Aspect ratio paired with a tier size, e.g. `16:9`. */
+  ratio?: string;
+  /** Reference images (public URLs or data URIs) for img2img / composition. */
+  image?: string[];
+  responseFormat?: "url" | "b64_json";
+  timeoutMs?: number;
+}
+
+/**
+ * Generate images through `POST {baseUrl}/images/generations`.
+ *
+ * `response_format` and reference `image` must live under `extra_body` — the
+ * provider rejects a top-level `response_format`. Generation runs from seconds
+ * to minutes, hence the long default timeout.
+ */
+export async function generateImage(options: ImageGenerateOptions): Promise<GenerateResult> {
+  const url = generationUrl(options.baseUrl, "/images/generations");
+  if (!url) return { success: false, message: "invalid URL" };
+  if (!options.model || !options.prompt) return { success: false, message: "model and prompt are required" };
+
+  const key = resolveGenerationKey(options.apiKey);
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (key) headers["Authorization"] = `Bearer ${key}`;
+
+  const responseFormat = options.responseFormat ?? "url";
+  const extraBody: Record<string, unknown> = { response_format: responseFormat };
+  const references = (options.image ?? []).filter((entry) => typeof entry === "string" && entry.trim());
+  if (references.length > 0) extraBody.image = references;
+
+  const body: Record<string, unknown> = {
+    model: options.model,
+    prompt: options.prompt,
+    size: options.size || "1K",
+    extra_body: extraBody,
+  };
+  if (options.ratio) body.ratio = options.ratio;
+  // Text-to-image base64 uses the top-level flag; img2img uses extra_body.
+  if (responseFormat === "b64_json" && references.length === 0) body.return_base64 = true;
+
+  const started = Date.now();
+  try {
+    const res = await fetchExternal(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(options.timeoutMs ?? 360000),
+    });
+    if (!res.ok) return await generationHttpError(res, started);
+
+    const data = (await res.json()) as any;
+    const latencyMs = Date.now() - started;
+    const entries = Array.isArray(data?.data) ? data.data : [];
+    const images: string[] = entries
+      .map((entry: any) => {
+        if (typeof entry?.url === "string" && entry.url) return entry.url;
+        if (typeof entry?.b64_json === "string" && entry.b64_json) return `data:image/png;base64,${entry.b64_json}`;
+        return "";
+      })
+      .filter((entry: string) => entry);
+    if (images.length === 0) return { success: false, latencyMs, message: "no image in response", raw: data };
+    return { success: true, latencyMs, images, raw: data };
+  } catch (e: any) {
+    return generationFailure(e, started);
+  }
+}
+
+export interface VideoCreateOptions {
+  baseUrl: string;
+  model: string;
+  prompt: string;
+  apiKey?: string;
+  /** `text` (prompt only), `keyframe` (first/last frame), `reference` (media). */
+  mode?: "text" | "keyframe" | "reference";
+  /** Duration in seconds as a string, `"4"`–`"12"`. */
+  seconds?: string;
+  /** Flash models only accept `"720P"`. */
+  size?: string;
+  aspectRatio?: string;
+  seed?: number;
+  firstFrame?: string;
+  lastFrame?: string;
+  images?: string[];
+  audios?: string[];
+  timeoutMs?: number;
+}
+
+/**
+ * Create an async video task through `POST {baseUrl}/videos`.
+ *
+ * The response carries `id`/`task_id` (task identity) plus `video_id`, and only
+ * `video_id` is pollable — so that is what we surface. Media fields are sent per
+ * mode because the provider rejects fields that do not belong to the mode.
+ */
+export async function createVideoTask(options: VideoCreateOptions): Promise<GenerateResult> {
+  const url = generationUrl(options.baseUrl, "/videos");
+  if (!url) return { success: false, message: "invalid URL" };
+  if (!options.model || !options.prompt) return { success: false, message: "model and prompt are required" };
+
+  const key = resolveGenerationKey(options.apiKey);
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (key) headers["Authorization"] = `Bearer ${key}`;
+
+  const mode = options.mode ?? "text";
+  const body: Record<string, unknown> = {
+    model: options.model,
+    prompt: options.prompt,
+    mode,
+    seconds: options.seconds || "5",
+    size: options.size || "720P",
+  };
+  if (options.aspectRatio) body.aspect_ratio = options.aspectRatio;
+  if (typeof options.seed === "number" && Number.isFinite(options.seed)) body.seed = options.seed;
+
+  if (mode === "keyframe") {
+    if (!options.firstFrame && !options.lastFrame) {
+      return { success: false, message: "keyframe mode needs first_frame or last_frame" };
+    }
+    if (options.firstFrame) body.first_frame = options.firstFrame;
+    if (options.lastFrame) body.last_frame = options.lastFrame;
+  } else if (mode === "reference") {
+    const images = (options.images ?? []).filter((entry) => typeof entry === "string" && entry.trim());
+    const audios = (options.audios ?? []).filter((entry) => typeof entry === "string" && entry.trim());
+    if (images.length === 0 && audios.length === 0) {
+      return { success: false, message: "reference mode needs images or audios" };
+    }
+    if (images.length > 0) body.images = images;
+    if (audios.length > 0) body.audios = audios;
+  }
+
+  const started = Date.now();
+  try {
+    const res = await fetchExternal(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(options.timeoutMs ?? 120000),
+    });
+    if (!res.ok) return await generationHttpError(res, started);
+
+    const data = (await res.json()) as any;
+    const latencyMs = Date.now() - started;
+    const videoId = typeof data?.video_id === "string" ? data.video_id : "";
+    if (!videoId) return { success: false, latencyMs, message: "no video_id in response", raw: data };
+    return {
+      success: true,
+      latencyMs,
+      videoId,
+      taskStatus: typeof data?.status === "string" ? data.status : undefined,
+      raw: data,
+    };
+  } catch (e: any) {
+    return generationFailure(e, started);
+  }
+}
+
+/**
+ * Depth-first search for the first plausible video URL in a task payload.
+ * The Flash docs do not pin down the completed-task shape, so the field name is
+ * discovered instead of assumed; `raw` is always returned as a fallback.
+ */
+function findVideoUrl(payload: unknown, depth = 0): string | undefined {
+  if (depth > 6 || !payload || typeof payload !== "object") return undefined;
+  for (const [key, value] of Object.entries(payload as Record<string, unknown>)) {
+    if (typeof value === "string" && /^https?:\/\//i.test(value)) {
+      const normalized = key.toLowerCase().replace(/[^a-z]/g, "");
+      if (normalized.includes("video") || normalized === "url" || normalized.includes("download")) return value;
+      if (/\.(mp4|mov|webm|m4v)(\?|$)/i.test(value)) return value;
+    }
+    if (value && typeof value === "object") {
+      const nested = findVideoUrl(value, depth + 1);
+      if (nested) return nested;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Poll a video task.
+ *
+ * The status endpoint sits at the account root (`/agnesapi`), not under the
+ * chat-style `/v1` prefix, so a trailing version segment is stripped first.
+ * `model_name` is required for keyframe and reference tasks and recommended for
+ * text tasks too.
+ */
+export async function pollVideoTask(
+  baseUrl: string,
+  videoId: string,
+  model?: string,
+  apiKey?: string
+): Promise<GenerateResult> {
+  if (!/^[\w-]{1,200}$/.test(videoId)) return { success: false, message: "invalid video id" };
+  const root = baseUrl.replace(/\/+$/, "").replace(/\/v\d+$/, "");
+  const url = generationUrl(root, "/agnesapi");
+  if (!url) return { success: false, message: "invalid URL" };
+  url.searchParams.set("video_id", videoId);
+  if (model) url.searchParams.set("model_name", model);
+
+  const key = resolveGenerationKey(apiKey);
+  const headers: Record<string, string> = {};
+  if (key) headers["Authorization"] = `Bearer ${key}`;
+
+  const started = Date.now();
+  try {
+    const res = await fetchExternal(url, { headers, signal: AbortSignal.timeout(30000) });
+    if (!res.ok) {
+      // The status endpoint rate-limits well below the documented 1–2s cadence,
+      // and a 5xx is a gateway hiccup — neither means the task itself failed.
+      const failure = await generationHttpError(res, started);
+      return res.status === 429 || res.status >= 500 ? { ...failure, videoId, retryable: true } : failure;
+    }
+    const data = (await res.json()) as any;
+    return {
+      success: true,
+      latencyMs: Date.now() - started,
+      videoId,
+      taskStatus: typeof data?.status === "string" ? data.status : undefined,
+      progress: typeof data?.progress === "number" ? data.progress : undefined,
+      videoUrl: findVideoUrl(data),
+      raw: data,
+    };
+  } catch (e: any) {
+    // A timeout here is transient too: the task keeps running server-side.
+    const failure = generationFailure(e, started);
+    return { ...failure, videoId, retryable: true };
+  }
+}
+
 // ─── Subagents ────────────────────────────────────────────
 
 const AGENTS_DIR = join(PI_DIR, "agents");

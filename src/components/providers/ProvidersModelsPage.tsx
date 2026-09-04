@@ -40,17 +40,39 @@ import {
   Wand2,
 } from "lucide-react";
 
+// Selectable API types for the provider picker. Chat APIs first, then the
+// OpenAI-compatible generation endpoints (image / video).
+//
+// Google / Bedrock / Mistral were dropped from this list on request. Their
+// values stay valid in `ApiType` because pi's builtin catalog still uses them,
+// so `ApiTypeOptions` re-adds whatever a provider currently has saved instead
+// of letting the <select> silently fall back to the first entry.
 const API_TYPES: { value: ApiType; label: string }[] = [
   { value: "openai-completions", label: "Chat Completions (/chat/completions)" },
   { value: "openai-responses", label: "OpenAI Responses" },
   { value: "openai-codex-responses", label: "OpenAI Codex Responses" },
   { value: "azure-openai-responses", label: "Azure OpenAI Responses" },
   { value: "anthropic-messages", label: "Anthropic Messages" },
-  { value: "google-generative-ai", label: "Google Generative AI" },
-  { value: "google-vertex", label: "Google Vertex AI" },
-  { value: "bedrock-converse-stream", label: "AWS Bedrock" },
-  { value: "mistral-conversations", label: "Mistral" },
+  { value: "openai-images", label: "Images · 生图 (/images/generations)" },
+  { value: "openai-videos", label: "Videos · 生视频 (/videos)" },
 ];
+
+/**
+ * <option> list for the API-type selects. Keeps a provider's saved value
+ * visible even when it is no longer offered (builtin Google/Mistral/Bedrock),
+ * so opening the form cannot rewrite the api on the next save.
+ */
+function ApiTypeOptions({ value }: { value: ApiType }) {
+  const known = API_TYPES.some((a) => a.value === value);
+  return (
+    <>
+      {API_TYPES.map((a) => (
+        <option key={a.value} value={a.value}>{a.label}</option>
+      ))}
+      {!known && <option value={value}>{value}</option>}
+    </>
+  );
+}
 
 // Shape returned by /api/pi/provider-models (see server/pi-reader.ts FetchedModel)
 interface FetchedModel {
@@ -1061,9 +1083,7 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed, modelsJson
           onChange={(e) => setApi(e.target.value as ApiType)}
           className="mt-1.5 w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2.5 text-sm text-white"
         >
-          {API_TYPES.map((a) => (
-            <option key={a.value} value={a.value}>{a.label}</option>
-          ))}
+          <ApiTypeOptions value={api} />
         </select>
       </div>
 
@@ -2156,9 +2176,7 @@ function AddProviderForm({
           onChange={(e) => setApi(e.target.value as ApiType)}
           className="mt-1.5 w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2.5 text-sm text-white"
         >
-          {API_TYPES.map((a) => (
-            <option key={a.value} value={a.value}>{a.label}</option>
-          ))}
+          <ApiTypeOptions value={api} />
         </select>
       </div>
 
@@ -2535,9 +2553,7 @@ function ImportProviderModal({
               onChange={(e) => setApi(e.target.value as ApiType)}
               className="mt-1 w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white"
             >
-              {API_TYPES.map((a) => (
-                <option key={a.value} value={a.value}>{a.label}</option>
-              ))}
+              <ApiTypeOptions value={api} />
             </select>
           </div>
           <div>

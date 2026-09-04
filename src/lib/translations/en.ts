@@ -112,6 +112,7 @@ const en: Record<string, string> = {
   "mode.chat": "Chat",
   "nav.speed_test": "Model Speed Test",
   "nav.chat": "Chat",
+  "nav.generate": "Image / Video",
   "speed_test.title": "Model Speed Test",
   "speed_test.subtitle": "Fetch all models per provider and benchmark call latency and success rate with one click.",
   "speed_test.runs_note": "{0} runs per model",

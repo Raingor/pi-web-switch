@@ -110,6 +110,7 @@ const zhCN: Record<string, string> = {
   "mode.chat": "Chat 版",
   "nav.speed_test": "模型测速",
   "nav.chat": "对话",
+  "nav.generate": "生图 / 生视频",
   "speed_test.title": "模型测速",
   "speed_test.subtitle": "按供应商获取全部模型，一键测速，查看每个模型的调用速率与成功率。",
   "speed_test.runs_note": "每个模型测试 {0} 次",

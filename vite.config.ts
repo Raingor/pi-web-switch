@@ -479,6 +479,67 @@ function piApiPlugin(): Plugin {
             }
           });
         },
+        "POST /api/pi/image-generate"(req, res) {
+          let body = "";
+          req.on("data", (chunk: string) => (body += chunk));
+          req.on("end", () => {
+            try {
+              const input = JSON.parse(body);
+              if (!input?.baseUrl || !input?.model || !input?.prompt) {
+                throw new Error("missing baseUrl, model or prompt");
+              }
+              pi.generateImage(input).then((result: unknown) => {
+                res.setHeader("Content-Type", "application/json");
+                res.end(JSON.stringify(result));
+              });
+            } catch {
+              res.statusCode = 400;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ success: false, message: "Invalid request body" }));
+            }
+          });
+        },
+        "POST /api/pi/video-create"(req, res) {
+          let body = "";
+          req.on("data", (chunk: string) => (body += chunk));
+          req.on("end", () => {
+            try {
+              const input = JSON.parse(body);
+              if (!input?.baseUrl || !input?.model || !input?.prompt) {
+                throw new Error("missing baseUrl, model or prompt");
+              }
+              pi.createVideoTask(input).then((result: unknown) => {
+                res.setHeader("Content-Type", "application/json");
+                res.end(JSON.stringify(result));
+              });
+            } catch {
+              res.statusCode = 400;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ success: false, message: "Invalid request body" }));
+            }
+          });
+        },
+        "GET /api/pi/video-status"(req, res) {
+          // A GET so the UI can poll on an interval without sending a body.
+          const params = new URL(req.url ?? "", "http://localhost").searchParams;
+          const baseUrl = params.get("baseUrl") ?? "";
+          const videoId = params.get("videoId") ?? "";
+          if (!baseUrl || !videoId) {
+            res.statusCode = 400;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ success: false, message: "missing baseUrl or videoId" }));
+            return;
+          }
+          pi.pollVideoTask(
+            baseUrl,
+            videoId,
+            params.get("model") ?? undefined,
+            params.get("apiKey") ?? undefined
+          ).then((result: unknown) => {
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify(result));
+          });
+        },
       };
 
       // Middleware: match API routes

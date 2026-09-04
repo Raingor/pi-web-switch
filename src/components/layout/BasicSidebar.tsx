@@ -12,6 +12,7 @@ import {
   Orbit,
   Gauge,
   MessageSquare,
+  Sparkles,
   Send,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -31,6 +32,7 @@ const navItems = [
   { to: "/subagents", icon: Users, key: "nav.subagents", code: "06" },
   { to: "/settings", icon: Settings, key: "nav.settings", code: "07" },
   { to: "/speed-test", icon: Gauge, key: "nav.speed_test", code: "08" },
+  { to: "/generate", icon: Sparkles, key: "nav.generate", code: "09" },
 ];
 
 interface SidebarProps {
