@@ -47,6 +47,8 @@ private struct CodexUsageStatus {
 private struct UsageSummary {
     var today = UsageTotals()
     var sevenDays = UsageTotals()
+    var chatgptToday = UsageTotals()
+    var chatgptSevenDays = UsageTotals()
     var providers: [ProviderTotals] = []
     var codex: CodexUsageStatus?
     var updatedAt = Date()
@@ -117,6 +119,15 @@ private final class UsageReader {
             .appendingPathComponent(".pi/agent/sessions", isDirectory: true)
     }
 
+    private var chatgptDirectories: [URL] {
+        let codexRoot = fileManager.homeDirectoryForCurrentUser
+            .appendingPathComponent(".codex", isDirectory: true)
+        return [
+            codexRoot.appendingPathComponent("sessions", isDirectory: true),
+            codexRoot.appendingPathComponent("archived_sessions", isDirectory: true),
+        ]
+    }
+
     func read() -> UsageSummary {
         do {
             let now = Date()
@@ -129,6 +140,8 @@ private final class UsageReader {
             let sevenDaysKey = dateFormatter.string(from: sevenDaysAgo)
             var today = UsageTotals()
             var sevenDays = UsageTotals()
+            var chatgptToday = UsageTotals()
+            var chatgptSevenDays = UsageTotals()
             var providers: [String: ProviderTotals] = [:]
 
             let directories = try fileManager.contentsOfDirectory(
@@ -154,9 +167,20 @@ private final class UsageReader {
                 }
             }
 
+            for directory in chatgptDirectories {
+                for file in jsonlFiles(in: directory) {
+                    autoreleasepool {
+                        parseChatGPT(file: file, todayKey: todayKey, sevenDaysKey: sevenDaysKey,
+                                     today: &chatgptToday, sevenDays: &chatgptSevenDays)
+                    }
+                }
+            }
+
             return UsageSummary(
                 today: today,
                 sevenDays: sevenDays,
+                chatgptToday: chatgptToday,
+                chatgptSevenDays: chatgptSevenDays,
                 providers: providers.values.sorted { $0.cost > $1.cost }.prefix(5).map { $0 },
                 updatedAt: now
             )
@@ -232,6 +256,64 @@ private final class UsageReader {
         }
         if !pending.isEmpty { consume(pending) }
     }
+
+    private func jsonlFiles(in directory: URL) -> [URL] {
+        guard let items = try? fileManager.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+
+        return items.flatMap { url -> [URL] in
+            let isDirectory = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+            if isDirectory { return jsonlFiles(in: url) }
+            return url.pathExtension == "jsonl" ? [url] : []
+        }
+    }
+
+    private func parseChatGPT(
+        file: URL,
+        todayKey: String,
+        sevenDaysKey: String,
+        today: inout UsageTotals,
+        sevenDays: inout UsageTotals
+    ) {
+        guard let handle = try? FileHandle(forReadingFrom: file) else { return }
+        defer { try? handle.close() }
+        var pending = Data()
+
+        func consume(_ data: Data) {
+            guard let envelope = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let payload = envelope["payload"] as? [String: Any],
+                  payload["type"] as? String == "token_count",
+                  let info = payload["info"] as? [String: Any],
+                  let usage = info["last_token_usage"] as? [String: Any],
+                  let timestamp = envelope["timestamp"] as? String,
+                  let date = isoFormatter.date(from: timestamp) ?? ISO8601DateFormatter().date(from: timestamp) else { return }
+
+            let dateKey = dateFormatter.string(from: date)
+            guard dateKey >= sevenDaysKey else { return }
+            let rawInput = integer(usage, "input_tokens")
+            let cacheRead = integer(usage, "cached_input_tokens")
+            let cacheWrite = integer(usage, "cache_write_input_tokens")
+            let input = max(rawInput - cacheRead - cacheWrite, 0)
+            let output = integer(usage, "output_tokens")
+            sevenDays.add(input: input, output: output, cacheRead: cacheRead, cacheWrite: cacheWrite, cost: 0, requests: 1)
+            if dateKey == todayKey {
+                today.add(input: input, output: output, cacheRead: cacheRead, cacheWrite: cacheWrite, cost: 0, requests: 1)
+            }
+        }
+
+        while true {
+            guard let chunk = try? handle.read(upToCount: 64 * 1024), !chunk.isEmpty else { break }
+            pending.append(chunk)
+            while let newline = pending.firstIndex(of: 10) {
+                consume(Data(pending[..<newline]))
+                pending.removeSubrange(...newline)
+            }
+        }
+        if !pending.isEmpty { consume(pending) }
+    }
 }
 
 // A single native view keeps information non-interactive and avoids disabled
@@ -241,7 +323,7 @@ private final class UsagePanel: NSView {
     override var isFlipped: Bool { true }
     init(summary: UsageSummary) {
         self.summary = summary
-        super.init(frame: NSRect(x: 0, y: 0, width: 400, height: 584))
+        super.init(frame: NSRect(x: 0, y: 0, width: 400, height: 704))
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
         setAccessibilityLabel("Pi 使用情况")
@@ -297,6 +379,13 @@ private final class UsagePanel: NSView {
         text(formatDuration(seconds).map { "\($0)后重置" } ?? "重置时间未知", 20, y + 32, 170, size: 10, color: .secondaryLabelColor)
         text(formatResetAt(window.resetAt).map { "\($0) UTC+8" } ?? "", 180, y + 32, 200, size: 10, color: .secondaryLabelColor, right: true)
     }
+    private func chatgptPeriod(_ title: String, totals: UsageTotals, x: CGFloat) {
+        text(title, x, 424, 170, color: .secondaryLabelColor, bold: true)
+        text(formatTokens(totals.tokens), x, 444, 170, size: 22, bold: true)
+        text("TOKENS", x, 473, 170, size: 9, color: .secondaryLabelColor)
+        text("输入 \(formatTokens(totals.input)) · 输出 \(formatTokens(totals.output))", x, 492, 170, size: 10, color: .secondaryLabelColor)
+        text("缓存 \(formatCacheHitRate(totals)) · \(totals.requests) 次", x, 509, 170, size: 10, color: .systemTeal)
+    }
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         text("π", 20, 12, 26, size: 24, color: .systemTeal)
@@ -322,15 +411,20 @@ private final class UsagePanel: NSView {
             text(message, 20, 295, 360, color: .secondaryLabelColor)
         }
         line(397)
-        text("提供商", 20, 412, 180, size: 11, bold: true)
-        text("近 7 日 · 按成本", 230, 412, 150, size: 10, color: .secondaryLabelColor, right: true)
+        text("GPT / CHATGPT 使用", 20, 412, 230, size: 11, bold: true)
+        text("来自本地会话记录", 230, 412, 150, size: 10, color: .secondaryLabelColor, right: true)
+        chatgptPeriod("今日", totals: summary.chatgptToday, x: 20)
+        chatgptPeriod("近 7 日", totals: summary.chatgptSevenDays, x: 210)
+        line(535)
+        text("提供商", 20, 550, 180, size: 11, bold: true)
+        text("近 7 日 · 按成本", 230, 550, 150, size: 10, color: .secondaryLabelColor, right: true)
         for (i, provider) in summary.providers.prefix(5).enumerated() {
-            let y = CGFloat(439 + i * 26)
+            let y = CGFloat(577 + i * 26)
             text(provider.id, 20, y, 169, size: 11)
             text(formatTokens(provider.tokens), 193, y, 83, size: 11, color: .secondaryLabelColor, right: true)
             text(formatCost(provider.cost), 280, y, 100, size: 11, right: true)
         }
-        if summary.providers.isEmpty { text("暂无使用记录", 20, 439, 360, color: .secondaryLabelColor) }
+        if summary.providers.isEmpty { text("暂无使用记录", 20, 577, 360, color: .secondaryLabelColor) }
     }
 }
 
