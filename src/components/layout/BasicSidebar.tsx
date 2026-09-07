@@ -11,7 +11,6 @@ import {
   X,
   Orbit,
   Gauge,
-  MessageSquare,
   Sparkles,
   Send,
 } from "lucide-react";
@@ -25,14 +24,13 @@ const TELEGRAM_GROUP_URL = "https://t.me/+ODpy7_7NlOE4NzA1";
 
 const navItems = [
   { to: "/", icon: LayoutDashboard, key: "nav.dashboard", code: "01" },
-  { to: "/chat", icon: MessageSquare, key: "nav.chat", code: "02" },
-  { to: "/sessions", icon: History, key: "nav.sessions", code: "03" },
-  { to: "/memory", icon: Brain, key: "nav.memory", code: "04" },
-  { to: "/providers", icon: Plug, key: "nav.providers_models", code: "05" },
-  { to: "/subagents", icon: Users, key: "nav.subagents", code: "06" },
-  { to: "/settings", icon: Settings, key: "nav.settings", code: "07" },
-  { to: "/speed-test", icon: Gauge, key: "nav.speed_test", code: "08" },
-  { to: "/generate", icon: Sparkles, key: "nav.generate", code: "09" },
+  { to: "/sessions", icon: History, key: "nav.sessions", code: "02" },
+  { to: "/memory", icon: Brain, key: "nav.memory", code: "03" },
+  { to: "/providers", icon: Plug, key: "nav.providers_models", code: "04" },
+  { to: "/subagents", icon: Users, key: "nav.subagents", code: "05" },
+  { to: "/settings", icon: Settings, key: "nav.settings", code: "06" },
+  { to: "/speed-test", icon: Gauge, key: "nav.speed_test", code: "07" },
+  { to: "/generate", icon: Sparkles, key: "nav.generate", code: "08" },
 ];
 
 interface SidebarProps {

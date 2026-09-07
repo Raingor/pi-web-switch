@@ -97,6 +97,8 @@ export interface Provider {
   apiKey?: string;
   apiKeys?: ProviderApiKey[];
   activeKeyId?: string;
+  /** Opt-in: automatic key failover on 429 / insufficient balance. */
+  autoFailover?: boolean;
   authHeader?: boolean;
   headers?: Record<string, string>;
   models: Model[];
@@ -193,6 +195,7 @@ export interface CustomProviderConfig {
   apiKey?: string;
   apiKeys?: ProviderApiKey[];
   activeKeyId?: string;
+  autoFailover?: boolean;
   authHeader?: boolean;
   headers?: Record<string, string>;
   models?: Model[];

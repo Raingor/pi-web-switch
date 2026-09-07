@@ -16,6 +16,7 @@ import { MODEL_CATALOG, searchCatalog, catalogToModel, catalogEntryId, findCatal
 import {
   Plus,
   Trash2,
+  RotateCcw,
   Edit3,
   Eye,
   EyeOff,
@@ -657,6 +658,64 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed, modelsJson
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [keyError, setKeyError] = useState<string | null>(null);
 
+  // ─── Automatic key failover (429 / insufficient balance) ───
+  // Health state is owned by the pi extension (pi-package/key-failover.ts)
+  // and read through the local API for display + manual reset.
+  const [keyHealth, setKeyHealth] = useState<Record<string, { status?: string; until?: number; reason?: string }>>({});
+  const [failoverBusy, setFailoverBusy] = useState(false);
+
+  useEffect(() => {
+    if (!isCustom) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const res = await fetch("/api/pi/key-state");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) setKeyHealth(data?.[provider.id] ?? {});
+      } catch {
+        /* health state is optional */
+      }
+    };
+    load();
+    const timer = setInterval(load, 15000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [isCustom, provider.id]);
+
+  const failoverEligible =
+    isCustom && !provider.oauth && !!baseUrl && !!api && savedKeys.length >= 2;
+
+  const handleAutoFailoverChange = async (checked: boolean) => {
+    setFailoverBusy(true);
+    const ok = await updateCustomProvider(provider.id, { autoFailover: checked });
+    setFailoverBusy(false);
+    if (!ok) setKeyError(t("providers_models.save_failed"));
+  };
+
+  const handleResetKeyHealth = async (keyId?: string) => {
+    try {
+      const res = await fetch("/api/pi/key-state/reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ providerId: provider.id, keyId }),
+      });
+      const data = await res.json();
+      if (data?.success) {
+        setKeyHealth((prev) => {
+          if (!keyId) return {};
+          const next = { ...prev };
+          delete next[keyId];
+          return next;
+        });
+      }
+    } catch {
+      /* reset is best-effort */
+    }
+  };
+
   // Key actually used for outbound calls (test connection, fetch models).
   const activeKey = keys.find((k) => k.id === activeKeyId)?.key ?? "";
   const effectiveKey = isCustom ? activeKey : apiKey;
@@ -1126,6 +1185,23 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed, modelsJson
                       {revealed ? k.key : maskKey(k.key)}
                     </code>
                     {isActive && <Badge variant="success">{t("providers_models.api_key_active")}</Badge>}
+                    {keyHealth[k.id]?.status === "paused" && (
+                      <Badge variant="error">{t("providers_models.key_paused_balance")}</Badge>
+                    )}
+                    {keyHealth[k.id]?.status === "cooldown" && (
+                      <Badge variant="warning">
+                        {t("providers_models.key_cooldown", String(Math.max(0, Math.ceil(((keyHealth[k.id]?.until ?? 0) - Date.now()) / 1000))))}
+                      </Badge>
+                    )}
+                    {keyHealth[k.id] && (
+                      <button
+                        onClick={() => handleResetKeyHealth(k.id)}
+                        className="rounded-md p-1.5 text-gray-500 hover:text-blue-400"
+                        title={t("providers_models.key_reset_health")}
+                      >
+                        <RotateCcw className="h-4 w-4" />
+                      </button>
+                    )}
                     <button
                       onClick={() => toggleReveal(k.id)}
                       className="rounded-md p-1.5 text-gray-500 hover:text-gray-300"
@@ -1185,6 +1261,34 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed, modelsJson
           )}
           {keys.length > 1 && (
             <p className="mt-1 text-xs text-gray-500">{t("providers_models.api_key_switch_hint")}</p>
+          )}
+
+          {/* Automatic failover (429 / insufficient balance) */}
+          <div className="provider-compat-row mt-3 flex items-center gap-2">
+            <input
+              id={`auto-failover-${provider.id}`}
+              type="checkbox"
+              disabled={!failoverEligible || failoverBusy}
+              checked={provider.autoFailover === true}
+              onChange={(e) => handleAutoFailoverChange(e.target.checked)}
+              className="rounded border-gray-600 bg-gray-800 text-blue-500"
+            />
+            <label
+              htmlFor={`auto-failover-${provider.id}`}
+              className="provider-compat-label text-sm text-gray-400"
+            >
+              <span>{t("providers_models.auto_failover")}</span>
+              <span className="provider-compat-description ml-2 text-xs text-gray-500">
+                {failoverEligible
+                  ? t("providers_models.auto_failover_desc")
+                  : t("providers_models.auto_failover_ineligible")}
+              </span>
+            </label>
+          </div>
+          {provider.autoFailover === true && (
+            <p className="mt-1 text-xs text-gray-500">
+              {t("providers_models.auto_failover_note")}
+            </p>
           )}
         </div>
       ) : (

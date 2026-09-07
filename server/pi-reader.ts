@@ -2,7 +2,6 @@ import { readFileSync, readdirSync, existsSync, statSync, unlinkSync, writeFileS
 import { homedir, platform } from "os";
 import { join, resolve, dirname, relative, sep, delimiter } from "path";
 import { spawnSync, spawn } from "child_process";
-import { randomUUID } from "crypto";
 import { DatabaseSync } from "node:sqlite";
 
 const PI_DIR = join(homedir(), ".pi", "agent");
@@ -255,7 +254,7 @@ function officialUsagePath(): string {
 function normalizeOfficialUsageConfig(value: any): OfficialUsageConfig {
   const endpoint = typeof value?.endpoint === "string" ? value.endpoint.trim() : "";
   const apiKeys = Array.isArray(value?.apiKeys)
-    ? value.apiKeys.filter((key: unknown): key is string => typeof key === "string").map((key) => key.trim()).filter(Boolean)
+    ? value.apiKeys.filter((key: unknown): key is string => typeof key === "string").map((key: string) => key.trim()).filter(Boolean)
     : typeof value?.apiKey === "string" && value.apiKey.trim()
       ? [value.apiKey.trim()]
       : [];
@@ -421,6 +420,55 @@ export function writeModels(models: any): boolean {
   try {
     const path = piPath("models.json");
     writeFileSync(path, JSON.stringify(models, null, 2), "utf-8");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ─── Provider key failover health state ─────────────────
+// Shared with the pi extension (pi-package/key-failover.ts), which owns the
+// file during real requests. Only key ids are stored — never raw key material.
+
+export interface KeyHealthEntry {
+  status: string;
+  until?: number;
+  reason?: string;
+}
+
+const KEY_STATE_FILENAME = "pi-web-switch-key-state.json";
+
+function keyStatePath(): string {
+  // Mirror the Pi extension's agent dir resolution (respects PI_CODING_AGENT_DIR).
+  const agentDir = process.env.PI_CODING_AGENT_DIR ?? PI_DIR;
+  return join(agentDir, KEY_STATE_FILENAME);
+}
+
+export function readKeyState(): Record<string, Record<string, KeyHealthEntry>> {
+  try {
+    const path = keyStatePath();
+    if (!existsSync(path)) return {};
+    return JSON.parse(readFileSync(path, "utf-8"));
+  } catch {
+    return {};
+  }
+}
+
+export function resetKeyState(providerId: string, keyId?: string): boolean {
+  try {
+    const path = keyStatePath();
+    let state: Record<string, Record<string, KeyHealthEntry>> = {};
+    if (existsSync(path)) state = JSON.parse(readFileSync(path, "utf-8"));
+    if (keyId) {
+      const provider = state[providerId];
+      if (provider) {
+        delete provider[keyId];
+        if (Object.keys(provider).length === 0) delete state[providerId];
+      }
+    } else {
+      delete state[providerId];
+    }
+    writeFileSync(path, JSON.stringify(state, null, 2), "utf-8");
     return true;
   } catch {
     return false;
@@ -1935,7 +1983,7 @@ export function updateSessionUserMessage(sessionId: string, messageId: string, t
     });
     if (index < 0) return false;
 
-    const entry = JSON.parse(lines[index]);
+    const entry = JSON.parse(lines[index]!);
     const content = entry.message.content;
     if (typeof content === "string") {
       entry.message.content = nextText;
@@ -2343,181 +2391,6 @@ function resolvePiBinary(): { bin: string; version: string } | null {
 /** Installed pi version, or null when no pi executable could be found. */
 function getPiVersion(): string | null {
   return resolvePiBinary()?.version ?? null;
-}
-
-export interface WebChatStatus {
-  kind: "starting" | "thinking" | "tool" | "responding";
-  toolName?: string;
-}
-
-/** One visible step of pi's work, streamed to the UI as it happens. */
-export interface WebChatStep {
-  kind: "thinking" | "tool" | "tool_result";
-  text?: string;
-  toolName?: string;
-  args?: string;
-  isError?: boolean;
-}
-
-export interface WebChatResult {
-  sessionId: string;
-  text: string;
-  error?: string;
-}
-
-const activeWebChats = new Map<string, { kill: (signal?: NodeJS.Signals) => boolean; stopped: boolean }>();
-
-export function stopWebChat(sessionId: string): boolean {
-  const active = activeWebChats.get(sessionId);
-  if (!active) return false;
-  active.stopped = true;
-  active.kill("SIGTERM");
-  return true;
-}
-
-/** Session ids with a pi child process currently running. */
-export function listActiveWebChats(): string[] {
-  return [...activeWebChats.keys()];
-}
-
-/** Open the platform folder picker for an explicit user-initiated chat workspace choice. */
-export function chooseChatDirectory(): Promise<string | null> {
-  if (platform() !== "darwin") return Promise.resolve(null);
-  return new Promise((resolvePromise) => {
-    let stdout = "";
-    const child = spawn("osascript", ["-e", "POSIX path of (choose folder with prompt \"选择 Pi 工作目录\")"], { stdio: ["ignore", "pipe", "ignore"] });
-    child.stdout?.on("data", (chunk) => { stdout += String(chunk); });
-    child.on("error", () => resolvePromise(null));
-    child.on("close", (code) => resolvePromise(code === 0 ? stdout.trim() || null : null));
-  });
-}
-
-/** Execute one non-interactive local pi turn, preserving its project session. */
-export async function runWebChat(
-  prompt: string,
-  requestedSessionId?: string,
-  onChunk?: (chunk: string) => void,
-  requestedCwd?: string,
-  requestedModel?: string,
-  requestedThinking?: string,
-  onStatus?: (status: WebChatStatus) => void,
-  onStep?: (step: WebChatStep) => void,
-): Promise<WebChatResult> {
-  const pi = resolvePiBinary();
-  const sessionId = requestedSessionId && /^[A-Za-z0-9_-]{1,100}$/.test(requestedSessionId)
-    ? requestedSessionId
-    : `web-${randomUUID()}`;
-  if (!pi) return { sessionId, text: "", error: "pi executable not found" };
-  const currentCwd = resolve(process.cwd());
-  const selectedCwd = requestedCwd ? resolve(requestedCwd) : currentCwd;
-  if (!existsSync(selectedCwd) || !statSync(selectedCwd).isDirectory()) return { sessionId, text: "", error: "invalid project directory" };
-  return new Promise((resolvePromise) => {
-    let stdout = "";
-    let stderr = "";
-    let settled = false;
-    const model = typeof requestedModel === "string" && /^[A-Za-z0-9._/-]+(?::(?:off|minimal|low|medium|high|xhigh|max))?$/.test(requestedModel)
-      ? requestedModel
-      : "";
-    // JSON mode streams structured NDJSON events, which is what lets the UI
-    // distinguish "thinking" from tool work instead of only seeing final text.
-    const args = ["--mode", "json", "--print", "--session-id", sessionId];
-    if (model) args.push("--model", model);
-    if (["off", "minimal", "low", "medium", "high", "xhigh", "max"].includes(requestedThinking ?? "")) args.push("--thinking", requestedThinking!);
-    args.push(prompt);
-    const child = spawn(pi.bin, args, {
-      cwd: selectedCwd, stdio: ["ignore", "pipe", "pipe"],
-    });
-    const active = { kill: child.kill.bind(child), stopped: false };
-    activeWebChats.set(sessionId, active);
-    const finish = (error?: string) => {
-      if (settled) return;
-      settled = true;
-      activeWebChats.delete(sessionId);
-      resolvePromise({ sessionId, text: stdout.trim(), error });
-    };
-    const timeout = setTimeout(() => { child.kill("SIGKILL"); finish("pi response timed out"); }, 600000);
-
-    onStatus?.({ kind: "starting" });
-    let pending = "";
-    // Accumulate streamed thinking / tool-argument text so each step can be
-    // emitted once, complete, instead of as hundreds of tiny deltas.
-    let thinkingBuffer = "";
-    const toolArgs = new Map<string, { toolName?: string; args: string }>();
-    const handleEvent = (line: string) => {
-      let event: any;
-      try {
-        event = JSON.parse(line);
-      } catch {
-        return; // non-JSON warning lines (e.g. "creating a new session")
-      }
-      if (event.type === "tool_execution_start") {
-        onStatus?.({ kind: "tool", toolName: typeof event.toolName === "string" ? event.toolName : undefined });
-        return;
-      }
-      if (event.type === "tool_execution_end") {
-        const result = event.result?.content;
-        const text = Array.isArray(result)
-          ? result.filter((part: any) => part?.type === "text" && part.text).map((part: any) => part.text).join("\n")
-          : "";
-        onStep?.({
-          kind: "tool_result",
-          toolName: typeof event.toolName === "string" ? event.toolName : undefined,
-          text: text.length > 4000 ? `${text.slice(0, 4000)}…` : text,
-          isError: !!event.isError,
-        });
-        return;
-      }
-      if (event.type !== "message_update") return;
-      const inner = event.assistantMessageEvent;
-      if (!inner || typeof inner.type !== "string") return;
-      if (inner.type === "thinking_start") {
-        thinkingBuffer = "";
-        onStatus?.({ kind: "thinking" });
-      } else if (inner.type === "thinking_delta" && typeof inner.delta === "string") {
-        thinkingBuffer += inner.delta;
-      } else if (inner.type === "thinking_end") {
-        const text = typeof inner.content === "string" && inner.content ? inner.content : thinkingBuffer;
-        thinkingBuffer = "";
-        if (text.trim()) onStep?.({ kind: "thinking", text: text.length > 8000 ? `${text.slice(0, 8000)}…` : text });
-      } else if (inner.type === "toolcall_start") {
-        const toolName = typeof inner.toolName === "string" ? inner.toolName : undefined;
-        if (typeof inner.id === "string") toolArgs.set(inner.id, { toolName, args: "" });
-        onStatus?.({ kind: "tool", toolName });
-      } else if (inner.type === "toolcall_delta" && typeof inner.delta === "string") {
-        const entry = [...toolArgs.values()].at(-1);
-        if (entry) entry.args += inner.delta;
-      } else if (inner.type === "toolcall_end") {
-        const call = inner.toolCall ?? {};
-        const id = typeof call.id === "string" ? call.id : undefined;
-        const entry = id ? toolArgs.get(id) : [...toolArgs.values()].at(-1);
-        const args = call.args !== undefined ? JSON.stringify(call.args) : (entry?.args ?? "");
-        if (id) toolArgs.delete(id);
-        onStep?.({
-          kind: "tool",
-          toolName: typeof call.name === "string" ? call.name : entry?.toolName,
-          args: args.length > 2000 ? `${args.slice(0, 2000)}…` : args,
-        });
-      } else if (inner.type === "text_start") onStatus?.({ kind: "responding" });
-      else if (inner.type === "text_delta" && typeof inner.delta === "string") {
-        stdout += inner.delta;
-        onChunk?.(inner.delta);
-      }
-    };
-
-    child.stdout?.on("data", (chunk) => {
-      pending += String(chunk);
-      const lines = pending.split("\n");
-      pending = lines.pop() ?? "";
-      for (const line of lines) if (line.trim()) handleEvent(line);
-    });
-    child.stderr?.on("data", (chunk) => { stderr += String(chunk); });
-    child.on("error", (error) => { clearTimeout(timeout); finish(error.message); });
-    child.on("close", (code) => {
-      clearTimeout(timeout);
-      if (pending.trim()) handleEvent(pending);
-      finish(code === 0 ? undefined : (active.stopped ? "generation stopped" : (stderr.trim() || `pi exited with ${code}`)));
-    });
-  });
 }
 
 function readJsonFile<T>(filePath: string): T | null {

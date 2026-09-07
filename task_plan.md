@@ -124,3 +124,14 @@ Phase 14 — Pi CLI settings parity complete
 | Error | Attempt | Resolution |
 |-------|---------|------------|
 | None yet | 1 | — |
+
+### Phase 15: Provider key-pool automatic failover (terminal Pi)
+
+- [x] Research Pi extension/provider-composer integration (recovered from failed worker run)
+- [x] Implement `pi-package/key-failover.ts` core logic (eligibility, classification, health state, stream wrapper)
+- [x] Repair `pi-package/index.ts` to current Pi extension API (JSX removal, registerCommand signature, agent-dir resolution) and wire failover registration
+- [x] Add `autoFailover` flag: types, store, ProvidersModelsPage toggle + key status/reset UI, server routes, translations
+- [x] Unit tests (mocked streams: 429→next, balance→pause, exhaustion, cooldown expiry, no-replay-after-output, abort, passthrough)
+- [ ] Isolated runtime e2e: PI_CODING_AGENT_DIR sandbox + local fake relay + real `pi` CLI（未验证）
+- [x] Production build
+- **Status:** implementation_complete; e2e_pending

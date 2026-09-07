@@ -76,3 +76,16 @@
 - The web store previously shallow-merged settings; updating one nested terminal/image/warning value could therefore erase its siblings before writing the complete JSON document. `mergePiSettings` now preserves all known nested groups, including nested retry-provider fields.
 - The initial per-model picker exposed more than one thousand catalog models at once. A search-first picker now limits the rendered list to 80 matching/pinned models while retaining existing overrides.
 - Browser persistence verification changed `terminal.showImages`, confirmed `terminal.showTerminalProgress` remained intact, then restored the exact original settings document. The final settings page has no browser console warnings or errors.
+
+## Key failover (Phase 15)
+
+- Terminal requests go through the Pi model runtime, so the extension's provider stream wrapper covers real CLI model calls. (The Web Chat module was removed on 2026-09-07.)
+- `composeModelProvider` (provider-composer.js:305): legacy `registerProvider(id, { api, streamSimple })` WITHOUT models/baseUrl/apiKey intercepts every model whose `model.api === extension.api`; models.json config/models/auth stay authoritative. Validation only requires `api` when `streamSimple` is set.
+- Stream errors arrive as `{type:"error", reason, error: AssistantMessage}` events (stopReason/errorMessage), NOT thrown to the consumer; sync throws (e.g. missing apiKey) happen at call time. Abort → reason "aborted".
+- `getApiProvider(model.api).streamSimple(model, context, {...options, apiKey})` from `@earendil-works/pi-ai/compat` is the exact fallback the composer itself uses; `lazyStream`/`createAssistantMessageEventStream` export from pi-ai root. `getAgentDir()/getModelsPath()/getSessionsDir()` export from pi-coding-agent root and respect `PI_CODING_AGENT_DIR`.
+- model-runtime passes `options.apiKey` (resolved auth) into streamSimple — per-attempt key override works via options.
+- Config value semantics (documented): `!cmd` shell command; `$VAR`/`${VAR}` env; `$$`/`$!` literals. `resolveConfigValue` is NOT exported from package root; pi-web-switch re-implements the documented non-command semantics and treats `!command` pool keys as ineligible (no new shell path).
+- `pi-web-switch` is NOT in the user's global `packages` settings — terminal coverage requires `pi install` (or `-e` for testing). Web Chat spawn inherits it once installed.
+- Event types: start, text_*/thinking_*/toolcall_*, done, error. Only "start" carries no content → retry allowed until any other event is yielded; buffered-prefix strategy gives exactly-once delivery.
+- On exhaustion, propagate the LAST original error event unchanged so pi's native retry-with-backoff semantics stay intact.
+- State file `pi-web-switch-key-state.json` in agent dir: provider→keyId→{status,until,reason}; key ids only (sha256-derived for hand-edited entries), never raw keys.

@@ -1,14 +1,18 @@
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Box, Text } from "@earendil-works/pi-tui";
-import { Type } from "typebox";
-import { execSync, spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { spawn } from "node:child_process";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  createFailoverRuntime,
+  readHealthState,
+  resetProviderHealth,
+  writeHealthState,
+} from "./key-failover.ts";
 
 const PI_SWITCH_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const PI_DIR = join(homedir(), ".pi", "agent");
+const KEY_STATE_FILENAME = "pi-web-switch-key-state.json";
 
 let serverProcess: ReturnType<typeof spawn> | null = null;
 
@@ -19,7 +23,7 @@ function getPackageManager(): "npm" | "pnpm" | "yarn" {
 }
 
 // ─── Usage reader ────────────────────────────────────────
-// Reads ~/.pi/agent/sessions/*.jsonl directly and aggregates today / 7d stats,
+// Reads session JSONL files directly and aggregates today / 7d stats,
 // so the user can see usage at a glance without launching the dashboard.
 
 interface UsageRecord {
@@ -36,6 +40,15 @@ interface UsageRecord {
 }
 
 const CN_TZ = "Asia/Shanghai";
+
+function cnDate(d: Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: CN_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
+}
 
 function cnDateParts(ts: string | number): { date: string; hour: number } {
   const d = new Date(ts);
@@ -107,19 +120,22 @@ function parseSessionFile(filePath: string): UsageRecord[] {
 }
 
 function readAllUsage(): UsageRecord[] {
-  const sessionsPath = join(PI_DIR, "sessions");
-  const { readdirSync, existsSync: exists, statSync } = require("node:fs");
-  if (!exists(sessionsPath)) return [];
-
-  const dirs = readdirSync(sessionsPath)
-    .filter((name: string) => name.startsWith("--"))
-    .map((name: string) => join(sessionsPath, name))
-    .filter((dir: string) => statSync(dir).isDirectory());
+  const sessionsPath = join(getAgentDir(), "sessions");
+  if (!existsSync(sessionsPath)) return [];
+  let dirs: string[] = [];
+  try {
+    dirs = readdirSync(sessionsPath)
+      .filter((name) => name.startsWith("--"))
+      .map((name) => join(sessionsPath, name))
+      .filter((dir) => statSync(dir).isDirectory());
+  } catch {
+    return [];
+  }
 
   const allRecords: UsageRecord[] = [];
   for (const dir of dirs) {
     try {
-      const files = readdirSync(dir).filter((f: string) => f.endsWith(".jsonl"));
+      const files = readdirSync(dir).filter((f) => f.endsWith(".jsonl"));
       for (const file of files) {
         const records = parseSessionFile(join(dir, file));
         allRecords.push(...records);
@@ -135,13 +151,6 @@ function aggregateSummary() {
   const records = readAllUsage();
   // pi-reader buckets dates in Asia/Shanghai (CN_TZ); use the same timezone
   // so "today" lines up with the session data around midnight UTC.
-  const cnDate = (d: Date) =>
-    new Intl.DateTimeFormat("en-CA", {
-      timeZone: "Asia/Shanghai",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).format(d);
   const today = cnDate(new Date());
   const sevenDaysAgo = cnDate(new Date(Date.now() - 6 * 24 * 60 * 60 * 1000));
 
@@ -198,60 +207,58 @@ function shortDate(iso: string): string {
   return `${parts[1]}/${parts[2]}`;
 }
 
-export default function (api: ExtensionAPI, ctx: ExtensionContext) {
+// ─── Key failover registration ───────────────────────────
+
+function readModelsJsonSafe(): { providers?: Record<string, unknown> } | undefined {
+  try {
+    const path = join(getAgentDir(), "models.json");
+    if (!existsSync(path)) return undefined;
+    return JSON.parse(readFileSync(path, "utf-8"));
+  } catch {
+    return undefined;
+  }
+}
+
+function keyStatePath(): string {
+  return join(getAgentDir(), KEY_STATE_FILENAME);
+}
+
+// ─── Extension entry ─────────────────────────────────────
+
+export default function (pi: ExtensionAPI) {
   // /pi-switch start|stop|status — launch the dashboard web UI
-  api.registerCommand({
-    name: "pi-switch",
-    description: "Start or stop the pi-web-switch dashboard",
-    params: Type.Object({
-      action: Type.Enum({ start: "start", stop: "stop", status: "status" }),
-      port: Type.Optional(Type.Number({ default: 5173 })),
-    }),
-    execute: async (params) => {
-      const { action, port = 5173 } = params;
+  pi.registerCommand("pi-switch", {
+    description: "Start or stop the pi-web-switch dashboard (start|stop|status [port])",
+    handler: async (args, ctx) => {
+      const [actionArg, portArg] = (args ?? "").trim().split(/\s+/).filter(Boolean);
+      const action = actionArg ?? "status";
+      const port = Number(portArg) || 5173;
 
       if (action === "status") {
         if (serverProcess && !serverProcess.killed) {
-          return ctx.say(
-            <Box borderStyle="round" borderColor="green" paddingLeft={1} paddingRight={1}>
-              <Text>pi-web-switch is running at http://localhost:{port}</Text>
-            </Box>
-          );
+          ctx.ui.notify(`pi-web-switch is running at http://localhost:${port}`, "info");
         } else {
           serverProcess = null;
-          return ctx.say(
-            <Box borderStyle="round" borderColor="yellow" paddingLeft={1} paddingRight={1}>
-              <Text>pi-web-switch is not running.</Text>
-              <Text>Use `/pi-switch start` to launch the dashboard.</Text>
-            </Box>
-          );
+          ctx.ui.notify(`pi-web-switch is not running. Use '/pi-switch start' to launch the dashboard.`, "info");
         }
+        return;
       }
 
       if (action === "stop") {
         if (serverProcess && !serverProcess.killed) {
           serverProcess.kill();
           serverProcess = null;
-          return ctx.say(
-            <Box borderStyle="round" borderColor="green" paddingLeft={1} paddingRight={1}>
-              <Text>pi-web-switch stopped.</Text>
-            </Box>
-          );
+          ctx.ui.notify("pi-web-switch stopped.", "info");
+        } else {
+          ctx.ui.notify("pi-web-switch is not running.", "info");
         }
-        return ctx.say(
-          <Box borderStyle="round" borderColor="yellow" paddingLeft={1} paddingRight={1}>
-            <Text>pi-web-switch is not running.</Text>
-          </Box>
-        );
+        return;
       }
 
       if (action === "start") {
         if (serverProcess && !serverProcess.killed) {
-          return ctx.say(
-            <Box borderStyle="round" borderColor="yellow" paddingLeft={1} paddingRight={1}>
-              <Text>pi-web-switch is already running at http://localhost:{port}</Text>
-            </Box>
-          );
+          ctx.ui.notify(`pi-web-switch is already running at http://localhost:${port}`, "info");
+          return;
         }
 
         const pm = getPackageManager();
@@ -267,25 +274,24 @@ export default function (api: ExtensionAPI, ctx: ExtensionContext) {
 
         await new Promise((r) => setTimeout(r, 2000));
 
-        return ctx.say(
-          <Box borderStyle="round" borderColor="green" paddingLeft={1} paddingRight={1}>
-            <Text>pi-web-switch started!</Text>
-            <Text>Dashboard: http://localhost:{port}</Text>
-            <Text>Use `/pi-switch stop` to stop the server.</Text>
-          </Box>
+        ctx.ui.notify(
+          `pi-web-switch started! Dashboard: http://localhost:${port} — use '/pi-switch stop' to stop the server.`,
+          "info"
         );
+        return;
       }
+
+      ctx.ui.notify(`Unknown action '${action}'. Use start, stop, or status.`, "error");
     },
   });
 
   // /pi-usage — quick usage summary (today + 7d) in the terminal
-  api.registerCommand({
-    name: "pi-usage",
+  pi.registerCommand("pi-usage", {
     description: "Show pi usage summary (today / 7 days) without launching the dashboard",
-    params: Type.Object({}),
-    execute: async () => {
+    handler: async (_args, ctx) => {
       try {
         const s = aggregateSummary();
+        const today = cnDate(new Date());
         const spark = s.daily
           .map((d) => {
             const max = Math.max(1, ...s.daily.map((x) => x.tokens));
@@ -294,31 +300,69 @@ export default function (api: ExtensionAPI, ctx: ExtensionContext) {
           })
           .join("\n");
 
-        return ctx.say(
-          <Box borderStyle="round" borderColor="green" paddingLeft={1} paddingRight={1}>
-            <Text bold>📊 pi usage summary</Text>
-            <Text> </Text>
-            <Text bold>Today ({new Date().toISOString().slice(0, 10)})</Text>
-            <Text>  Tokens:   {formatTokens(s.today.tokens)}</Text>
-            <Text>  Cost:     {formatCost(s.today.cost)}</Text>
-            <Text>  Requests: {s.today.requests}</Text>
-            <Text> </Text>
-            <Text bold>Last 7 days</Text>
-            <Text>  Tokens:   {formatTokens(s.sevenDays.tokens)}</Text>
-            <Text>  Cost:     {formatCost(s.sevenDays.cost)}</Text>
-            <Text>  Requests: {s.sevenDays.requests}</Text>
-            <Text> </Text>
-            <Text bold>Daily trend</Text>
-            <Text>{spark}</Text>
-          </Box>
+        ctx.ui.notify(
+          [
+            "📊 pi usage summary",
+            "",
+            `Today (${today})`,
+            `  Tokens:   ${formatTokens(s.today.tokens)}`,
+            `  Cost:     ${formatCost(s.today.cost)}`,
+            `  Requests: ${s.today.requests}`,
+            "",
+            "Last 7 days",
+            `  Tokens:   ${formatTokens(s.sevenDays.tokens)}`,
+            `  Cost:     ${formatCost(s.sevenDays.cost)}`,
+            `  Requests: ${s.sevenDays.requests}`,
+            "",
+            "Daily trend",
+            spark,
+          ].join("\n"),
+          "info"
         );
       } catch (err) {
-        return ctx.say(
-          <Box borderStyle="round" borderColor="red" paddingLeft={1} paddingRight={1}>
-            <Text>Failed to read usage: {String(err)}</Text>
-          </Box>
-        );
+        ctx.ui.notify(`Failed to read usage: ${String(err)}`, "error");
       }
+    },
+  });
+
+  // Key-pool automatic failover: register stream wrappers for every eligible
+  // provider (opt-in via the web UI toggle). Pool and health state are reread
+  // per request, so web-UI edits apply without re-registration. Re-synced on
+  // session_start / model_select so api-type or eligibility changes are picked
+  // up too. This covers the terminal Pi CLI and Web Chat (same runtime).
+  const failover = createFailoverRuntime(pi, {
+    loadModelsJson: () => readModelsJsonSafe() as never,
+    healthStatePath: keyStatePath(),
+  });
+  const syncFailover = () => {
+    try {
+      failover.sync();
+    } catch (err) {
+      console.error(`[pi-web-switch] key failover sync failed: ${String(err)}`);
+    }
+  };
+  syncFailover();
+  pi.on("session_start", async () => syncFailover());
+  pi.on("model_select", async () => syncFailover());
+
+  // Expose key-health reset from the terminal: /pi-key-reset <providerId> [keyId]
+  pi.registerCommand("pi-key-reset", {
+    description: "Reset automatic-failover key health for a provider (paused/cooldown keys)",
+    handler: async (args, ctx) => {
+      const [providerId, keyId] = (args ?? "").trim().split(/\s+/).filter(Boolean);
+      if (!providerId) {
+        ctx.ui.notify("Usage: /pi-key-reset <providerId> [keyId]", "error");
+        return;
+      }
+      const path = keyStatePath();
+      const next = readHealthState(path);
+      if (!next[providerId]) {
+        ctx.ui.notify(`No key health state recorded for '${providerId}'.`, "info");
+        return;
+      }
+      const updated = resetProviderHealth(next, providerId, keyId);
+      writeHealthState(path, updated);
+      ctx.ui.notify(keyId ? `Reset key ${keyId} of ${providerId}.` : `Reset all keys of ${providerId}.`, "info");
     },
   });
 }

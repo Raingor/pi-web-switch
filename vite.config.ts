@@ -64,10 +64,6 @@ function piApiPlugin(): Plugin {
             res.end(JSON.stringify(status));
           });
         },
-        "GET /api/pi/chat/active"(_, res) {
-          res.setHeader("Content-Type", "application/json");
-          res.end(JSON.stringify({ sessionIds: pi.listActiveWebChats() }));
-        },
         "GET /api/pi/session-usage"(req, res) {
           const sessionId = new URL(req.url ?? "", "http://localhost").searchParams.get("session") ?? "";
           const usage = pi.readSessionUsage(sessionId);
@@ -139,6 +135,28 @@ function piApiPlugin(): Plugin {
             res.end(JSON.stringify({ success: ok }));
           });
         },
+        "GET /api/pi/key-state"(_, res) {
+          const state = pi.readKeyState();
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify(state ?? {}));
+        },
+        "POST /api/pi/key-state/reset"(req, res) {
+          let body = "";
+          req.on("data", (chunk: string) => (body += chunk));
+          req.on("end", () => {
+            try {
+              const { providerId, keyId } = JSON.parse(body) as { providerId?: string; keyId?: string };
+              if (typeof providerId !== "string" || !providerId) throw new Error("missing providerId");
+              const ok = pi.resetKeyState(providerId, typeof keyId === "string" && keyId ? keyId : undefined);
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ success: ok }));
+            } catch (error) {
+              res.statusCode = 400;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ success: false }));
+            }
+          });
+        },
         "GET /api/pi/builtin-providers"(_, res) {
           res.setHeader("Content-Type", "application/json");
           // Prefer the live catalog from the local pi install; fall back to
@@ -162,50 +180,6 @@ function piApiPlugin(): Plugin {
           const sessions = pi.listSessions();
           res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify(sessions));
-        },
-        "POST /api/pi/chat"(req, res) {
-          let body = "";
-          req.on("data", (chunk: string) => (body += chunk));
-          req.on("end", async () => {
-            try {
-              const { prompt, sessionId, projectPath, model, thinking } = JSON.parse(body) as { prompt?: string; sessionId?: string; projectPath?: string; model?: string; thinking?: string };
-              if (typeof prompt !== "string" || !prompt.trim()) throw new Error("missing prompt");
-              res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
-              res.setHeader("Cache-Control", "no-cache, no-transform");
-              res.setHeader("Connection", "keep-alive");
-              const send = (event: string, data: unknown) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-              const result = await pi.runWebChat(prompt.trim(), sessionId, (chunk) => send("delta", chunk), projectPath, model, thinking, (status) => send("status", status), (step) => send("step", step));
-              if (result.error) send("error", result.error);
-              else send("done", { sessionId: result.sessionId });
-              res.end();
-            } catch (error) {
-              res.statusCode = 400;
-              res.setHeader("Content-Type", "application/json");
-              res.end(JSON.stringify({ error: error instanceof Error ? error.message : "Invalid request" }));
-            }
-          });
-        },
-        "POST /api/pi/chat/stop"(req, res) {
-          let body = "";
-          req.on("data", (chunk: string) => (body += chunk));
-          req.on("end", () => {
-            try {
-              const { sessionId } = JSON.parse(body) as { sessionId?: string };
-              const stopped = typeof sessionId === "string" && pi.stopWebChat(sessionId);
-              res.setHeader("Content-Type", "application/json");
-              res.end(JSON.stringify({ stopped }));
-            } catch {
-              res.statusCode = 400;
-              res.setHeader("Content-Type", "application/json");
-              res.end(JSON.stringify({ stopped: false }));
-            }
-          });
-        },
-        "POST /api/pi/chat/select-directory"(_, res) {
-          pi.chooseChatDirectory().then((path) => {
-            res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ path }));
-          });
         },
         "GET /api/pi/memory"(_, res) {
           const memory = pi.readMemoryFiles();

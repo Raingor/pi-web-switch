@@ -1,13 +1,11 @@
 import { useState } from "react";
-import { Outlet, useLocation } from "react-router-dom";
+import { Outlet } from "react-router-dom";
 import { Menu, RadioTower } from "lucide-react";
 import { BasicSidebar } from "./BasicSidebar";
 import { HelpButton } from "@/components/help/HelpButton";
 
 export function AppShell() {
-  const location = useLocation();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const isFullHeightPage = location.pathname.startsWith("/chat");
 
   return (
     <div className="app-shell">
@@ -46,14 +44,10 @@ export function AppShell() {
           <span className="system-pulse" aria-hidden="true" />
         </header>
 
-        <main className={isFullHeightPage ? "app-main app-main-full" : "app-main"}>
-          {isFullHeightPage ? (
+        <main className="app-main">
+          <div className="app-canvas">
             <Outlet />
-          ) : (
-            <div className="app-canvas">
-              <Outlet />
-            </div>
-          )}
+          </div>
         </main>
       </div>
 
