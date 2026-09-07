@@ -234,6 +234,106 @@ private final class UsageReader {
     }
 }
 
+// A single native view keeps information non-interactive and avoids disabled
+// menu-item contrast. Fixed columns prevent long provider names moving numbers.
+private final class UsagePanel: NSView {
+    private let summary: UsageSummary
+    override var isFlipped: Bool { true }
+    init(summary: UsageSummary) {
+        self.summary = summary
+        super.init(frame: NSRect(x: 0, y: 0, width: 400, height: 584))
+        setAccessibilityElement(true)
+        setAccessibilityRole(.group)
+        setAccessibilityLabel("Pi 使用情况")
+    }
+    required init?(coder: NSCoder) { nil }
+
+    private func text(_ value: String, _ x: CGFloat, _ y: CGFloat, _ width: CGFloat,
+                      size: CGFloat = 12, color: NSColor = .labelColor, right: Bool = false, bold: Bool = false) {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = right ? .right : .left
+        paragraph.lineBreakMode = .byTruncatingTail
+        let font = NSFont(name: right ? "Menlo" : "Helvetica Neue", size: size) ?? NSFont.systemFont(ofSize: size)
+        let selected = bold ? NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask) : font
+        (value as NSString).draw(in: NSRect(x: x, y: y, width: width, height: size + 7), withAttributes: [
+            .font: selected, .foregroundColor: color, .paragraphStyle: paragraph
+        ])
+    }
+    private func line(_ y: CGFloat) {
+        NSColor.separatorColor.setFill()
+        NSRect(x: 20, y: y, width: 360, height: 0.5).fill()
+    }
+    private func bar(_ percent: Double, x: CGFloat, y: CGFloat, width: CGFloat, color: NSColor) {
+        NSColor.quaternaryLabelColor.setFill()
+        NSBezierPath(roundedRect: NSRect(x: x, y: y, width: width, height: 4), xRadius: 2, yRadius: 2).fill()
+        let fill = width * CGFloat(min(100, max(0, percent))) / 100
+        if fill > 0 {
+            color.setFill()
+            NSBezierPath(roundedRect: NSRect(x: x, y: y, width: fill, height: 4), xRadius: 2, yRadius: 2).fill()
+        }
+    }
+    private func period(_ title: String, totals: UsageTotals, x: CGFloat) {
+        text(title, x, 65, 170, color: .secondaryLabelColor, bold: true)
+        text(formatTokens(totals.tokens), x, 87, 170, size: 26, bold: true)
+        text("TOKENS", x, 119, 170, size: 9, color: .secondaryLabelColor)
+        text(formatCost(totals.cost), x, 143, 90, size: 14, bold: true)
+        text("\(totals.requests) 次", x + 88, 145, 82, size: 11, right: true)
+        text("缓存命中", x, 176, 80, size: 11, color: .secondaryLabelColor)
+        text(formatCacheHitRate(totals), x + 80, 174, 90, size: 14, color: .systemTeal, right: true, bold: true)
+        let rate = totals.tokens > 0 ? Double(totals.cacheRead + totals.cacheWrite) / Double(totals.tokens) * 100 : 0
+        bar(rate, x: x, y: 198, width: 170, color: .systemTeal)
+        text("读 \(formatTokens(totals.cacheRead)) · 写 \(formatTokens(totals.cacheWrite))", x, 211, 170, size: 10, color: .secondaryLabelColor)
+    }
+    private func quota(_ title: String, window: CodexUsageWindow?, y: CGFloat) {
+        text(title, 20, y, 90, bold: true)
+        guard let window else {
+            text("暂无额度信息", 120, y, 260, color: .secondaryLabelColor, right: true)
+            return
+        }
+        let accent: NSColor = window.remainingPercent <= 10 ? .systemRed : .systemTeal
+        text(String(format: "已用 %.0f%% · 剩余 %.0f%%", window.usedPercent, window.remainingPercent), 110, y, 270, color: accent, right: true)
+        bar(window.remainingPercent, x: 20, y: y + 23, width: 360, color: accent)
+        let seconds = window.resetAt.map { max(0, Int($0.timeIntervalSinceNow)) } ?? window.resetAfterSeconds
+        text(formatDuration(seconds).map { "\($0)后重置" } ?? "重置时间未知", 20, y + 32, 170, size: 10, color: .secondaryLabelColor)
+        text(formatResetAt(window.resetAt).map { "\($0) UTC+8" } ?? "", 180, y + 32, 200, size: 10, color: .secondaryLabelColor, right: true)
+    }
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        text("π", 20, 12, 26, size: 24, color: .systemTeal)
+        text("使用情况", 52, 15, 180, size: 17, bold: true)
+        let clock = DateFormatter()
+        clock.dateFormat = "HH:mm"
+        text("更新 " + clock.string(from: summary.updatedAt), 260, 20, 120, size: 10, color: .secondaryLabelColor, right: true)
+        line(49)
+        if let error = summary.error {
+            text("读取失败：" + error, 20, 65, 360, color: .systemRed)
+            return
+        }
+        period("今日", totals: summary.today, x: 20)
+        period("近 7 日", totals: summary.sevenDays, x: 210)
+        line(240)
+        text("CODEX / 官方额度", 20, 255, 230, size: 11, bold: true)
+        text(summary.codex?.planType?.uppercased() ?? "", 280, 255, 100, size: 10, color: .secondaryLabelColor, right: true)
+        if let status = summary.codex, status.loggedIn, status.error == nil {
+            quota("5 小时", window: status.primary, y: 281)
+            quota("7 天", window: status.secondary, y: 340)
+        } else {
+            let message = summary.codex.map { $0.loggedIn ? ($0.error ?? "暂无额度信息") : "未登录 openai-codex" } ?? "正在查询官方额度…"
+            text(message, 20, 295, 360, color: .secondaryLabelColor)
+        }
+        line(397)
+        text("提供商", 20, 412, 180, size: 11, bold: true)
+        text("近 7 日 · 按成本", 230, 412, 150, size: 10, color: .secondaryLabelColor, right: true)
+        for (i, provider) in summary.providers.prefix(5).enumerated() {
+            let y = CGFloat(439 + i * 26)
+            text(provider.id, 20, y, 169, size: 11)
+            text(formatTokens(provider.tokens), 193, y, 83, size: 11, color: .secondaryLabelColor, right: true)
+            text(formatCost(provider.cost), 280, y, 100, size: 11, right: true)
+        }
+        if summary.providers.isEmpty { text("暂无使用记录", 20, 439, 360, color: .secondaryLabelColor) }
+    }
+}
+
 private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let reader = UsageReader()
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -388,26 +488,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
         }
 
         menu.removeAllItems()
-        menu.addItem(informationItem("Pi 使用情况"))
-        menu.addItem(.separator())
-
-        if let error = summary.error {
-            menu.addItem(informationItem("读取失败：\(error)"))
-        } else {
-            addSection("今日", totals: summary.today)
-            menu.addItem(.separator())
-            addSection("近 7 日", totals: summary.sevenDays)
-            if !summary.providers.isEmpty {
-                menu.addItem(.separator())
-                menu.addItem(informationItem("Top 提供商（近 7 日）"))
-                for provider in summary.providers {
-                    let text = "  \(provider.id)：\(formatTokens(provider.tokens)) · \(formatCost(provider.cost))"
-                    menu.addItem(informationItem(text))
-                }
-            }
-            menu.addItem(.separator())
-            addCodexUsage(summary.codex)
-        }
+        let panel = NSMenuItem()
+        panel.view = UsagePanel(summary: summary)
+        menu.addItem(panel)
 
         menu.addItem(.separator())
         let refreshItem = NSMenuItem(title: "刷新使用量", action: #selector(refreshAction), keyEquivalent: "r")
