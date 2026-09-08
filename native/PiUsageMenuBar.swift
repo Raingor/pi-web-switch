@@ -367,24 +367,24 @@ private final class UsagePanel: NSView {
         text("读 \(formatTokens(totals.cacheRead)) · 写 \(formatTokens(totals.cacheWrite))", x, 211, 170, size: 10, color: .secondaryLabelColor)
     }
     private func quota(_ title: String, window: CodexUsageWindow?, y: CGFloat) {
-        text(title, 20, y, 90, bold: true)
+        text(title, 20, y, 160, bold: true)
         guard let window else {
             text("暂无额度信息", 120, y, 260, color: .secondaryLabelColor, right: true)
             return
         }
         let accent: NSColor = window.remainingPercent <= 10 ? .systemRed : .systemTeal
-        text(String(format: "已用 %.0f%% · 剩余 %.0f%%", window.usedPercent, window.remainingPercent), 110, y, 270, color: accent, right: true)
+        text(String(format: "已用 %.0f%% · 剩余 %.0f%%", window.usedPercent, window.remainingPercent), 160, y, 220, color: accent, right: true)
         bar(window.remainingPercent, x: 20, y: y + 23, width: 360, color: accent)
         let seconds = window.resetAt.map { max(0, Int($0.timeIntervalSinceNow)) } ?? window.resetAfterSeconds
         text(formatDuration(seconds).map { "\($0)后重置" } ?? "重置时间未知", 20, y + 32, 170, size: 10, color: .secondaryLabelColor)
         text(formatResetAt(window.resetAt).map { "\($0) UTC+8" } ?? "", 180, y + 32, 200, size: 10, color: .secondaryLabelColor, right: true)
     }
-    private func chatgptPeriod(_ title: String, totals: UsageTotals, x: CGFloat) {
-        text(title, x, 424, 170, color: .secondaryLabelColor, bold: true)
-        text(formatTokens(totals.tokens), x, 444, 170, size: 22, bold: true)
-        text("TOKENS", x, 473, 170, size: 9, color: .secondaryLabelColor)
-        text("输入 \(formatTokens(totals.input)) · 输出 \(formatTokens(totals.output))", x, 492, 170, size: 10, color: .secondaryLabelColor)
-        text("缓存 \(formatCacheHitRate(totals)) · \(totals.requests) 次", x, 509, 170, size: 10, color: .systemTeal)
+    private func chatgptPeriod(_ title: String, totals: UsageTotals, x: CGFloat, y: CGFloat) {
+        text(title, x, y, 170, color: .secondaryLabelColor, bold: true)
+        text(formatTokens(totals.tokens), x, y + 20, 170, size: 22, bold: true)
+        text("TOKENS", x, y + 49, 170, size: 9, color: .secondaryLabelColor)
+        text("输入 \(formatTokens(totals.input)) · 输出 \(formatTokens(totals.output))", x, y + 68, 170, size: 10, color: .secondaryLabelColor)
+        text("缓存 \(formatCacheHitRate(totals)) · \(totals.requests) 次", x, y + 85, 170, size: 10, color: .systemTeal)
     }
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
@@ -410,21 +410,25 @@ private final class UsagePanel: NSView {
             let message = summary.codex.map { $0.loggedIn ? ($0.error ?? "暂无额度信息") : "未登录 openai-codex" } ?? "正在查询官方额度…"
             text(message, 20, 295, 360, color: .secondaryLabelColor)
         }
-        line(397)
-        text("GPT / CHATGPT 使用", 20, 412, 230, size: 11, bold: true)
-        text("来自本地会话记录", 230, 412, 150, size: 10, color: .secondaryLabelColor, right: true)
-        chatgptPeriod("今日", totals: summary.chatgptToday, x: 20)
-        chatgptPeriod("近 7 日", totals: summary.chatgptSevenDays, x: 210)
-        line(535)
-        text("提供商", 20, 550, 180, size: 11, bold: true)
-        text("近 7 日 · 按成本", 230, 550, 150, size: 10, color: .secondaryLabelColor, right: true)
+
+        let currentY: CGFloat = 397
+        line(currentY)
+        text("GPT / CHATGPT 使用", 20, currentY + 15, 230, size: 11, bold: true)
+        text("来自本地会话记录", 230, currentY + 15, 150, size: 10, color: .secondaryLabelColor, right: true)
+        chatgptPeriod("今日", totals: summary.chatgptToday, x: 20, y: currentY + 27)
+        chatgptPeriod("近 7 日", totals: summary.chatgptSevenDays, x: 210, y: currentY + 27)
+
+        let providerLineY = currentY + 138
+        line(providerLineY)
+        text("提供商", 20, providerLineY + 15, 180, size: 11, bold: true)
+        text("近 7 日 · 按成本", 230, providerLineY + 15, 150, size: 10, color: .secondaryLabelColor, right: true)
         for (i, provider) in summary.providers.prefix(5).enumerated() {
-            let y = CGFloat(577 + i * 26)
+            let y = providerLineY + 42 + CGFloat(i * 26)
             text(provider.id, 20, y, 169, size: 11)
             text(formatTokens(provider.tokens), 193, y, 83, size: 11, color: .secondaryLabelColor, right: true)
             text(formatCost(provider.cost), 280, y, 100, size: 11, right: true)
         }
-        if summary.providers.isEmpty { text("暂无使用记录", 20, 577, 360, color: .secondaryLabelColor) }
+        if summary.providers.isEmpty { text("暂无使用记录", 20, providerLineY + 42, 360, color: .secondaryLabelColor) }
     }
 }
 
@@ -491,6 +495,23 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
                 self.isRefreshing = false
                 self.rebuildMenu(summary)
             }
+        }
+    }
+
+    private func runShellCommand(_ command: String) -> String {
+        let task = Process()
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError = FileHandle.nullDevice
+        task.executableURL = URL(fileURLWithPath: "/bin/sh")
+        task.arguments = ["-c", command]
+        do {
+            try task.run()
+            task.waitUntilExit()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            return String(data: data, encoding: .utf8) ?? ""
+        } catch {
+            return ""
         }
     }
 
