@@ -480,6 +480,46 @@ function piApiPlugin(): Plugin {
             }
           });
         },
+        "POST /api/pi/agnes-chat"(req, res) {
+          let body = "";
+          req.on("data", (chunk: string) => (body += chunk));
+          req.on("end", () => {
+            try {
+              const input = JSON.parse(body) as {
+                model?: string;
+                messages?: unknown;
+                maxTokens?: number;
+                temperature?: number;
+              };
+              const agnes = pi.readAgnesConfig();
+              if (!agnes.apiKey) throw new Error("missing api key");
+              if (!Array.isArray(input.messages) || input.messages.length === 0) throw new Error("messages are required");
+              const messages = input.messages.filter((message: any) =>
+                message && ["system", "user", "assistant"].includes(message.role)
+                && (typeof message.content === "string" || Array.isArray(message.content))
+              );
+              if (messages.length !== input.messages.length) throw new Error("invalid messages");
+              pi.chatAgnes({
+                baseUrl: agnes.baseUrl,
+                apiKey: agnes.apiKey,
+                model: input.model || "agnes-3.0-flash",
+                messages,
+                maxTokens: input.maxTokens,
+                temperature: input.temperature,
+              }).then((result: unknown) => {
+                res.setHeader("Content-Type", "application/json");
+                res.end(JSON.stringify(result));
+              });
+            } catch (error) {
+              res.statusCode = 400;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({
+                success: false,
+                message: error instanceof Error ? error.message : "Invalid request body",
+              }));
+            }
+          });
+        },
         "POST /api/pi/image-generate"(req, res) {
           let body = "";
           req.on("data", (chunk: string) => (body += chunk));

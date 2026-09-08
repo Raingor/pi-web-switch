@@ -3080,9 +3080,10 @@ export function writeAgnesConfig(config: Partial<AgnesConfig>): boolean {
   }
 }
 
-// ─── Image / Video Generation ─────────────────────────────
-// OpenAI-compatible generation endpoints (Agnes AI and similar gateways).
-// Images are synchronous; video is an async task that must be polled.
+// ─── Agnes 3.0 / Legacy Generation ────────────────────────
+// Agnes 3.0 is an OpenAI-compatible text model. The image/video functions below
+// are retained for backwards-compatible API consumers, but are no longer used
+// by the web panel.
 
 export interface GenerateResult {
   success: boolean;
@@ -3137,6 +3138,85 @@ async function generationHttpError(res: Response, started: number): Promise<Gene
     return { success: false, status: res.status, latencyMs, message: String(message).slice(0, 400), raw: data };
   } catch {
     return { success: false, status: res.status, latencyMs, message: `HTTP ${res.status}` };
+  }
+}
+
+export interface AgnesChatMessage {
+  role: "system" | "user" | "assistant";
+  content: string | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }>;
+}
+
+export interface AgnesChatOptions {
+  baseUrl: string;
+  model: string;
+  messages: AgnesChatMessage[];
+  apiKey?: string;
+  maxTokens?: number;
+  temperature?: number;
+  timeoutMs?: number;
+}
+
+export interface AgnesChatResult {
+  success: boolean;
+  status?: number;
+  latencyMs?: number;
+  message?: string;
+  reply?: string;
+  usage?: { promptTokens?: number; completionTokens?: number; totalTokens?: number };
+}
+
+function chatContentText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((part: any) => part?.type === "text" && typeof part.text === "string" ? part.text : "")
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** Call Agnes 3.0 Flash through its OpenAI-compatible Chat Completions API. */
+export async function chatAgnes(options: AgnesChatOptions): Promise<AgnesChatResult> {
+  const url = generationUrl(options.baseUrl, "/chat/completions");
+  if (!url) return { success: false, message: "invalid URL" };
+  if (!options.model || !options.messages.length) return { success: false, message: "model and messages are required" };
+
+  const key = resolveGenerationKey(options.apiKey);
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (key) headers.Authorization = `Bearer ${key}`;
+  const body: Record<string, unknown> = {
+    model: options.model,
+    messages: options.messages,
+    stream: false,
+  };
+  if (typeof options.maxTokens === "number" && Number.isFinite(options.maxTokens)) body.max_tokens = options.maxTokens;
+  if (typeof options.temperature === "number" && Number.isFinite(options.temperature)) body.temperature = options.temperature;
+
+  const started = Date.now();
+  try {
+    const res = await fetchExternal(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(options.timeoutMs ?? 120000),
+    });
+    if (!res.ok) return await generationHttpError(res, started);
+
+    const data = (await res.json()) as any;
+    const reply = chatContentText(data?.choices?.[0]?.message?.content);
+    const usage = data?.usage;
+    if (!reply) return { success: false, latencyMs: Date.now() - started, message: "empty response" };
+    return {
+      success: true,
+      latencyMs: Date.now() - started,
+      reply,
+      usage: usage ? {
+        promptTokens: usage.prompt_tokens,
+        completionTokens: usage.completion_tokens,
+        totalTokens: usage.total_tokens,
+      } : undefined,
+    };
+  } catch (e: any) {
+    return generationFailure(e, started);
   }
 }
 

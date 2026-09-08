@@ -41,8 +41,8 @@ import {
   Wand2,
 } from "lucide-react";
 
-// Selectable API types for the provider picker — chat APIs only. Image and
-// video generation live in their own Agnes zone (/generate), not here.
+// Selectable API types for the provider picker — chat APIs only. Agnes 3.0
+// has its own dedicated model console in /generate, not here.
 //
 // Google / Bedrock / Mistral were dropped from this list on request. Their
 // values stay valid in `ApiType` because pi's builtin catalog still uses them,
