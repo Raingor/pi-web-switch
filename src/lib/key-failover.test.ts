@@ -201,8 +201,10 @@ describe("classifyError", () => {
     expect(classifyError({ errorMessage: '403: {"code":"insufficient_quota"}' }).kind).toBe("insufficient-balance");
     expect(classifyError({ errorMessage: "pre-consume quota failed, user quota: $0.7, need quota: $0.8" }).kind).toBe("insufficient-balance");
   });
-  it("does NOT treat bare 403 as balance", () => {
-    expect(classifyError({ errorMessage: "403: invalid api key" }).kind).toBe("other");
+  it("treats bare 403 as a key-level failure (pause + switch)", () => {
+    expect(classifyError({ errorMessage: "403: invalid api key" }).kind).toBe("insufficient-balance");
+    expect(classifyError({ errorMessage: "403 Forbidden" }).kind).toBe("insufficient-balance");
+    expect(classifyError({ errorMessage: 'HTTP 403: {"error":"forbidden"}' }).kind).toBe("insufficient-balance");
   });
   it("classifies rate limits", () => {
     expect(classifyError({ errorMessage: "429: too many requests" }).kind).toBe("rate-limit");
@@ -281,11 +283,24 @@ describe("createFailoverStreamSimple", () => {
     expect(events.map((e) => e.type)).toEqual(["start", "text_delta", "done"]);
     expect(harness.health.relay?.k1).toMatchObject({ status: "cooldown", reason: "rate-limit" });
     expect(harness.health.relay?.k1?.until).toBe(1_000_000 + RATE_LIMIT_COOLDOWN_MS);
+    expect(harness.logs.join("\n")).toContain("k1");
+    expect(harness.logs.join("\n")).not.toContain("sk-1");
   });
 
   it("pauses a key on insufficient balance (even 429 insufficient_quota)", async () => {
     const { harness, stream } = makeHarness(eligibleCfg, {
       "sk-1": [startEvent, errorEvent("429: You exceeded your current quota, please check your plan and billing details.")],
+      "sk-2": [startEvent, doneEvent()],
+    });
+    const { events } = await collect(stream(fakeModel, fakeContext, {}));
+    expect(harness.usedKeys).toEqual(["sk-1", "sk-2"]);
+    expect(events.at(-1)?.type).toBe("done");
+    expect(harness.health.relay?.k1).toEqual({ status: "paused", reason: "insufficient-balance" });
+  });
+
+  it("pauses and switches after a bare 403", async () => {
+    const { harness, stream } = makeHarness(eligibleCfg, {
+      "sk-1": [startEvent, errorEvent("HTTP 403 Forbidden")],
       "sk-2": [startEvent, doneEvent()],
     });
     const { events } = await collect(stream(fakeModel, fakeContext, {}));
@@ -368,10 +383,8 @@ describe("createFailoverStreamSimple", () => {
     expect(harness.usedKeys[0]).toBe("sk-3");
   });
 
-  it("delegates to the active key when all keys are unhealthy", async () => {
-    const { harness, stream } = makeHarness(eligibleCfg, {
-      "sk-1": [startEvent, errorEvent("429: still limited")],
-    });
+  it("does not call a paused/cooling key when every key is unhealthy", async () => {
+    const { harness, stream } = makeHarness(eligibleCfg, {});
     harness.health = {
       relay: {
         k1: { status: "paused", reason: "insufficient-balance" },
@@ -380,9 +393,10 @@ describe("createFailoverStreamSimple", () => {
       },
     };
     const { events } = await collect(stream(fakeModel, fakeContext, {}));
-    // Active key sk-1 delegated to; its error surfaces unchanged.
-    expect(harness.usedKeys).toEqual(["sk-1"]);
-    expect(events.at(-1)?.type).toBe("error");
+    expect(harness.usedKeys).toEqual([]);
+    const last = events.at(-1);
+    expect(last?.type).toBe("error");
+    if (last?.type === "error") expect(last.error.errorMessage).toContain("No healthy API keys remain");
   });
 
   it("clears an expired cooldown entry after the key succeeds again", async () => {

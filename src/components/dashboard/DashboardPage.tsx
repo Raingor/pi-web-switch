@@ -168,21 +168,6 @@ function cnTodayStr(): string {
   }).format(new Date());
 }
 
-/** Previous period of equal length, for period-over-period trends. */
-function getPrevRange(range: RangeKey): { from: string; to: string } | null {
-  const shift = (days: number) => {
-    // Start from China-time "today" and shift by whole days using UTC math.
-    const [y, m, dNum] = cnTodayStr().split("-").map(Number);
-    const t = Date.UTC(y ?? 0, (m ?? 1) - 1, dNum ?? 1) - days * 86400000;
-    const d = new Date(t);
-    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
-  };
-  if (range === "today") return { from: shift(1), to: shift(1) };
-  if (range === "7d") return { from: shift(13), to: shift(7) };
-  if (range === "30d") return { from: shift(59), to: shift(30) };
-  return null; // custom: no comparable previous period
-}
-
 function sortRows<T extends Record<string, unknown>>(rows: T[], key: string, dir: SortDir): T[] {
   return [...rows].sort((a, b) => {
     const av = Number(a[key] ?? 0);
@@ -212,8 +197,6 @@ function StatCard({
   value,
   subtitle,
   icon,
-  trend,
-  trendLabel,
   progress,
   children,
   className,
@@ -222,8 +205,6 @@ function StatCard({
   value: string;
   subtitle?: string;
   icon: React.ReactNode;
-  trend?: number;
-  trendLabel?: string;
   progress?: number;
   children?: React.ReactNode;
   className?: string;
@@ -238,19 +219,6 @@ function StatCard({
       </div>
       <p className="text-2xl font-bold tracking-tight" style={{ color: "var(--page-text)" }}>{value}</p>
       {subtitle && <p className="text-xs mt-1" style={{ color: "var(--subtle-text)" }}>{subtitle}</p>}
-      {trend !== undefined && (
-        <div className="flex items-center gap-1 mt-2">
-          {trend >= 0 ? (
-            <ArrowUp className="h-3 w-3 text-emerald-400" />
-          ) : (
-            <ArrowDown className="h-3 w-3 text-red-400" />
-          )}
-          <span className={cn("text-xs font-medium", trend >= 0 ? "text-emerald-400" : "text-red-400")}>
-            {Math.abs(trend).toFixed(1)}%
-          </span>
-          {trendLabel && <span className="text-xs" style={{ color: "var(--subtle-text)" }}>{trendLabel}</span>}
-        </div>
-      )}
       {progress !== undefined && (
         <div className="mt-2 h-1.5 w-full rounded-full" style={{ backgroundColor: "var(--card-border)" }}>
           <div
@@ -392,7 +360,6 @@ export function DashboardPage() {
   const [logPage, setLogPage] = useState(1);
   const [providerSort, setProviderSort] = useState<{ key: string; dir: SortDir }>({ key: "totalCost", dir: "desc" });
   const [modelSort, setModelSort] = useState<{ key: string; dir: SortDir }>({ key: "totalCost", dir: "desc" });
-  const [prevTotals, setPrevTotals] = useState<{ tokens: number; cost: number } | null>(null);
   const [codexUsage, setCodexUsage] = useState<CodexUsageStatus | null>(null);
 
   const customInvalid = range === "custom" && !!customFrom && !!customTo && customFrom > customTo;
@@ -418,16 +385,6 @@ export function DashboardPage() {
       })
       .catch(() => { setLoading(false); setRefreshing(false); });
 
-    // Previous period of equal length → period-over-period trend on stat cards
-    const prev = getPrevRange(range);
-    if (prev) {
-      fetch(`${baseUrl}?range=custom&from=${prev.from}&to=${prev.to}`)
-        .then((r) => r.json())
-        .then((p) => setPrevTotals({ tokens: p.totalTokens ?? 0, cost: p.totalCost ?? 0 }))
-        .catch(() => setPrevTotals(null));
-    } else {
-      setPrevTotals(null);
-    }
   }, [initialized, source, range, customFrom, customTo, customInvalid]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
@@ -474,14 +431,6 @@ export function DashboardPage() {
     cost: parseFloat(d.cost.toFixed(4)),
     requests: d.requests,
   }));
-
-  // Period-over-period trends (undefined → hidden)
-  const tokenTrend = data && prevTotals && prevTotals.tokens > 0
-    ? ((data.totalTokens - prevTotals.tokens) / prevTotals.tokens) * 100
-    : undefined;
-  const costTrend = data && prevTotals && prevTotals.cost > 0
-    ? ((data.totalCost - prevTotals.cost) / prevTotals.cost) * 100
-    : undefined;
 
   // Sorted stats + request-log pagination
   const sortedProviders = sortRows(data?.providerStats ?? [], providerSort.key, providerSort.dir);
@@ -766,8 +715,6 @@ export function DashboardPage() {
               value={data.totalTokens.toLocaleString("en-US")}
               icon={<Activity className="h-4 w-4" style={{ color: "#3b82f6" }} />}
               subtitle={`≈ ${formatTokensShort(data.totalTokens, lang)}`}
-              trend={tokenTrend}
-              trendLabel={tokenTrend !== undefined ? t("dashboard.vs_prev") : undefined}
             >
               <div className="mt-3 space-y-0.5 border-t pt-3" style={{ borderColor: "var(--card-border)" }}>
                 <BreakdownRow label={t("dashboard.input")} value={data.totalInput} total={data.totalTokens} color="#3b82f6" lang={lang} />
@@ -789,8 +736,6 @@ export function DashboardPage() {
               value={formatCost(data.totalCost, currency)}
               icon={<DollarSign className="h-4 w-4" style={{ color: "#f59e0b" }} />}
               subtitle={`${currency === "CNY" ? `¥${(data.totalCost * USD_TO_CNY).toFixed(4)}` : `$${data.totalCost.toFixed(4)}`} ${currency}`}
-              trend={costTrend}
-              trendLabel={costTrend !== undefined ? t("dashboard.vs_prev") : undefined}
             />
 
             <StatCard

@@ -329,7 +329,7 @@ export default function (pi: ExtensionAPI) {
   // provider (opt-in via the web UI toggle). Pool and health state are reread
   // per request, so web-UI edits apply without re-registration. Re-synced on
   // session_start / model_select so api-type or eligibility changes are picked
-  // up too. This covers the terminal Pi CLI and Web Chat (same runtime).
+  // up too. This covers terminal Pi CLI requests.
   const failover = createFailoverRuntime(pi, {
     loadModelsJson: () => readModelsJsonSafe() as never,
     healthStatePath: keyStatePath(),

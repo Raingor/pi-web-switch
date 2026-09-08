@@ -132,6 +132,6 @@ Phase 14 — Pi CLI settings parity complete
 - [x] Repair `pi-package/index.ts` to current Pi extension API (JSX removal, registerCommand signature, agent-dir resolution) and wire failover registration
 - [x] Add `autoFailover` flag: types, store, ProvidersModelsPage toggle + key status/reset UI, server routes, translations
 - [x] Unit tests (mocked streams: 429→next, balance→pause, exhaustion, cooldown expiry, no-replay-after-output, abort, passthrough)
-- [ ] Isolated runtime e2e: PI_CODING_AGENT_DIR sandbox + local fake relay + real `pi` CLI（未验证）
+- [x] Isolated runtime e2e: PI_CODING_AGENT_DIR sandbox + local fake relay + real `pi` CLI（2026-09-08 通过：429 冷却切换、402/403 暂停切换、状态清理后恢复）
 - [x] Production build
-- **Status:** implementation_complete; e2e_pending
+- **Status:** complete; residual_risk=concurrent_health_state_writes

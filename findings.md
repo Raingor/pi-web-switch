@@ -85,7 +85,7 @@
 - `getApiProvider(model.api).streamSimple(model, context, {...options, apiKey})` from `@earendil-works/pi-ai/compat` is the exact fallback the composer itself uses; `lazyStream`/`createAssistantMessageEventStream` export from pi-ai root. `getAgentDir()/getModelsPath()/getSessionsDir()` export from pi-coding-agent root and respect `PI_CODING_AGENT_DIR`.
 - model-runtime passes `options.apiKey` (resolved auth) into streamSimple — per-attempt key override works via options.
 - Config value semantics (documented): `!cmd` shell command; `$VAR`/`${VAR}` env; `$$`/`$!` literals. `resolveConfigValue` is NOT exported from package root; pi-web-switch re-implements the documented non-command semantics and treats `!command` pool keys as ineligible (no new shell path).
-- `pi-web-switch` is NOT in the user's global `packages` settings — terminal coverage requires `pi install` (or `-e` for testing). Web Chat spawn inherits it once installed.
+- `pi-web-switch` is NOT in the user's global `packages` settings — terminal coverage requires `pi install` (or `-e` for testing). The Web Chat module was removed on 2026-09-07.
 - Event types: start, text_*/thinking_*/toolcall_*, done, error. Only "start" carries no content → retry allowed until any other event is yielded; buffered-prefix strategy gives exactly-once delivery.
 - On exhaustion, propagate the LAST original error event unchanged so pi's native retry-with-backoff semantics stay intact.
 - State file `pi-web-switch-key-state.json` in agent dir: provider→keyId→{status,until,reason}; key ids only (sha256-derived for hand-edited entries), never raw keys.

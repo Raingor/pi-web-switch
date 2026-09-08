@@ -4,15 +4,15 @@
  * When a custom provider (relay) has an opted-in key pool and the active key
  * hits a rate limit (HTTP 429) or runs out of balance, retry the request with
  * the next healthy key inside a single provider stream call. Works for the
- * terminal Pi CLI and Web Chat alike because both run requests through the
- * Pi model runtime, which dispatches to the provider's `streamSimple`.
+ * terminal Pi CLI requests through the Pi model runtime, which dispatches to
+ * the provider's `streamSimple`. (The Web Chat module was removed.)
  *
  * Registration contract (see pi provider-composer): the extension registers
  * `registerProvider(id, { api, streamSimple })` WITHOUT models/baseUrl/apiKey,
  * so models.json stays the source of truth for config and the wrapper only
  * intercepts models whose `model.api` matches the registered `api`.
  */
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readFileSync, renameSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import {
@@ -202,8 +202,9 @@ export function checkEligibility(cfg: ProviderPoolConfig | undefined): Eligibili
 
 // ─── Error classification ────────────────────────────────
 // Order matters: quota/balance patterns must win over generic 429 because
-// OpenAI-style relays report `429 ... insufficient_quota`. Bare 403 without
-// balance wording is NOT treated as insufficient balance.
+// Relay providers (new_api-style) return 403 for pre-consume quota failures
+// and exhausted/banned keys, so bare 403 is treated as a key-level failure:
+// pause the key and switch to the next one in the pool.
 
 const ABORT_PATTERNS = [/request was aborted/i, /\baborted\b/i];
 const BALANCE_PATTERNS = [
@@ -218,6 +219,8 @@ const BALANCE_PATTERNS = [
   /billing[_\s-]?(?:limit|exceed|balance)/i,
   /余额不足|额度不足|欠费|账户余额/,
   /^\s*402[:\s]/,
+  /^\s*403[:\s]/,
+  /\b403\b/,
 ];
 const RATE_LIMIT_PATTERNS = [
   /^\s*429[:\s]/,
@@ -261,7 +264,7 @@ export function readHealthState(path: string): KeyHealthState {
 export function writeHealthState(path: string, state: KeyHealthState): void {
   try {
     mkdirSync(dirname(path), { recursive: true });
-    const tmp = `${path}.tmp-${process.pid}`;
+    const tmp = `${path}.tmp-${process.pid}-${randomUUID()}`;
     writeFileSync(tmp, JSON.stringify(state, null, 2), "utf-8");
     renameSync(tmp, path);
   } catch {
@@ -314,8 +317,9 @@ export function pickCandidates(
 // ─── Stream wrapper ──────────────────────────────────────
 
 function describeKey(entry: KeyPoolEntry): string {
-  const label = entry.value.length > 10 ? `${entry.value.slice(0, 4)}…${entry.value.slice(-4)}` : "key";
-  return label;
+  // Never include raw or partially masked credentials in diagnostics. ids are
+  // models.json metadata (or one-way hashes for hand-written pool entries).
+  return entry.id || "key";
 }
 
 /**
@@ -348,14 +352,16 @@ export function createFailoverStreamSimple(providerId: string, deps: FailoverDep
     const state = deps.loadHealthState();
     const { candidates } = pickCandidates(pool, state[providerId], now(), activeId);
     if (candidates.length === 0) {
-      // Every key is paused/cooldown: surface the original behavior via the
-      // active key so the native error (and pi's retry logic) stays intact.
-      const entry = pool.find((k) => k.value === activeKey) ?? pool[0];
-      const stream = deps.fallbackStream(model, context, {
-        ...options,
-        apiKey: entry?.resolved ?? entry?.value,
-      });
-      for await (const event of stream) yield event;
+      // Do not make another network call with a deliberately paused/cooling
+      // key. This error tells the user to wait or explicitly reset its health.
+      yield {
+        type: "error",
+        reason: "error",
+        error: {
+          stopReason: "error",
+          errorMessage: `No healthy API keys remain for provider '${providerId}'. Wait for cooldown or run /pi-key-reset after restoring balance.`,
+        } as AssistantMessage,
+      };
       return;
     }
 
