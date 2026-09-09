@@ -124,31 +124,31 @@ npm run build  # 构建生产版本
 npm run preview # 预览生产构建
 ```
 
-## 🖥️ 姊妹项目 — pi-desktop
+## 🖥️ 姊妹项目 — pi-of-cindy
 
-pi-web-switch 跑在浏览器里。如果你想要的是 **原生 macOS 应用**，可以用它的姊妹项目：
+pi-web-switch 跑在浏览器里。如果你想要更完整的 **桌面端、手机端和 AI Agent 工作台**，可以了解它的姊妹项目：
 
-> **[pi-desktop](https://github.com/Raingor/pi-desktop)** — 由本项目衍生的聊天优先桌面客户端（Electron 43）。
-> 主窗口专注对话（按项目分组的会话列表 + 对话区），所有配置收进独立的全屏设置工作台（通用 / 概览与使用统计 / 提供商与模型 / 子代理 / 模型测速 / 会话管理 / 记忆）。
+> **[pi-of-cindy](https://github.com/Raingor/pi-of-cindy)** — CINDY 客户端的 pi-only 改造分支，包含 Electron 桌面端、Expo / React Native 手机端及共享 packages。
+> 它以本机 [pi](https://github.com/earendil-works/pi) CLI 为唯一工作台，提供 Pi 供应商、仪表盘、任务、记忆、Subagents 和本地会话导入，并与本机 pi CLI 共用 `~/.pi/agent/` 配置。
 >
-> 相比本项目，pi-desktop 额外提供：
-> - **菜单栏常驻** — 单击托盘图标弹出用量浮窗（今日 / 近 7 日 token、成本、请求数、迷你折线、Top 提供商），并显示 **OpenAI Codex 官方额度**（5 小时窗口 + 每周窗口的剩余百分比、倒计时、准确重置时间）
-> - **15 套整体界面风格** — 通过 `html[data-style]` 令牌整体换肤：9 套 pi 原创 + 6 套编辑器助手配色（VS Code Dark Modern / Kiro / Claude / Codex / Gemini / Grok）
-> - **打开会话自动恢复模型** — 从会话历史读回当时的 provider/model/thinking，模型不可用时回落默认值
-> - **侧栏会话重命名** — 写 pi 原生 `session_info`，终端 `pi --resume` 看到同一个名字
-> - **单实例锁 + 本地 API 跳源防护** — Host/Origin/Content-Type 三重校验，防 DNS rebinding 与表单型 CSRF
+> pi-of-cindy 的主要特点：
+> - **多端 Agent 工作台** — 桌面端、手机端与共享能力统一在一个 pnpm monorepo 中
+> - **Harness × 模型自由组合** — 支持 Claude Code、Codex 等 Agent Harness，任务可规划、并行执行和独立 review
+> - **真实环境执行** — 可以操作浏览器、电脑和手机，使用本机文件及已登录应用完成任务
+> - **Pi-only 本地工作流** — 导入的 pi CLI 会话可以直接继续，提供商和模型配置与终端保持一致
+> - **Apache-2.0 开源** — 客户端源码开放，支持自行构建和二次开发
 >
-> 下载：**[Releases](https://github.com/Raingor/pi-desktop/releases/latest)**（x64 / arm64 DMG + ZIP）。未发布到 npm。
+> 下载与完整说明请查看 **[pi-of-cindy README](https://github.com/Raingor/pi-of-cindy)**。
 
-**两者读写同一份 `~/.pi/agent/` 配置**，在任一端改的提供商、模型、记忆，在另一端和终端 `pi` 里都立刻生效，可并存使用不冲突。
+**两者共用本机 `~/.pi/agent/` 配置**，在任一端改动的提供商、模型和记忆，都可在另一端及终端 `pi` 中继续使用。
 
-| | pi-web-switch（本项目） | pi-desktop |
+| | pi-web-switch（本项目） | pi-of-cindy |
 |---|---|---|
-| 形态 | 浏览器面板（Vite 开发服务器） | 原生 macOS 应用（Electron） |
-| 侧重 | 配置管理 — 仪表盘 / 提供商 / 会话 / 记忆多页并列 | 聊天优先 — 主窗口对话，配置入设置工作台 |
-| 菜单栏 | — | 托盘浮窗（用量 + Codex 额度） |
-| 主题 | 浅色 / 深色 / 跟随系统 | 15 套整体界面风格 |
-| 安装 | `npm run dev`，或作为 pi 扩展包 `npm:@raingor/pi-web-switch` | 从 Releases 下载 DMG / ZIP |
+| 形态 | 浏览器面板（Vite 开发服务器） | Electron 桌面端 + Expo / React Native 手机端 |
+| 侧重 | 配置管理 — 仪表盘 / 提供商 / 会话 / 记忆多页并列 | 多端 AI Agent 工作台 — 任务执行、Harness 编排和本地会话 |
+| Pi 集成 | Pi 扩展包 / 本地配置面板 | 以本机 pi CLI 为核心，共用 `~/.pi/agent/` |
+| 开源协议 | MIT | Apache-2.0 |
+| 开发方式 | `npm run dev` | `pnpm install` + `pnpm restart:desktop:remote` |
 
 ## 🏗️ 技术栈
 
@@ -210,7 +210,7 @@ pi-web-switch/
 
 ## 🔗 相关链接
 
-- **姊妹项目（原生 macOS 应用）：** [github.com/Raingor/pi-desktop](https://github.com/Raingor/pi-desktop) · [Releases](https://github.com/Raingor/pi-desktop/releases/latest)
+- **姊妹项目（CINDY pi-only 客户端）：** [github.com/Raingor/pi-of-cindy](https://github.com/Raingor/pi-of-cindy)
 - **个人主页：** [raingor.github.io/my-blog](https://raingor.github.io/my-blog/)
 - **GitHub：** [github.com/Raingor](https://github.com/Raingor)
 

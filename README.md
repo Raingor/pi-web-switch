@@ -137,31 +137,31 @@ npm run preview
 
 The dev server automatically serves pi configuration via Vite middleware at `/api/pi/*` — no separate backend process needed.
 
-## 🖥️ Desktop App — pi-desktop
+## 🖥️ Sister Project — pi-of-cindy
 
-pi-web-switch runs in the browser. If you want a **native macOS app** instead, use its sister project:
+pi-web-switch runs in the browser. If you want a more complete **desktop, mobile, and AI agent workbench**, see its sister project:
 
-> **[pi-desktop](https://github.com/Raingor/pi-desktop)** — a chat-first desktop client (Electron 43) derived from this project.
-> The main window is dedicated to conversation (project-grouped session list + chat area) and every configuration page lives in a separate full-screen settings workspace (General / Usage / Providers & Models / Subagents / Speed Test / Sessions / Memory).
+> **[pi-of-cindy](https://github.com/Raingor/pi-of-cindy)** — a pi-only rework of the CINDY client, including an Electron desktop app, an Expo / React Native mobile app, and shared packages.
+> It uses the local [pi](https://github.com/earendil-works/pi) CLI as its sole workbench, with Pi providers, dashboard, tasks, memory, subagents, and local session import. It shares `~/.pi/agent/` with the local pi CLI.
 >
-> Beyond what this project offers, pi-desktop adds:
-> - **Menu bar residency** — click the tray icon for a usage popover (today / last 7 days tokens, cost, requests, mini sparkline, top providers) plus **official OpenAI Codex quota** (5-hour and weekly windows with remaining %, countdown, and exact reset time)
-> - **15 interface styles** — whole-UI reskinning via `html[data-style]` tokens: 9 pi originals plus 6 editor-assistant palettes (VS Code Dark Modern / Kiro / Claude / Codex / Gemini / Grok)
-> - **Model restore on session open** — reads the provider/model/thinking level back from session history, falling back to defaults when a model is no longer available
-> - **Session rename in the sidebar** — writes pi's native `session_info`, so `pi --resume` shows the same name in the terminal
-> - **Single-instance lock + local API cross-origin protection** — Host/Origin/Content-Type checks against DNS rebinding and form-style CSRF
+> Key capabilities of pi-of-cindy:
+> - **Multi-platform agent workbench** — desktop, mobile, and shared capabilities in one pnpm monorepo
+> - **Harness × model composition** — supports Agent Harnesses such as Claude Code and Codex, with planning, parallel execution, and independent review
+> - **Real-environment execution** — can operate browsers, computers, and phones using local files and logged-in apps
+> - **Pi-only local workflow** — imported pi CLI sessions can continue directly, with providers and models kept in sync with the terminal
+> - **Apache-2.0 open source** — build and extend the client yourself
 >
-> Download: **[Releases](https://github.com/Raingor/pi-desktop/releases/latest)** (x64 / arm64 DMG + ZIP). Not published to npm.
+> See the **[pi-of-cindy README](https://github.com/Raingor/pi-of-cindy)** for downloads and complete documentation.
 
-**Both read and write the same `~/.pi/agent/` config**, so a provider, model, or memory edited on either side takes effect immediately in the other and in the terminal `pi`. They can be used side by side without conflict.
+**Both share the local `~/.pi/agent/` config**, so providers, models, and memories changed in either project remain available to the other and to the terminal `pi`.
 
-| | pi-web-switch (this project) | pi-desktop |
+| | pi-web-switch (this project) | pi-of-cindy |
 |---|---|---|
-| Form | Browser panel (Vite dev server) | Native macOS app (Electron) |
-| Focus | Configuration management — Dashboard / Providers / Sessions / Memory side by side | Chat-first — conversation in the main window, config in a settings workspace |
-| Menu bar | — | Tray popover with usage + Codex quota |
-| Themes | Light / Dark / System | 15 full interface styles |
-| Install | `npm run dev`, or `npm:@raingor/pi-web-switch` as a pi package | DMG / ZIP from Releases |
+| Form | Browser panel (Vite dev server) | Electron desktop app + Expo / React Native mobile app |
+| Focus | Configuration management — Dashboard / Providers / Sessions / Memory side by side | Multi-platform AI agent workbench — task execution, harness orchestration, and local sessions |
+| Pi integration | Pi package / local configuration panel | Local pi CLI as the core, sharing `~/.pi/agent/` |
+| License | MIT | Apache-2.0 |
+| Development | `npm run dev` | `pnpm install` + `pnpm restart:desktop:remote` |
 
 ## 🏗️ Tech Stack
 
@@ -343,7 +343,7 @@ When reporting an issue, please include:
 
 ## 🔗 Links
 
-- **Sister project (native macOS app):** [github.com/Raingor/pi-desktop](https://github.com/Raingor/pi-desktop) · [Releases](https://github.com/Raingor/pi-desktop/releases/latest)
+- **Sister project (CINDY pi-only client):** [github.com/Raingor/pi-of-cindy](https://github.com/Raingor/pi-of-cindy)
 - **Homepage:** [raingor.github.io/my-blog](https://raingor.github.io/my-blog/)
 - **GitHub:** [github.com/Raingor](https://github.com/Raingor)
 

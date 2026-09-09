@@ -86,31 +86,31 @@ npm run dev    # 開発サーバー起動（~/.pi/agent/ を自動読込）
 npm run build  # プロダクションビルド
 ```
 
-## 🖥️ 姉妹プロジェクト — pi-desktop
+## 🖥️ 姉妹プロジェクト — pi-of-cindy
 
-pi-web-switch はブラウザで動作します。**ネイティブ macOS アプリ** が欲しい場合は、姉妹プロジェクトをご利用ください：
+pi-web-switch はブラウザで動作します。より完全な **デスクトップ、モバイル、AI エージェントのワークベンチ** が必要な場合は、姉妹プロジェクトをご覧ください：
 
-> **[pi-desktop](https://github.com/Raingor/pi-desktop)** — 本プロジェクトから派生したチャット優先のデスクトップクライアント（Electron 43）。
-> メインウィンドウは対話専用（プロジェクト別セッション一覧 + チャットエリア）で、設定はすべて独立した全画面設定ワークステーションに集約（一般 / 使用状況 / プロバイダとモデル / サブエージェント / 速度テスト / セッション管理 / メモリ）。
+> **[pi-of-cindy](https://github.com/Raingor/pi-of-cindy)** — CINDY クライアントの pi-only 改造版です。Electron デスクトップ、Expo / React Native モバイルアプリ、共有 packages を含みます。
+> ローカル [pi](https://github.com/earendil-works/pi) CLI を唯一のワークベンチとして、Pi プロバイダー、ダッシュボード、タスク、メモリ、Subagents、ローカルセッションのインポートを提供し、ローカル pi CLI と `~/.pi/agent/` を共有します。
 >
-> 本プロジェクトに加えて、pi-desktop には次の機能があります：
-> - **メニューバー常駐** — トレイアイコンクリックで使用量ポップオーバー（今日 / 直近 7 日の token、コスト、リクエスト数、ミニ折れ線、Top プロバイダ）と **OpenAI Codex 公式クォータ**（5 時間ウィンドウ + 週次ウィンドウの残量、カウントダウン、正確なリセット時刻）を表示
-> - **15 種のインターフェーススタイル** — `html[data-style]` トークンで UI 全体をスキン変更：pi オリジナル 9 種 + エディタアシスタント配色 6 種（VS Code Dark Modern / Kiro / Claude / Codex / Gemini / Grok）
-> - **セッションを開くとモデルを自動復元** — セッション履歴から当時の provider/model/thinking を読み戻し、利用不可なら既定値にフォールバック
-> - **サイドバーでのセッションリネーム** — pi ネイティブの `session_info` に書き込み、ターミナルの `pi --resume` でも同じ名前が見える
-> - **単一インスタンスロック + ローカル API のクロスオリジン保護** — Host/Origin/Content-Type の 3 重検証で DNS rebinding とフォーム型 CSRF を防止
+> pi-of-cindy の主な特徴：
+> - **マルチプラットフォームのエージェントワークベンチ** — デスクトップ、モバイル、共有機能を 1 つの pnpm monorepo に統合
+> - **Harness × モデルの組み合わせ** — Claude Code や Codex などに対応し、計画、並列実行、独立 review が可能
+> - **実環境での実行** — ローカルファイルとログイン済みアプリを使ってブラウザ、コンピューター、スマートフォンを操作
+> - **Pi-only ローカルワークフロー** — pi CLI のセッションを直接継続でき、プロバイダーとモデルをターミナルと同期
+> - **Apache-2.0 オープンソース** — 自分でビルドして拡張可能
 >
-> ダウンロード：**[Releases](https://github.com/Raingor/pi-desktop/releases/latest)**（x64 / arm64 DMG + ZIP）。npm には未公開。
+> ダウンロードと詳細は **[pi-of-cindy README](https://github.com/Raingor/pi-of-cindy)** をご覧ください。
 
-**両方とも同じ `~/.pi/agent/` 設定を読み書きします**。どちらかで変更したプロバイダー・モデル・メモリはもう一方とターミナルの `pi` に即時反映され、並行して使っても競合しません。
+**両方ともローカルの `~/.pi/agent/` 設定を共有します**。どちらかで変更したプロバイダー、モデル、メモリは、もう一方とターミナルの `pi` でも利用できます。
 
-| | pi-web-switch（本プロジェクト） | pi-desktop |
+| | pi-web-switch（本プロジェクト） | pi-of-cindy |
 |---|---|---|
-| 形態 | ブラウザパネル（Vite 開発サーバー） | ネイティブ macOS アプリ（Electron） |
-| 主眼 | 設定管理 — ダッシュボード / プロバイダ / セッション / メモリを並列表示 | チャット優先 — メインは対話、設定はワークステーションへ |
-| メニューバー | — | トレイポップオーバー（使用量 + Codex クォータ） |
-| テーマ | ライト / ダーク / システム追従 | 15 種の全体スタイル |
-| 導入 | `npm run dev`、または pi パッケージ `npm:@raingor/pi-web-switch` | Releases から DMG / ZIP |
+| 形態 | ブラウザパネル（Vite 開発サーバー） | Electron デスクトップ + Expo / React Native モバイルアプリ |
+| 主眼 | 設定管理 — ダッシュボード / プロバイダ / セッション / メモリを並列表示 | マルチプラットフォーム AI エージェントワークベンチ — タスク実行、Harness 編成、ローカルセッション |
+| Pi 連携 | Pi パッケージ / ローカル設定パネル | ローカル pi CLI を中心に `~/.pi/agent/` を共有 |
+| ライセンス | MIT | Apache-2.0 |
+| 開発方法 | `npm run dev` | `pnpm install` + `pnpm restart:desktop:remote` |
 
 ## 🏗️ 技術スタック
 
@@ -172,7 +172,7 @@ pi-web-switch/
 
 ## 🔗 リンク
 
-- **姉妹プロジェクト（ネイティブ macOS アプリ）：** [github.com/Raingor/pi-desktop](https://github.com/Raingor/pi-desktop) · [Releases](https://github.com/Raingor/pi-desktop/releases/latest)
+- **姉妹プロジェクト（CINDY pi-only クライアント）：** [github.com/Raingor/pi-of-cindy](https://github.com/Raingor/pi-of-cindy)
 - **ホームページ：** [raingor.github.io/my-blog](https://raingor.github.io/my-blog/)
 - **GitHub：** [github.com/Raingor](https://github.com/Raingor)
 
