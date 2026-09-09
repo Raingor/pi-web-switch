@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { BookOpen, Check, Download, Eye, EyeOff, ExternalLink, Film, Image as ImageIcon, KeyRound, Loader2, MessageSquare, Send, Sparkles, Trash2, Wand2 } from "lucide-react";
+import { BookOpen, Check, Download, Eye, EyeOff, ExternalLink, Film, Image as ImageIcon, KeyRound, Loader2, MessageSquare, Send, Sparkles, Trash2, Upload, Wand2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // Shape returned by /api/pi/image-generate, /video-create and /video-status
@@ -30,7 +30,8 @@ const IMAGE_RATIOS = ["1:1", "3:4", "4:3", "16:9", "9:16", "2:3", "3:2", "21:9"]
 // Videos: Flash tiers only accept 720P, so size is fixed and only ratio varies.
 const VIDEO_MODELS = ["agnes-video-2.5-flash", "agnes-video-2.5"] as const;
 const VIDEO_RATIOS = ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"] as const;
-const VIDEO_SECONDS = ["4", "5", "6", "7", "8", "9", "10", "11", "12"] as const;
+// Agnes currently rejects durations outside its 4–12 second range.
+const VIDEO_SECONDS = ["5", "10", "12"] as const;
 const VIDEO_MODES = [
   { value: "text", label: "文生视频" },
   { value: "keyframe", label: "首尾帧控制" },
@@ -83,6 +84,41 @@ function parseLines(raw: string): string[] {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
+}
+
+interface LocalImageReference {
+  id: string;
+  name: string;
+  dataUrl: string;
+  size: number;
+}
+
+const MAX_REFERENCE_IMAGE_BYTES = 20 * 1024 * 1024;
+const VIDEO_REFERENCE_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+
+function readImageAsDataUrl(file: File): Promise<LocalImageReference> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result !== "string") {
+        reject(new Error(`无法读取 ${file.name}`));
+        return;
+      }
+      resolve({
+        id: `${file.name}:${file.size}:${file.lastModified}`,
+        name: file.name,
+        dataUrl: reader.result,
+        size: file.size,
+      });
+    };
+    reader.onerror = () => reject(new Error(`无法读取 ${file.name}`));
+    reader.readAsDataURL(file);
+  });
+}
+
+function formatFileSize(size: number): string {
+  if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 export function GeneratePage() {
@@ -194,6 +230,9 @@ export function GeneratePage() {
   const [imageRatio, setImageRatio] = useState<string>("1:1");
   const [imageFormat, setImageFormat] = useState<"url" | "b64_json">("url");
   const [imageRefs, setImageRefs] = useState("");
+  const [localImageRefs, setLocalImageRefs] = useState<LocalImageReference[]>([]);
+  const [imageRefError, setImageRefError] = useState("");
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const [imageBusy, setImageBusy] = useState(false);
   const [imageResult, setImageResult] = useState<GenerateResult | null>(null);
 
@@ -206,10 +245,61 @@ export function GeneratePage() {
   const [firstFrame, setFirstFrame] = useState("");
   const [lastFrame, setLastFrame] = useState("");
   const [videoImages, setVideoImages] = useState("");
+  const [localVideoImages, setLocalVideoImages] = useState<LocalImageReference[]>([]);
+  const [videoImageError, setVideoImageError] = useState("");
+  const videoImageInputRef = useRef<HTMLInputElement>(null);
   const [videoAudios, setVideoAudios] = useState("");
   const [videoBusy, setVideoBusy] = useState(false);
   const [videoResult, setVideoResult] = useState<GenerateResult | null>(null);
   const pollTimer = useRef<number | null>(null);
+
+  const addLocalImageFiles = async (files: File[]) => {
+    setImageRefError("");
+    const validFiles = files.filter((file) => file.type.startsWith("image/"));
+    if (validFiles.length !== files.length) setImageRefError("只能添加图片文件");
+    const oversized = validFiles.find((file) => file.size > MAX_REFERENCE_IMAGE_BYTES);
+    if (oversized) setImageRefError(`${oversized.name} 超过 20 MB，未添加`);
+    const readable = validFiles.filter((file) => file.size <= MAX_REFERENCE_IMAGE_BYTES);
+    if (readable.length === 0) return;
+    try {
+      const loaded = await Promise.all(readable.map(readImageAsDataUrl));
+      setLocalImageRefs((previous) => {
+        const existing = new Set(previous.map((item) => item.id));
+        return [...previous, ...loaded.filter((item) => !existing.has(item.id))];
+      });
+    } catch (error) {
+      setImageRefError(error instanceof Error ? error.message : "读取图片失败");
+    }
+  };
+
+  const imageReferenceValues = [
+    ...parseLines(imageRefs),
+    ...localImageRefs.map((image) => image.dataUrl),
+  ];
+
+  const addLocalVideoImageFiles = async (files: File[]) => {
+    setVideoImageError("");
+    const validFiles = files.filter((file) => VIDEO_REFERENCE_IMAGE_TYPES.has(file.type));
+    if (validFiles.length !== files.length) setVideoImageError("视频参考图仅支持 JPEG、PNG、WEBP");
+    const oversized = validFiles.find((file) => file.size > MAX_REFERENCE_IMAGE_BYTES);
+    if (oversized) setVideoImageError(`${oversized.name} 超过 20 MB，未添加`);
+    const readable = validFiles.filter((file) => file.size <= MAX_REFERENCE_IMAGE_BYTES);
+    if (readable.length === 0) return;
+    try {
+      const loaded = await Promise.all(readable.map(readImageAsDataUrl));
+      setLocalVideoImages((previous) => {
+        const existing = new Set(previous.map((item) => item.id));
+        return [...previous, ...loaded.filter((item) => !existing.has(item.id))];
+      });
+    } catch (error) {
+      setVideoImageError(error instanceof Error ? error.message : "读取图片失败");
+    }
+  };
+
+  const videoReferenceValues = [
+    ...parseLines(videoImages),
+    ...localVideoImages.map((image) => image.dataUrl),
+  ];
 
   const stopPolling = () => {
     if (pollTimer.current !== null) {
@@ -233,7 +323,7 @@ export function GeneratePage() {
           size: imageSize,
           ratio: imageRatio,
           responseFormat: imageFormat,
-          image: parseLines(imageRefs),
+          image: imageReferenceValues,
         }),
       });
       setImageResult((await res.json()) as GenerateResult);
@@ -297,7 +387,7 @@ export function GeneratePage() {
           aspectRatio: videoRatio,
           firstFrame: videoMode === "keyframe" ? firstFrame.trim() : undefined,
           lastFrame: videoMode === "keyframe" ? lastFrame.trim() : undefined,
-          images: videoMode === "reference" ? parseLines(videoImages) : undefined,
+          images: videoMode === "reference" ? videoReferenceValues : undefined,
           audios: videoMode === "reference" ? parseLines(videoAudios) : undefined,
         }),
       });
@@ -448,14 +538,77 @@ export function GeneratePage() {
                 </select>
               </Field>
             </div>
-            <Field label="参考图（可选，一行一个 URL 或 data URI）" hint="填写后为图生图；多张则为多图合成">
-              <textarea
-                value={imageRefs}
-                onChange={(e) => setImageRefs(e.target.value)}
-                rows={2}
-                placeholder="https://example.com/input.png"
-                className={cn(inputCls, "resize-y font-mono text-xs")}
-              />
+            <Field label="参考图（可选）" hint="支持 URL、data URI 或本地图片；多张图片会一起发送用于图生图 / 多图合成">
+              <div className="space-y-2">
+                <textarea
+                  value={imageRefs}
+                  onChange={(e) => setImageRefs(e.target.value)}
+                  rows={2}
+                  placeholder="每行一个公开图片 URL，例如 https://example.com/input.png"
+                  className={cn(inputCls, "resize-y font-mono text-xs")}
+                />
+                <div
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    void addLocalImageFiles(Array.from(event.dataTransfer.files));
+                  }}
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-dashed border-gray-700 bg-gray-950/40 px-3 py-3 transition-colors hover:border-blue-500/70 hover:bg-blue-950/10"
+                >
+                  <div className="flex min-w-0 items-center gap-2">
+                    <ImageIcon className="h-4 w-4 shrink-0 text-blue-400" />
+                    <div className="min-w-0">
+                      <p className="text-xs text-gray-300">从本地选择或拖拽图片到这里</p>
+                      <p className="text-[11px] text-gray-600">PNG、JPG、WEBP · 单张不超过 20 MB · 可多选</p>
+                    </div>
+                  </div>
+                  <input
+                    ref={imageInputRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={(event) => {
+                      void addLocalImageFiles(Array.from(event.target.files ?? []));
+                      event.target.value = "";
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => imageInputRef.current?.click()}
+                    className="flex shrink-0 items-center gap-1.5 rounded-md border border-blue-800/70 px-3 py-1.5 text-xs text-blue-300 transition-colors hover:bg-blue-950/50"
+                  >
+                    <Upload className="h-3.5 w-3.5" />
+                    选择图片
+                  </button>
+                </div>
+                {localImageRefs.length > 0 && (
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    {localImageRefs.map((image) => (
+                      <div key={image.id} className="group relative overflow-hidden rounded-lg border border-gray-700 bg-gray-950/60">
+                        <img src={image.dataUrl} alt={image.name} className="aspect-[4/3] w-full object-cover" />
+                        <div className="flex items-center justify-between gap-2 px-2 py-1.5">
+                          <span className="min-w-0 truncate text-[10px] text-gray-400" title={image.name}>{image.name}</span>
+                          <span className="shrink-0 text-[10px] text-gray-600">{formatFileSize(image.size)}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setLocalImageRefs((previous) => previous.filter((item) => item.id !== image.id))}
+                          className="absolute right-1.5 top-1.5 rounded-md bg-gray-950/80 p-1 text-gray-300 opacity-0 transition-opacity hover:text-red-300 group-hover:opacity-100"
+                          title={`移除 ${image.name}`}
+                          aria-label={`移除 ${image.name}`}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-600">
+                  <span>已添加 {imageReferenceValues.length} 张参考图</span>
+                  {imageRefError && <span className="text-red-400">{imageRefError}</span>}
+                </div>
+              </div>
             </Field>
             <button
               onClick={runImage}
@@ -575,13 +728,74 @@ export function GeneratePage() {
 
             {videoMode === "reference" && (
               <div className="grid gap-3 md:grid-cols-2">
-                <Field label="参考图片（一行一个，最多 5 张）">
-                  <textarea
-                    value={videoImages}
-                    onChange={(e) => setVideoImages(e.target.value)}
-                    rows={3}
-                    className={cn(inputCls, "resize-y font-mono text-xs")}
-                  />
+                <Field label="参考图片（最多 5 张）" hint="支持 URL、data URI、本地选择或拖拽图片">
+                  <div className="space-y-2">
+                    <textarea
+                      value={videoImages}
+                      onChange={(e) => setVideoImages(e.target.value)}
+                      rows={3}
+                      placeholder="每行一个图片 URL"
+                      className={cn(inputCls, "resize-y font-mono text-xs")}
+                    />
+                    <div
+                      onDragOver={(event) => event.preventDefault()}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        void addLocalVideoImageFiles(Array.from(event.dataTransfer.files));
+                      }}
+                      className="flex items-center justify-between gap-2 rounded-lg border border-dashed border-gray-700 bg-gray-950/40 px-3 py-2.5 hover:border-blue-500/70 hover:bg-blue-950/10"
+                    >
+                      <div className="flex min-w-0 items-center gap-2">
+                        <ImageIcon className="h-4 w-4 shrink-0 text-blue-400" />
+                        <span className="truncate text-[11px] text-gray-500">选择或拖拽本地参考图</span>
+                      </div>
+                      <input
+                        ref={videoImageInputRef}
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        multiple
+                        className="hidden"
+                        onChange={(event) => {
+                          void addLocalVideoImageFiles(Array.from(event.target.files ?? []));
+                          event.target.value = "";
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => videoImageInputRef.current?.click()}
+                        className="flex shrink-0 items-center gap-1 rounded-md border border-blue-800/70 px-2.5 py-1.5 text-[11px] text-blue-300 hover:bg-blue-950/50"
+                      >
+                        <Upload className="h-3.5 w-3.5" />
+                        上传图片
+                      </button>
+                    </div>
+                    {localVideoImages.length > 0 && (
+                      <div className="grid grid-cols-2 gap-2">
+                        {localVideoImages.map((image) => (
+                          <div key={image.id} className="group relative overflow-hidden rounded-lg border border-gray-700 bg-gray-950/60">
+                            <img src={image.dataUrl} alt={image.name} className="aspect-[4/3] w-full object-cover" />
+                            <div className="flex items-center justify-between gap-1 px-2 py-1.5">
+                              <span className="min-w-0 truncate text-[10px] text-gray-400" title={image.name}>{image.name}</span>
+                              <span className="shrink-0 text-[10px] text-gray-600">{formatFileSize(image.size)}</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setLocalVideoImages((previous) => previous.filter((item) => item.id !== image.id))}
+                              className="absolute right-1.5 top-1.5 rounded-md bg-gray-950/80 p-1 text-gray-300 opacity-0 hover:text-red-300 group-hover:opacity-100"
+                              title={`移除 ${image.name}`}
+                              aria-label={`移除 ${image.name}`}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-gray-600">
+                      <span>已添加 {videoReferenceValues.length} 张图片</span>
+                      {videoImageError && <span className="text-red-400">{videoImageError}</span>}
+                    </div>
+                  </div>
                 </Field>
                 <Field label="参考音频（一行一个，最多 3 段）">
                   <textarea

@@ -3141,6 +3141,26 @@ async function generationHttpError(res: Response, started: number): Promise<Gene
   }
 }
 
+/**
+ * The video gateway accepts public URLs or raw base64 for reference images.
+ * Browser uploads arrive as data URIs, so strip the MIME wrapper before the
+ * request while leaving public URLs and already-raw base64 untouched.
+ */
+function normalizeVideoImageReference(value: string): string {
+  const match = value.match(/^data:image\/(png|jpe?g|webp);base64,(.+)$/is);
+  return match ? match[2].replace(/\s+/g, "") : value;
+}
+
+function videoTaskErrorMessage(value: unknown): string | undefined {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (!value || typeof value !== "object") return undefined;
+  const error = value as Record<string, unknown>;
+  for (const key of ["message", "detail", "code"]) {
+    if (typeof error[key] === "string" && error[key].trim()) return error[key].trim();
+  }
+  return undefined;
+}
+
 export interface AgnesChatMessage {
   role: "system" | "user" | "assistant";
   content: string | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }>;
@@ -3344,10 +3364,12 @@ export async function createVideoTask(options: VideoCreateOptions): Promise<Gene
     if (!options.firstFrame && !options.lastFrame) {
       return { success: false, message: "keyframe mode needs first_frame or last_frame" };
     }
-    if (options.firstFrame) body.first_frame = options.firstFrame;
-    if (options.lastFrame) body.last_frame = options.lastFrame;
+    if (options.firstFrame) body.first_frame = normalizeVideoImageReference(options.firstFrame);
+    if (options.lastFrame) body.last_frame = normalizeVideoImageReference(options.lastFrame);
   } else if (mode === "reference") {
-    const images = (options.images ?? []).filter((entry) => typeof entry === "string" && entry.trim());
+    const images = (options.images ?? [])
+      .filter((entry) => typeof entry === "string" && entry.trim())
+      .map(normalizeVideoImageReference);
     const audios = (options.audios ?? []).filter((entry) => typeof entry === "string" && entry.trim());
     if (images.length === 0 && audios.length === 0) {
       return { success: false, message: "reference mode needs images or audios" };
@@ -3438,13 +3460,17 @@ export async function pollVideoTask(
       return res.status === 429 || res.status >= 500 ? { ...failure, videoId, retryable: true } : failure;
     }
     const data = (await res.json()) as any;
+    const taskStatus = typeof data?.status === "string" ? data.status : undefined;
+    const taskError = videoTaskErrorMessage(data?.error);
+    const failed = /^(failed|error|cancelled|canceled)$/i.test(taskStatus ?? "");
     return {
-      success: true,
+      success: !failed,
       latencyMs: Date.now() - started,
       videoId,
-      taskStatus: typeof data?.status === "string" ? data.status : undefined,
+      taskStatus,
       progress: typeof data?.progress === "number" ? data.progress : undefined,
       videoUrl: findVideoUrl(data),
+      message: taskError,
       raw: data,
     };
   } catch (e: any) {
