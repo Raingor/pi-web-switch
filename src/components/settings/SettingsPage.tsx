@@ -9,7 +9,7 @@ import {
   parseImportFile,
   saveLocalBackup,
 } from "@/lib/config";
-import type { PiConfig, PiSettings, UpdateCheckResult } from "@/types";
+import { packageSource, type PiConfig, type PiSettings, type UpdateCheckResult } from "@/types";
 import { cn } from "@/lib/utils";
 import { RECOMMENDED_PACKAGES } from "@/data/recommended-packages";
 import { PackageBrowser } from "./PackageBrowser";
@@ -35,6 +35,7 @@ import {
   Sparkles,
   Command,
   Terminal,
+  Monitor,
 } from "lucide-react";
 
 type SettingsTab = "appearance" | "models" | "cli" | "skills" | "commands" | "advanced";
@@ -298,6 +299,8 @@ export function SettingsPage() {
 
   const selectCls =
     "rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-white";
+  const installedPackages = settings?.packages ?? [];
+  const installedPackageIds = new Set(installedPackages.map(packageSource));
 
   return (
     <div className="space-y-6">
@@ -363,7 +366,7 @@ export function SettingsPage() {
                 );
               })}
             </div>
-            <div className="mt-5 flex items-center gap-3">
+            <div className="mt-5 flex flex-wrap items-center gap-3">
               <label className="flex items-center gap-2 text-sm text-gray-400">
                 <input
                   type="checkbox"
@@ -384,7 +387,18 @@ export function SettingsPage() {
                 />
                 {t("settings.expand_run_steps")}
               </label>
+              <label className="flex items-center gap-2 text-sm text-gray-400">
+                <input
+                  type="checkbox"
+                  checked={settings?.showNative ?? true}
+                  onChange={(e) => updateSettings({ showNative: e.target.checked })}
+                  className="rounded border-gray-600 bg-gray-800 text-blue-500"
+                />
+                <Monitor className="h-3.5 w-3.5 text-blue-400" />
+                {t("settings.show_native")}
+              </label>
             </div>
+            <p className="mt-2 text-xs text-gray-600">{t("settings.show_native_desc")}</p>
           </Card>
 
           <Card icon={Type} title={t("settings.font_size")} desc={t("settings.font_size_desc")}>
@@ -600,22 +614,26 @@ export function SettingsPage() {
                 {t("settings.browse_packages")}
               </button>
             </div>
-            {(settings?.packages ?? []).length > 0 && (
+            {installedPackages.length > 0 && (
               <div className="mb-4 flex flex-wrap gap-1.5">
-                {(settings?.packages ?? []).map((pkg) => (
-                  <span
-                    key={pkg}
-                    className="flex items-center gap-1.5 rounded-md border border-gray-700 bg-gray-800 px-2.5 py-1 text-xs text-gray-300"
-                  >
-                    {pkg}
-                    <button
-                      onClick={() => removePackage(pkg)}
-                      className="text-gray-500 hover:text-red-400"
+                {installedPackages.map((pkg) => {
+                  const id = packageSource(pkg);
+                  return (
+                    <span
+                      key={id}
+                      className="flex items-center gap-1.5 rounded-md border border-gray-700 bg-gray-800 px-2.5 py-1 text-xs text-gray-300"
                     >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </span>
-                ))}
+                      {id}
+                      <button
+                        onClick={() => removePackage(id)}
+                        className="text-gray-500 hover:text-red-400"
+                        aria-label={`Remove ${id}`}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  );
+                })}
               </div>
             )}
             {(settings?.packages ?? []).length === 0 && (
@@ -624,7 +642,7 @@ export function SettingsPage() {
 
             {/* Recommended packages — one-click install */}
             {(() => {
-              const installed = new Set(settings?.packages ?? []);
+              const installed = installedPackageIds;
               const recommended = RECOMMENDED_PACKAGES.filter((p) => !installed.has(p.id));
               if (recommended.length === 0) return null;
               return (
@@ -740,7 +758,7 @@ export function SettingsPage() {
       <PackageBrowser
         open={showPackageBrowser}
         onClose={() => setShowPackageBrowser(false)}
-        installed={new Set(settings?.packages ?? [])}
+        installed={installedPackageIds}
         onInstall={(id) => addPackage(id)}
       />
 

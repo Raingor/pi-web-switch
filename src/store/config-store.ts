@@ -8,6 +8,7 @@ import type {
   PiModelsJson,
   CustomProviderConfig,
 } from "@/types";
+import { packageSource } from "@/types";
 import { BUILTIN_PROVIDERS } from "@/data/builtin-providers";
 import { mergePiSettings } from "@/lib/pi-settings";
 import { withProviders, withProviderRemoved } from "@/lib/models-json";
@@ -330,7 +331,7 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
     const { settings } = get();
     if (!settings) return;
     const list = settings.packages ?? [];
-    if (!list.includes(pkg)) {
+    if (!list.some((installed) => packageSource(installed) === pkg)) {
       await get().updateSettings({ packages: [...list, pkg] });
     }
   },
@@ -338,7 +339,7 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
   removePackage: async (pkg) => {
     const { settings } = get();
     if (!settings) return;
-    const list = (settings.packages ?? []).filter((p) => p !== pkg);
+    const list = (settings.packages ?? []).filter((p) => packageSource(p) !== pkg);
     await get().updateSettings({ packages: list });
   },
 

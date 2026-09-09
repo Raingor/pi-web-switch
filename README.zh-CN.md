@@ -86,6 +86,19 @@
 - **导入/导出** — 下载完整配置为 JSON，从备份恢复
 - **重置** — 恢复空白默认配置
 
+### 🖥️ Native macOS 菜单栏
+- **轻量原生应用** — 使用 Swift/AppKit 实现，不依赖 Electron、WebView 或常驻 Web 服务
+- **用量概览** — 查看 Pi 用量、本地 ChatGPT/Codex 会话用量、提供商统计和 Codex 官方额度
+- **后台刷新** — 在后台读取本地会话并刷新额度，不阻塞菜单栏交互
+- **显示开关** — 设置页通过 `~/.pi/agent/settings.json` 控制 Native 菜单栏功能的显示与隐藏
+
+需要 macOS 和 Swift Command Line Tools。在项目目录中运行：
+
+```bash
+npm run native:build  # 构建 release/PiUsageMenuBar.app
+npm run native:open   # 构建并启动菜单栏应用
+```
+
 ## 🌗 主题支持
 
 完整的浅色和深色模式，支持跟随系统。主题通过 CSS 自定义属性即时切换——无需刷新页面。所有组件均适配，包括侧栏、弹窗、表单、图表和滚动条。
@@ -193,6 +206,10 @@ pi-web-switch/
 │           └── SKILL.md   # 使用文档
 ├── server/
 │   └── pi-reader.ts       # 服务端：读取 ~/.pi/agent/ 文件
+├── native/
+│   └── PiUsageMenuBar.swift # Swift/AppKit 菜单栏用量应用
+├── scripts/
+│   └── build-native-menubar.sh
 └── src/                   # React 前端
 ```
 

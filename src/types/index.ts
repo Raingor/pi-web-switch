@@ -113,6 +113,14 @@ export interface Provider {
 
 // ─── Pi Config Structure ──────────────────────────────────
 
+// Pi stores package references as strings in older settings files and as
+// objects when package-specific skills are configured.
+export type PiPackage = string | { source: string; skills?: string[] };
+
+export function packageSource(pkg: PiPackage): string {
+  return typeof pkg === "string" ? pkg : pkg.source;
+}
+
 export interface PiSettings {
   lastChangelogVersion?: string;
   defaultProvider?: string;
@@ -126,6 +134,8 @@ export interface PiSettings {
   showCacheMissNotices?: boolean;
   quietStartup?: boolean;
   collapseChangelog?: boolean;
+  /** Show the native macOS usage menu bar feature. */
+  showNative?: boolean;
   enableInstallTelemetry?: boolean;
   enableSkillCommands?: boolean;
   steeringMode?: "one-at-a-time" | "all";
@@ -155,7 +165,7 @@ export interface PiSettings {
       maxRetryDelayMs?: number;
     };
   };
-  packages?: string[];
+  packages?: PiPackage[];
   terminal?: {
     showImages?: boolean;
     imageWidthCells?: number;

@@ -128,6 +128,18 @@ private final class UsageReader {
         ]
     }
 
+    func readShowNative() -> Bool {
+        let settingsURL = fileManager.homeDirectoryForCurrentUser
+            .appendingPathComponent(".pi/agent/settings.json")
+        guard let data = try? Data(contentsOf: settingsURL),
+              let settings = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            // Keep the native app visible when the setting is unavailable so a
+            // first launch or an older Pi installation remains discoverable.
+            return true
+        }
+        return settings["showNative"] as? Bool ?? true
+    }
+
     func read() -> UsageSummary {
         do {
             let now = Date()
@@ -323,7 +335,7 @@ private final class UsagePanel: NSView {
     override var isFlipped: Bool { true }
     init(summary: UsageSummary) {
         self.summary = summary
-        super.init(frame: NSRect(x: 0, y: 0, width: 400, height: 704))
+        super.init(frame: NSRect(x: 0, y: 0, width: 400, height: 820))
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
         setAccessibilityLabel("Pi 使用情况")
@@ -354,17 +366,17 @@ private final class UsagePanel: NSView {
             NSBezierPath(roundedRect: NSRect(x: x, y: y, width: fill, height: 4), xRadius: 2, yRadius: 2).fill()
         }
     }
-    private func period(_ title: String, totals: UsageTotals, x: CGFloat) {
-        text(title, x, 65, 170, color: .secondaryLabelColor, bold: true)
-        text(formatTokens(totals.tokens), x, 87, 170, size: 26, bold: true)
-        text("TOKENS", x, 119, 170, size: 9, color: .secondaryLabelColor)
-        text(formatCost(totals.cost), x, 143, 90, size: 14, bold: true)
-        text("\(totals.requests) 次", x + 88, 145, 82, size: 11, right: true)
-        text("缓存命中", x, 176, 80, size: 11, color: .secondaryLabelColor)
-        text(formatCacheHitRate(totals), x + 80, 174, 90, size: 14, color: .systemTeal, right: true, bold: true)
+    private func period(_ title: String, totals: UsageTotals, x: CGFloat, y: CGFloat = 65) {
+        text(title, x, y, 170, color: .secondaryLabelColor, bold: true)
+        text(formatTokens(totals.tokens), x, y + 22, 170, size: 26, bold: true)
+        text("TOKENS", x, y + 54, 170, size: 9, color: .secondaryLabelColor)
+        text(formatCost(totals.cost), x, y + 78, 90, size: 14, bold: true)
+        text("\(totals.requests) 次", x + 88, y + 80, 82, size: 11, right: true)
+        text("缓存命中", x, y + 111, 80, size: 11, color: .secondaryLabelColor)
+        text(formatCacheHitRate(totals), x + 80, y + 109, 90, size: 14, color: .systemTeal, right: true, bold: true)
         let rate = totals.tokens > 0 ? Double(totals.cacheRead + totals.cacheWrite) / Double(totals.tokens) * 100 : 0
-        bar(rate, x: x, y: 198, width: 170, color: .systemTeal)
-        text("读 \(formatTokens(totals.cacheRead)) · 写 \(formatTokens(totals.cacheWrite))", x, 211, 170, size: 10, color: .secondaryLabelColor)
+        bar(rate, x: x, y: y + 133, width: 170, color: .systemTeal)
+        text("读 \(formatTokens(totals.cacheRead)) · 写 \(formatTokens(totals.cacheWrite))", x, y + 146, 170, size: 10, color: .secondaryLabelColor)
     }
     private func quota(_ title: String, window: CodexUsageWindow?, y: CGFloat) {
         text(title, 20, y, 160, bold: true)
@@ -378,13 +390,6 @@ private final class UsagePanel: NSView {
         let seconds = window.resetAt.map { max(0, Int($0.timeIntervalSinceNow)) } ?? window.resetAfterSeconds
         text(formatDuration(seconds).map { "\($0)后重置" } ?? "重置时间未知", 20, y + 32, 170, size: 10, color: .secondaryLabelColor)
         text(formatResetAt(window.resetAt).map { "\($0) UTC+8" } ?? "", 180, y + 32, 200, size: 10, color: .secondaryLabelColor, right: true)
-    }
-    private func chatgptPeriod(_ title: String, totals: UsageTotals, x: CGFloat, y: CGFloat) {
-        text(title, x, y, 170, color: .secondaryLabelColor, bold: true)
-        text(formatTokens(totals.tokens), x, y + 20, 170, size: 22, bold: true)
-        text("TOKENS", x, y + 49, 170, size: 9, color: .secondaryLabelColor)
-        text("输入 \(formatTokens(totals.input)) · 输出 \(formatTokens(totals.output))", x, y + 68, 170, size: 10, color: .secondaryLabelColor)
-        text("缓存 \(formatCacheHitRate(totals)) · \(totals.requests) 次", x, y + 85, 170, size: 10, color: .systemTeal)
     }
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
@@ -400,35 +405,39 @@ private final class UsagePanel: NSView {
         }
         period("今日", totals: summary.today, x: 20)
         period("近 7 日", totals: summary.sevenDays, x: 210)
-        line(240)
-        text("CODEX / 官方额度", 20, 255, 230, size: 11, bold: true)
-        text(summary.codex?.planType?.uppercased() ?? "", 280, 255, 100, size: 10, color: .secondaryLabelColor, right: true)
-        if let status = summary.codex, status.loggedIn, status.error == nil {
-            quota("5 小时", window: status.primary, y: 281)
-            quota("7 天", window: status.secondary, y: 340)
-        } else {
-            let message = summary.codex.map { $0.loggedIn ? ($0.error ?? "暂无额度信息") : "未登录 openai-codex" } ?? "正在查询官方额度…"
-            text(message, 20, 295, 360, color: .secondaryLabelColor)
-        }
-
-        let currentY: CGFloat = 397
-        line(currentY)
-        text("GPT / CHATGPT 使用", 20, currentY + 15, 230, size: 11, bold: true)
-        text("来自本地会话记录", 230, currentY + 15, 150, size: 10, color: .secondaryLabelColor, right: true)
-        chatgptPeriod("今日", totals: summary.chatgptToday, x: 20, y: currentY + 27)
-        chatgptPeriod("近 7 日", totals: summary.chatgptSevenDays, x: 210, y: currentY + 27)
-
-        let providerLineY = currentY + 138
-        line(providerLineY)
-        text("提供商", 20, providerLineY + 15, 180, size: 11, bold: true)
-        text("近 7 日 · 按成本", 230, providerLineY + 15, 150, size: 10, color: .secondaryLabelColor, right: true)
+        let providerSectionY: CGFloat = 240
+        line(providerSectionY)
+        text("提供商", 20, providerSectionY + 15, 180, size: 11, bold: true)
+        text("近 7 日 · 按成本", 230, providerSectionY + 15, 150, size: 10, color: .secondaryLabelColor, right: true)
+        let providerRowStartY = providerSectionY + 42
         for (i, provider) in summary.providers.prefix(5).enumerated() {
-            let y = providerLineY + 42 + CGFloat(i * 26)
+            let y = providerRowStartY + CGFloat(i * 26)
             text(provider.id, 20, y, 169, size: 11)
             text(formatTokens(provider.tokens), 193, y, 83, size: 11, color: .secondaryLabelColor, right: true)
             text(formatCost(provider.cost), 280, y, 100, size: 11, right: true)
         }
-        if summary.providers.isEmpty { text("暂无使用记录", 20, providerLineY + 42, 360, color: .secondaryLabelColor) }
+
+        let providerRowCount = max(1, min(summary.providers.count, 5))
+        if summary.providers.isEmpty { text("暂无使用记录", 20, providerRowStartY, 360, color: .secondaryLabelColor) }
+
+        let chatgptSectionY = providerSectionY + 42 + CGFloat(providerRowCount * 26) + 20
+        line(chatgptSectionY)
+        text("GPT / CHATGPT 使用", 20, chatgptSectionY + 15, 230, size: 11, bold: true)
+        text("来自本地会话记录", 230, chatgptSectionY + 15, 150, size: 10, color: .secondaryLabelColor, right: true)
+        period("今日", totals: summary.chatgptToday, x: 20, y: chatgptSectionY + 27)
+        period("近 7 日", totals: summary.chatgptSevenDays, x: 210, y: chatgptSectionY + 27)
+
+        let codexLineY = chatgptSectionY + 190
+        line(codexLineY)
+        text("CODEX / 官方额度", 20, codexLineY + 15, 230, size: 11, bold: true)
+        text(summary.codex?.planType?.uppercased() ?? "", 280, codexLineY + 15, 100, size: 10, color: .secondaryLabelColor, right: true)
+        if let status = summary.codex, status.loggedIn, status.error == nil {
+            quota("5 小时", window: status.primary, y: codexLineY + 41)
+            quota("7 天", window: status.secondary, y: codexLineY + 100)
+        } else {
+            let message = summary.codex.map { $0.loggedIn ? ($0.error ?? "暂无额度信息") : "未登录 openai-codex" } ?? "正在查询官方额度…"
+            text(message, 20, codexLineY + 55, 360, color: .secondaryLabelColor)
+        }
     }
 }
 
@@ -438,6 +447,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
     private let menu = NSMenu()
     private let refreshQueue = DispatchQueue(label: "com.raingor.pi-usage-menubar.refresh", qos: .utility)
     private var cachedSummary: UsageSummary?
+    // This is intentionally kept on the main thread with the status item.
+    private var nativeEnabled = false
     private var isRefreshing = false
     // Accessed only from refreshQueue.
     private var codexCache: (value: CodexUsageStatus, at: Date)?
@@ -450,9 +461,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
         statusItem.menu = menu
         statusItem.button?.font = NSFont.menuBarFont(ofSize: 0)
         rebuildLoadingMenu()
-        requestRefresh(force: true)
+        syncNativeVisibility()
+        Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            self?.syncNativeVisibility()
+        }
         Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            self?.requestRefresh(force: true)
+            guard let self, self.nativeEnabled else { return }
+            self.requestRefresh(force: true)
         }
     }
 
@@ -480,7 +495,24 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
         // rendered in low-contrast gray by macOS.
     }
 
+    private func syncNativeVisibility() {
+        refreshQueue.async { [weak self] in
+            guard let self else { return }
+            let enabled = self.reader.readShowNative()
+            DispatchQueue.main.async {
+                let wasEnabled = self.nativeEnabled
+                self.nativeEnabled = enabled
+                self.statusItem.isVisible = enabled
+                if enabled && !wasEnabled {
+                    self.rebuildLoadingMenu()
+                    self.requestRefresh(force: true)
+                }
+            }
+        }
+    }
+
     private func requestRefresh(force: Bool) {
+        guard nativeEnabled else { return }
         if !force, let cachedSummary, Date().timeIntervalSince(cachedSummary.updatedAt) < 30 {
             return
         }

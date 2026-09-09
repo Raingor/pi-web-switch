@@ -76,6 +76,19 @@
 - デフォルト値、テーマ（Light/Dark/System）、画面ズーム（50%–200%）とフォントサイズ、パッケージ管理
 - インポート/エクスポート、リセット
 
+### 🖥️ Native macOS メニューバー
+- **軽量なネイティブアプリ** — Electron、WebView、常駐 Web サーバーを使わない Swift/AppKit 実装
+- **使用量の概要** — Pi、ローカル ChatGPT/Codex セッション、プロバイダー、Codex 公式利用枠を表示
+- **バックグラウンド更新** — メニューバー操作をブロックせずにローカルセッションと利用枠を更新
+- **表示切替** — 設定ページから `~/.pi/agent/settings.json` を通じて表示/非表示を制御
+
+macOS と Swift Command Line Tools が必要です。プロジェクトのチェックアウトから実行します：
+
+```bash
+npm run native:build  # release/PiUsageMenuBar.app をビルド
+npm run native:open   # ビルドしてメニューバーアプリを起動
+```
+
 ## 🚀 始め方
 
 ```bash
@@ -155,6 +168,10 @@ pi-web-switch/
 │           └── SKILL.md   # 使用ドキュメント
 ├── server/
 │   └── pi-reader.ts       # サーバーサイド：~/.pi/agent/ 読み取り
+├── native/
+│   └── PiUsageMenuBar.swift # Swift/AppKit メニューバーアプリ
+├── scripts/
+│   └── build-native-menubar.sh
 └── src/                   # React フロントエンド
 ```
 

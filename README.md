@@ -87,6 +87,19 @@
 - **Import/Export** — Download full config as JSON, restore from backup
 - **Reset** — Factory reset to blank configuration
 
+### 🖥️ Native macOS Menu Bar
+- **Lightweight Native App** — Swift/AppKit implementation with no Electron, WebView, or resident web server
+- **Usage at a Glance** — Pi usage, local ChatGPT/Codex session usage, provider totals, and official Codex quota
+- **Background Refresh** — Reads local session files and refreshes quota data without blocking the menu bar
+- **Visibility Control** — The Settings page controls the menu bar feature through `~/.pi/agent/settings.json`
+
+macOS and Swift Command Line Tools are required. From a checkout of this repository:
+
+```bash
+npm run native:build  # Build release/PiUsageMenuBar.app
+npm run native:open   # Build and launch the menu bar app
+```
+
 ## 🌗 Theme Support
 
 Full light and dark mode with system-follow support. Theme toggles instantly via CSS custom properties — no page reload needed. All components adapt including sidebar, modals, forms, charts, and scrollbars.
@@ -186,6 +199,10 @@ pi-web-switch/
 ├── tsconfig.json
 ├── server/
 │   └── pi-reader.ts        # Server-side module: reads ~/.pi/agent/ files + parses sessions
+├── native/
+│   └── PiUsageMenuBar.swift # Swift/AppKit usage menu bar app
+├── scripts/
+│   └── build-native-menubar.sh
 ├── pi-package/
 │   ├── index.ts            # Extension entry: /pi-switch and /pi-usage commands
 │   └── skills/
