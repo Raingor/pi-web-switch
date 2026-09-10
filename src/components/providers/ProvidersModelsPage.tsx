@@ -19,6 +19,8 @@ import {
   RotateCcw,
   Edit3,
   Eye,
+  Square,
+  SquareCheck,
   EyeOff,
   Lock,
   Unlock,
@@ -34,7 +36,6 @@ import {
   Zap,
   ClipboardPaste,
   Download,
-  SquareCheck,
   Copy,
   Sparkles,
   Mic,
@@ -649,6 +650,8 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed, modelsJson
   const [editModel, setEditModel] = useState<Model | null>(null);
   const [showAddModel, setShowAddModel] = useState(false);
   const [deleteModel, setDeleteModel] = useState<Model | null>(null);
+  const [selectedModels, setSelectedModels] = useState<Set<string>>(new Set());
+  const [batchDeleteConfirm, setBatchDeleteConfirm] = useState(false);
   const [supportsDeveloperRole, setSupportsDeveloperRole] = useState(
     provider.compat?.supportsDeveloperRole ?? false
   );
@@ -1037,6 +1040,29 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed, modelsJson
 
   const visibleModels = provider.models;
 
+  const isAllSelected = visibleModels.length > 0 && visibleModels.every((m) => selectedModels.has(m.id));
+  const toggleSelectAll = () => {
+    if (isAllSelected) setSelectedModels(new Set());
+    else setSelectedModels(new Set(visibleModels.map((m) => m.id)));
+  };
+  const toggleSelectModel = (id: string) => {
+    setSelectedModels((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const handleBatchDelete = () => {
+    if (selectedModels.size === 0) return;
+    setBatchDeleteConfirm(true);
+  };
+  const confirmBatchDelete = () => {
+    selectedModels.forEach((id) => removeModel(provider.id, id));
+    setSelectedModels(new Set());
+    setBatchDeleteConfirm(false);
+  };
+
   return (
     <div className="space-y-5">
       {/* Header */}
@@ -1379,33 +1405,59 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed, modelsJson
 
       {/* Model List */}
       <div>
-        <div className="flex items-center justify-between gap-3">
-          <label className="block text-sm text-gray-400">{t("providers_models.model_list")}</label>
-          {provider.models.length > 0 && (
+          <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
-              <button
-                onClick={() => setAllModelsEnabled(true)}
-                className="rounded-md border border-gray-700 px-2.5 py-1 text-xs text-gray-300 transition-colors hover:bg-gray-800 hover:text-white"
-              >
-                {t("providers_models.enable_all")}
-              </button>
-              <button
-                onClick={() => setAllModelsEnabled(false)}
-                className="rounded-md border border-gray-700 px-2.5 py-1 text-xs text-gray-300 transition-colors hover:bg-gray-800 hover:text-white"
-              >
-                {t("providers_models.disable_all")}
-              </button>
-              <button
-                onClick={handleTestAll}
-                title={t("providers_models.test_all")}
-                className="rounded-md border border-gray-700 px-2.5 py-1 text-xs text-gray-300 transition-colors hover:bg-gray-800 hover:text-white"
-              >
-                <Zap className="mr-1 inline h-3 w-3" />
-                {t("providers_models.test_all")}
-              </button>
+              {provider.models.length > 0 && (
+                <button
+                  onClick={toggleSelectAll}
+                  title={isAllSelected ? t("models.deselect_all") : t("models.select_all")}
+                  className="rounded-md p-1 text-gray-500 transition-colors hover:bg-gray-800 hover:text-gray-300"
+                >
+                  {isAllSelected ? (
+                    <SquareCheck className="h-4 w-4 text-blue-400" />
+                  ) : (
+                    <Square className="h-4 w-4" />
+                  )}
+                </button>
+              )}
+              <label className="block text-sm text-gray-400">{t("providers_models.model_list")}</label>
             </div>
-          )}
-        </div>
+            {provider.models.length > 0 && (
+              <div className="flex items-center gap-2">
+                {selectedModels.size > 0 && (
+                  <button
+                    onClick={handleBatchDelete}
+                    className="rounded-md border border-red-700/50 bg-red-900/30 px-2.5 py-1 text-xs font-medium text-red-400 transition-colors hover:bg-red-900/50"
+                    title={t("models.batch_delete")}
+                    aria-label={selectedModels.size + " " + t("models.batch_delete") + " 个模型"}
+                  >
+                    <Trash2 className="mr-1 inline h-3 w-3" />
+                    {t("models.batch_delete_count", selectedModels.size.toString())}
+                  </button>
+                )}
+                <button
+                  onClick={() => setAllModelsEnabled(true)}
+                  className="rounded-md border border-gray-700 px-2.5 py-1 text-xs text-gray-300 transition-colors hover:bg-gray-800 hover:text-white"
+                >
+                  {t("providers_models.enable_all")}
+                </button>
+                <button
+                  onClick={() => setAllModelsEnabled(false)}
+                  className="rounded-md border border-gray-700 px-2.5 py-1 text-xs text-gray-300 transition-colors hover:bg-gray-800 hover:text-white"
+                >
+                  {t("providers_models.disable_all")}
+                </button>
+                <button
+                  onClick={handleTestAll}
+                  title={t("providers_models.test_all")}
+                  className="rounded-md border border-gray-700 px-2.5 py-1 text-xs text-gray-300 transition-colors hover:bg-gray-800 hover:text-white"
+                >
+                  <Zap className="mr-1 inline h-3 w-3" />
+                  {t("providers_models.test_all")}
+                </button>
+              </div>
+            )}
+          </div>
 
         <div className="mt-1.5 space-y-2 rounded-lg border border-gray-800 p-3">
           {provider.models.length === 0 && (
@@ -1416,11 +1468,29 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed, modelsJson
           )}
           {visibleModels.map((m) => {
             const enabled = isModelEnabled(m.id);
+            const isSelected = selectedModels.has(m.id);
             return (
             <div
               key={m.id}
-              className="provider-model-row flex items-center gap-2 rounded-lg border border-gray-700 bg-gray-900/70 px-3 py-2.5"
+              className={cn(
+                "provider-model-row flex items-center gap-2 rounded-lg border bg-gray-900/70 px-3 py-2.5",
+                isSelected ? "border-blue-500/60" : "border-gray-700"
+              )}
             >
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleSelectModel(m.id);
+                }}
+                title={isSelected ? t("models.deselect_all") : t("models.select_all")}
+                className="rounded-md p-0.5 text-gray-500 transition-colors hover:text-gray-300"
+              >
+                {isSelected ? (
+                  <SquareCheck className="h-4 w-4 text-blue-400" />
+                ) : (
+                  <Square className="h-4 w-4" />
+                )}
+              </button>
               <button
                 onClick={() => toggleModelEnabled(m.id)}
                 title={enabled ? t("models.enabled") : t("models.disabled")}
@@ -1772,6 +1842,38 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed, modelsJson
             >
               <Trash2 className="h-4 w-4" />
               {t("models.delete_model")}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Batch Delete Confirmation Modal */}
+      <Modal
+        open={batchDeleteConfirm}
+        onClose={() => setBatchDeleteConfirm(false)}
+        title={t("models.batch_delete")}
+      >
+        <div className="space-y-4">
+          <div className="flex items-start gap-3">
+            <Trash2 className="h-5 w-5 shrink-0 mt-0.5 text-red-400" />
+            <p className="text-sm text-gray-200">
+              {t("models.batch_delete_confirm", selectedModels.size.toString())}
+            </p>
+          </div>
+          <div className="flex justify-end gap-3">
+            <button
+              onClick={() => { setBatchDeleteConfirm(false); setSelectedModels(new Set()); }}
+              className="rounded-lg px-4 py-2 text-sm text-gray-400 hover:bg-gray-800"
+            >
+              {t("models.cancel")}
+            </button>
+            <button
+              onClick={confirmBatchDelete}
+              className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium text-white"
+              style={{ backgroundColor: "#dc2626" }}
+            >
+              <Trash2 className="h-4 w-4" />
+              {t("models.batch_delete")}
             </button>
           </div>
         </div>
