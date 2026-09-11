@@ -87,16 +87,17 @@
 - **重置** — 恢复空白默认配置
 
 ### 🖥️ Native macOS 菜单栏
-- **轻量原生应用** — 使用 Swift/AppKit 实现，不依赖 Electron、WebView 或常驻 Web 服务
-- **用量概览** — 查看 Pi 用量、本地 ChatGPT/Codex 会话用量、提供商统计和 Codex 官方额度
+- **两个轻量原生应用** — 分别统计 Pi 和 ChatGPT/Codex，用 Swift/AppKit 实现，不依赖 Electron、WebView 或常驻 Web 服务
+- **Pi 用量应用** — 显示 Pi 今日/近 7 日用量、成本、缓存命中率和提供商统计
+- **ChatGPT 用量应用** — 显示本地 ChatGPT/Codex 会话用量和 Codex 官方额度
 - **后台刷新** — 在后台读取本地会话并刷新额度，不阻塞菜单栏交互
-- **显示开关** — 设置页通过 `~/.pi/agent/settings.json` 控制 Native 菜单栏功能的显示与隐藏
+- **独立显示开关** — 设置页通过 `~/.pi/agent/settings.json` 分别控制两个菜单栏应用
 
 需要 macOS 和 Swift Command Line Tools。在项目目录中运行：
 
 ```bash
-npm run native:build  # 构建 release/PiUsageMenuBar.app
-npm run native:open   # 构建并启动菜单栏应用
+npm run native:build  # 构建 release/ 下的两个 .app
+npm run native:open   # 构建并启动两个菜单栏应用
 ```
 
 ## 🌗 主题支持
@@ -207,7 +208,9 @@ pi-web-switch/
 ├── server/
 │   └── pi-reader.ts       # 服务端：读取 ~/.pi/agent/ 文件
 ├── native/
-│   └── PiUsageMenuBar.swift # Swift/AppKit 菜单栏用量应用
+│   ├── NativeUsageSupport.swift # 共用用量读取和格式化
+│   ├── PiUsageMenuBar.swift # Pi 用量菜单栏应用
+│   └── ChatGPTUsageMenuBar.swift # ChatGPT/Codex 用量菜单栏应用
 ├── scripts/
 │   └── build-native-menubar.sh
 └── src/                   # React 前端

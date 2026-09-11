@@ -1,17 +1,17 @@
 import AppKit
 import Foundation
 
-final class PiUsagePanel: NSView {
+final class ChatGPTUsagePanel: NSView {
     private let summary: UsageSummary
 
     override var isFlipped: Bool { true }
 
     init(summary: UsageSummary) {
         self.summary = summary
-        super.init(frame: NSRect(x: 0, y: 0, width: 400, height: 610))
+        super.init(frame: NSRect(x: 0, y: 0, width: 400, height: 470))
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
-        setAccessibilityLabel("Pi 使用情况")
+        setAccessibilityLabel("ChatGPT 使用情况")
     }
 
     required init?(coder: NSCoder) { nil }
@@ -43,7 +43,7 @@ final class PiUsagePanel: NSView {
         }
     }
 
-    private func period(_ title: String, totals: UsageTotals, x: CGFloat, y: CGFloat = 65) {
+    private func period(_ title: String, totals: UsageTotals, x: CGFloat, y: CGFloat) {
         text(title, x, y, 170, color: .secondaryLabelColor, bold: true)
         text(formatTokens(totals.tokens), x, y + 22, 170, size: 26, bold: true)
         text("TOKENS", x, y + 54, 170, size: 9, color: .secondaryLabelColor)
@@ -72,8 +72,8 @@ final class PiUsagePanel: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        text("π", 20, 12, 26, size: 24, color: .systemTeal)
-        text("Pi 使用情况", 52, 15, 180, size: 17, bold: true)
+        text("GPT", 20, 12, 60, size: 24, color: .systemTeal)
+        text("ChatGPT 使用情况", 78, 15, 210, size: 17, bold: true)
         let clock = DateFormatter()
         clock.dateFormat = "HH:mm"
         text("更新 " + clock.string(from: summary.updatedAt), 260, 20, 120, size: 10, color: .secondaryLabelColor, right: true)
@@ -84,46 +84,30 @@ final class PiUsagePanel: NSView {
             return
         }
 
-        period("今日", totals: summary.today, x: 20)
-        period("近 7 日", totals: summary.sevenDays, x: 210)
+        text("本地 ChatGPT/Codex 会话", 20, 65, 230, size: 11, bold: true)
+        text("仅统计本地会话记录", 230, 65, 150, size: 10, color: .secondaryLabelColor, right: true)
+        period("今日", totals: summary.chatgptToday, x: 20, y: 92)
+        period("近 7 日", totals: summary.chatgptSevenDays, x: 210, y: 92)
 
-        let providerSectionY: CGFloat = 240
-        line(providerSectionY)
-        text("提供商", 20, providerSectionY + 15, 180, size: 11, bold: true)
-        text("近 7 日 · 按成本", 230, providerSectionY + 15, 150, size: 10, color: .secondaryLabelColor, right: true)
-        let rowStartY = providerSectionY + 42
-        for (i, provider) in summary.providers.prefix(5).enumerated() {
-            let y = rowStartY + CGFloat(i * 26)
-            text(provider.id, 20, y, 169, size: 11)
-            text(formatTokens(provider.tokens), 193, y, 83, size: 11, color: .secondaryLabelColor, right: true)
-            text(formatCost(provider.cost), 280, y, 100, size: 11, right: true)
-        }
-        if summary.providers.isEmpty {
-            text("暂无使用记录", 20, rowStartY, 360, color: .secondaryLabelColor)
-        }
-
-        let providerRowCount = max(1, min(summary.providers.count, 5))
-        let quotaSectionY = providerSectionY + 42 + CGFloat(providerRowCount * 26) + 20
-        line(quotaSectionY)
-        text("ChatGPT / Codex 额度", 20, quotaSectionY + 15, 230, size: 11, bold: true)
+        let quotaLineY: CGFloat = 270
+        line(quotaLineY)
+        text("CODEX / 官方额度", 20, quotaLineY + 15, 230, size: 11, bold: true)
+        text(summary.codex?.planType?.uppercased() ?? "", 280, quotaLineY + 15, 100, size: 10, color: .secondaryLabelColor, right: true)
         if let status = summary.codex, status.loggedIn, status.error == nil {
-            quota("5 小时窗口", window: status.primary, y: quotaSectionY + 41)
-            quota("7 天窗口", window: status.secondary, y: quotaSectionY + 100)
-        } else if let status = summary.codex, !status.loggedIn {
-            text("未登录 openai-codex，无官方额度", 20, quotaSectionY + 50, 360, color: .secondaryLabelColor)
-        } else if let status = summary.codex, status.error != nil {
-            text("额度查询失败：" + (status.error ?? "错误"), 20, quotaSectionY + 50, 360, color: .systemRed)
+            quota("5 小时", window: status.primary, y: quotaLineY + 41)
+            quota("7 天", window: status.secondary, y: quotaLineY + 100)
         } else {
-            text("正在查询 ChatGPT / Codex 官方额度…", 20, quotaSectionY + 50, 360, color: .secondaryLabelColor)
+            let message = summary.codex.map { $0.loggedIn ? ($0.error ?? "暂无额度信息") : "未登录 openai-codex" } ?? "正在查询官方额度…"
+            text(message, 20, quotaLineY + 55, 360, color: .secondaryLabelColor)
         }
     }
 }
 
-final class PiUsageAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+final class ChatGPTUsageAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let reader = UsageReader()
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let menu = NSMenu()
-    private let refreshQueue = DispatchQueue(label: "com.raingor.pi-usage-menubar.refresh", qos: .utility)
+    private let refreshQueue = DispatchQueue(label: "com.raingor.chatgpt-usage-menubar.refresh", qos: .utility)
     private var cachedSummary: UsageSummary?
     private var nativeEnabled = false
     private var isRefreshing = false
@@ -170,7 +154,7 @@ final class PiUsageAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
     private func syncNativeVisibility() {
         refreshQueue.async { [weak self] in
             guard let self else { return }
-            let enabled = self.reader.readShowNative("showPiNative")
+            let enabled = self.reader.readShowNative("showChatGPTNative")
             DispatchQueue.main.async {
                 let wasEnabled = self.nativeEnabled
                 self.nativeEnabled = enabled
@@ -192,7 +176,7 @@ final class PiUsageAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
         isRefreshing = true
         refreshQueue.async { [weak self] in
             guard let self else { return }
-            var summary = self.reader.read(scope: .pi)
+            var summary = self.reader.read(scope: .chatgpt)
             summary.codex = self.readCodexUsage(force: force)
             DispatchQueue.main.async {
                 self.cachedSummary = summary
@@ -269,45 +253,45 @@ final class PiUsageAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
     }
 
     private func rebuildLoadingMenu() {
-        statusItem.button?.title = "π …"
-        statusItem.button?.toolTip = "正在读取 Pi 使用量"
+        statusItem.button?.title = "GPT …"
+        statusItem.button?.toolTip = "正在读取 ChatGPT 使用量"
         menu.removeAllItems()
-        menu.addItem(informationItem("正在读取 Pi 近 7 日使用量…"))
+        menu.addItem(informationItem("正在读取 ChatGPT 近 7 日使用量…"))
         menu.addItem(.separator())
-        let quitItem = NSMenuItem(title: "退出 Pi 用量", action: #selector(quitAction), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: "退出 ChatGPT 用量", action: #selector(quitAction), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
     }
 
     private func rebuildMenu(_ summary: UsageSummary) {
         if let error = summary.error {
-            statusItem.button?.title = "π ⚠"
+            statusItem.button?.title = "GPT ⚠"
             statusItem.button?.toolTip = error
         } else {
-            statusItem.button?.title = "π \(formatTokens(summary.today.tokens))"
-            statusItem.button?.toolTip = "今日 \(summary.today.tokens) tokens"
+            statusItem.button?.title = "GPT \(formatTokens(summary.chatgptToday.tokens))"
+            statusItem.button?.toolTip = "今日 ChatGPT \(summary.chatgptToday.tokens) tokens"
         }
 
         menu.removeAllItems()
         let panel = NSMenuItem()
-        panel.view = PiUsagePanel(summary: summary)
+        panel.view = ChatGPTUsagePanel(summary: summary)
         menu.addItem(panel)
 
         menu.addItem(.separator())
-        let refreshItem = NSMenuItem(title: "刷新 Pi 使用量", action: #selector(refreshAction), keyEquivalent: "r")
+        let refreshItem = NSMenuItem(title: "刷新 ChatGPT 使用量", action: #selector(refreshAction), keyEquivalent: "r")
         refreshItem.target = self
         menu.addItem(refreshItem)
-        let quitItem = NSMenuItem(title: "退出 Pi 用量", action: #selector(quitAction), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: "退出 ChatGPT 用量", action: #selector(quitAction), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
     }
 }
 
 @main
-struct PiUsageMenuBarMain {
+struct ChatGPTUsageMenuBarMain {
     static func main() {
         let application = NSApplication.shared
-        let delegate = PiUsageAppDelegate()
+        let delegate = ChatGPTUsageAppDelegate()
         application.delegate = delegate
         application.run()
     }

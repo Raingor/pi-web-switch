@@ -88,16 +88,17 @@
 - **Reset** — Factory reset to blank configuration
 
 ### 🖥️ Native macOS Menu Bar
-- **Lightweight Native App** — Swift/AppKit implementation with no Electron, WebView, or resident web server
-- **Usage at a Glance** — Pi usage, local ChatGPT/Codex session usage, provider totals, and official Codex quota
+- **Two Lightweight Apps** — Separate Swift/AppKit menu bar apps for Pi usage and ChatGPT/Codex usage, with no Electron, WebView, or resident web server
+- **Pi Usage App** — Pi today/7-day usage, cost, cache rate, and provider totals
+- **ChatGPT Usage App** — Local ChatGPT/Codex session usage and official Codex quota
 - **Background Refresh** — Reads local session files and refreshes quota data without blocking the menu bar
-- **Visibility Control** — The Settings page controls the menu bar feature through `~/.pi/agent/settings.json`
+- **Separate Visibility Controls** — The Settings page controls each menu bar app through `~/.pi/agent/settings.json`
 
 macOS and Swift Command Line Tools are required. From a checkout of this repository:
 
 ```bash
-npm run native:build  # Build release/PiUsageMenuBar.app
-npm run native:open   # Build and launch the menu bar app
+npm run native:build  # Build both .app bundles under release/
+npm run native:open   # Build and launch both menu bar apps
 ```
 
 ## 🌗 Theme Support
@@ -200,7 +201,9 @@ pi-web-switch/
 ├── server/
 │   └── pi-reader.ts        # Server-side module: reads ~/.pi/agent/ files + parses sessions
 ├── native/
-│   └── PiUsageMenuBar.swift # Swift/AppKit usage menu bar app
+│   ├── NativeUsageSupport.swift # Shared usage readers and formatters
+│   ├── PiUsageMenuBar.swift # Pi usage menu bar app
+│   └── ChatGPTUsageMenuBar.swift # ChatGPT/Codex usage menu bar app
 ├── scripts/
 │   └── build-native-menubar.sh
 ├── pi-package/

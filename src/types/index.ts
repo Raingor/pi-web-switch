@@ -134,8 +134,12 @@ export interface PiSettings {
   showCacheMissNotices?: boolean;
   quietStartup?: boolean;
   collapseChangelog?: boolean;
-  /** Show the native macOS usage menu bar feature. */
+  /** Legacy master switch for the native macOS usage menu bar features. */
   showNative?: boolean;
+  /** Show the Pi usage menu bar app. */
+  showPiNative?: boolean;
+  /** Show the ChatGPT/Codex usage menu bar app. */
+  showChatGPTNative?: boolean;
   enableInstallTelemetry?: boolean;
   enableSkillCommands?: boolean;
   steeringMode?: "one-at-a-time" | "all";

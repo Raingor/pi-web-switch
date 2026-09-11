@@ -77,16 +77,17 @@
 - インポート/エクスポート、リセット
 
 ### 🖥️ Native macOS メニューバー
-- **軽量なネイティブアプリ** — Electron、WebView、常駐 Web サーバーを使わない Swift/AppKit 実装
-- **使用量の概要** — Pi、ローカル ChatGPT/Codex セッション、プロバイダー、Codex 公式利用枠を表示
+- **2 つの軽量アプリ** — Pi 用と ChatGPT/Codex 用を分離した Swift/AppKit 実装。Electron、WebView、常駐 Web サーバーは不要
+- **Pi 使用量アプリ** — Pi の今日/7 日間の使用量、コスト、キャッシュ率、プロバイダー統計を表示
+- **ChatGPT 使用量アプリ** — ローカル ChatGPT/Codex セッションの使用量と Codex 公式利用枠を表示
 - **バックグラウンド更新** — メニューバー操作をブロックせずにローカルセッションと利用枠を更新
-- **表示切替** — 設定ページから `~/.pi/agent/settings.json` を通じて表示/非表示を制御
+- **個別表示切替** — 設定ページから `~/.pi/agent/settings.json` を通じて各アプリを個別に制御
 
 macOS と Swift Command Line Tools が必要です。プロジェクトのチェックアウトから実行します：
 
 ```bash
-npm run native:build  # release/PiUsageMenuBar.app をビルド
-npm run native:open   # ビルドしてメニューバーアプリを起動
+npm run native:build  # release/ 以下の 2 つの .app をビルド
+npm run native:open   # ビルドして 2 つのメニューバーアプリを起動
 ```
 
 ## 🚀 始め方
@@ -169,7 +170,9 @@ pi-web-switch/
 ├── server/
 │   └── pi-reader.ts       # サーバーサイド：~/.pi/agent/ 読み取り
 ├── native/
-│   └── PiUsageMenuBar.swift # Swift/AppKit メニューバーアプリ
+│   ├── NativeUsageSupport.swift # 共通の使用量読み取りとフォーマット
+│   ├── PiUsageMenuBar.swift # Pi 使用量メニューバーアプリ
+│   └── ChatGPTUsageMenuBar.swift # ChatGPT/Codex 使用量メニューバーアプリ
 ├── scripts/
 │   └── build-native-menubar.sh
 └── src/                   # React フロントエンド

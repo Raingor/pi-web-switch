@@ -2,31 +2,38 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-APP="$ROOT/release/PiUsageMenuBar.app"
-CONTENTS="$APP/Contents"
 
-rm -rf "$APP"
-mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
+build_app() {
+  local source="$1"
+  local app="$2"
+  local executable="$3"
+  local display_name="$4"
+  local bundle_id="$5"
+  local app_path="$ROOT/release/$app.app"
+  local contents="$app_path/Contents"
 
-swiftc "$ROOT/native/PiUsageMenuBar.swift" \
-  -O \
-  -framework AppKit \
-  -framework Foundation \
-  -o "$CONTENTS/MacOS/PiUsageMenuBar"
+  rm -rf "$app_path"
+  mkdir -p "$contents/MacOS" "$contents/Resources"
 
-cat > "$CONTENTS/Info.plist" <<'PLIST'
+  swiftc "$ROOT/native/NativeUsageSupport.swift" "$ROOT/native/$source" \
+    -O \
+    -framework AppKit \
+    -framework Foundation \
+    -o "$contents/MacOS/$executable"
+
+  cat > "$contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>CFBundleDisplayName</key>
-  <string>Pi Usage</string>
+  <string>$display_name</string>
   <key>CFBundleExecutable</key>
-  <string>PiUsageMenuBar</string>
+  <string>$executable</string>
   <key>CFBundleIdentifier</key>
-  <string>com.raingor.pi-usage-menubar</string>
+  <string>$bundle_id</string>
   <key>CFBundleName</key>
-  <string>Pi Usage</string>
+  <string>$display_name</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
@@ -41,9 +48,13 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
-# Ad-hoc signing lets macOS launch the local app without requiring a paid
-# Apple Developer certificate. Gatekeeper may still ask for confirmation.
-codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true
+  # Ad-hoc signing lets macOS launch the local app without a paid
+  # Apple Developer certificate. Gatekeeper may still ask for confirmation.
+  codesign --force --deep --sign - "$app_path" >/dev/null 2>&1 || true
 
-echo "Built: $APP"
-echo "Run:   open \"$APP\""
+  echo "Built: $app_path"
+}
+
+build_app "PiUsageMenuBar.swift" "PiUsageMenuBar" "PiUsageMenuBar" "Pi Usage" "com.raingor.pi-usage-menubar"
+build_app "ChatGPTUsageMenuBar.swift" "ChatGPTUsageMenuBar" "ChatGPTUsageMenuBar" "ChatGPT Usage" "com.raingor.chatgpt-usage-menubar"
+echo "Run:   open \"$ROOT/release/PiUsageMenuBar.app\" \"$ROOT/release/ChatGPTUsageMenuBar.app\""

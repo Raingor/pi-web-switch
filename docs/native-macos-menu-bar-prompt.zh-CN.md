@@ -1,15 +1,15 @@
 # Native macOS 菜单栏应用生成提示词
 
-> 用途：将下面的提示词交给代码生成 Agent，用于重新实现或继续维护 `pi-web-switch` 的 Native macOS 用量菜单栏应用。
+> 用途：将下面的提示词交给代码生成 Agent，用于重新实现或继续维护 `pi-web-switch` 的两个 Native macOS 用量菜单栏应用。
 
 ## 可直接使用的提示词
 
 ```text
-请在现有 pi-web-switch 项目中实现一个低内存、原生 macOS 菜单栏用量面板。
+请在现有 pi-web-switch 项目中实现两个低内存、原生 macOS 菜单栏用量面板。
 
 ## 目标
 
-创建一个独立的 macOS 菜单栏应用，用于快速查看 Pi 编码代理和 ChatGPT/Codex 的本地用量。应用必须轻量、稳定，不依赖 Electron、WebView、浏览器窗口或常驻 Web 服务。
+创建两个独立的 macOS 菜单栏应用：一个只统计 Pi 编码代理用量，另一个只统计 ChatGPT/Codex 本地用量和官方额度。应用必须轻量、稳定，不依赖 Electron、WebView、浏览器窗口或常驻 Web 服务。
 
 ## 技术约束
 
@@ -53,17 +53,18 @@
 
 ## 菜单栏显示开关
 
-Web 设置页中的“显示 Native 原生菜单栏”开关控制 macOS 右上角的 Native 功能是否显示：
+Web 设置页中的两个开关分别控制 macOS 右上角的 Pi Native 和 ChatGPT Native 功能是否显示：
 
-- 设置写入 `~/.pi/agent/settings.json` 的顶层 `showNative` 布尔值。
-- Native 应用启动时读取该值；不存在时默认显示。
-- Native 应用运行期间定期读取该值，取消勾选后隐藏 `NSStatusItem`，重新勾选后自动恢复。
-- 该开关只控制 macOS 菜单栏功能，不控制网页侧栏或网页路由。
-- 隐藏时应用进程可以继续运行，以便在 Web 设置中重新开启；不要因此持续发起不必要的用量或网络请求。
+- Pi 开关写入 `~/.pi/agent/settings.json` 的顶层 `showPiNative` 布尔值。
+- ChatGPT 开关写入同一文件的顶层 `showChatGPTNative` 布尔值。
+- 两个 Native 应用启动和运行期间都定期读取自己的开关；取消勾选后隐藏对应 `NSStatusItem`，重新勾选后自动恢复。
+- 旧版 `showNative` 作为两个新开关缺失时的兼容默认值。
+- 这些开关只控制 macOS 菜单栏功能，不控制网页侧栏或网页路由。
+- 隐藏时对应应用进程可以继续运行，以便在 Web 设置中重新开启；不要因此持续发起不必要的用量或网络请求。
 
 ## 菜单栏交互
 
-菜单栏按钮显示简短状态，例如：
+两个菜单栏按钮分别显示简短状态，例如：
 
 - `π 12.4k`：今日 token 数量。
 - `π ⚠`：读取或请求出现错误。
@@ -73,11 +74,12 @@ Web 设置页中的“显示 Native 原生菜单栏”开关控制 macOS 右上�
 
 - 今日 Pi 用量：tokens、成本、请求数、缓存命中率。
 - 近 7 日 Pi 用量：tokens、成本、请求数、缓存命中率。
-- 今日和近 7 日 ChatGPT/Codex 用量，使用与 Pi 用量相同的双列指标卡布局：tokens、成本、请求次数、缓存命中率进度条以及缓存读写明细。
+- Pi Native 显示今日和近 7 日 Pi 用量、提供商统计。
+- ChatGPT Native 显示今日和近 7 日 ChatGPT/Codex 用量，使用双列指标卡布局：tokens、成本、请求次数、缓存命中率进度条以及缓存读写明细。
 - Codex 官方额度：套餐、5 小时窗口、7 天窗口、剩余额度和重置时间。
-- 用量最多的前 5 个 provider。
+- Pi Native 显示用量最多的前 5 个 provider。
 - “刷新使用量”操作。
-- “退出 Pi 用量”操作。
+- 两个应用各自提供对应的退出操作。
 
 菜单打开时如果数据尚未加载，应先显示“正在读取”，然后异步更新内容。刷新操作必须重新读取本地文件，并强制刷新官方额度缓存。
 
@@ -113,7 +115,7 @@ Web 设置页中的“显示 Native 原生菜单栏”开关控制 macOS 右上�
 ## 构建和交付
 
 - 提供一个可执行的构建脚本，例如 `scripts/build-native-menubar.sh`。
-- 构建产物为 `release/PiUsageMenuBar.app`。
+- 构建产物为 `release/PiUsageMenuBar.app` 和 `release/ChatGPTUsageMenuBar.app`。
 - 提供 `npm run native:build` 和 `npm run native:open` 命令。
 - 构建失败时输出明确原因。
 - 不修改项目现有 Web Chat、供应商配置和 Pi CLI 故障切换逻辑。
@@ -137,11 +139,13 @@ Web 设置页中的“显示 Native 原生菜单栏”开关控制 macOS 右上�
 
 | 提示词概念 | 当前实现 |
 | --- | --- |
-| Native 源码 | `native/PiUsageMenuBar.swift` |
+| 共用 Native 源码 | `native/NativeUsageSupport.swift` |
+| Pi Native 源码 | `native/PiUsageMenuBar.swift` |
+| ChatGPT Native 源码 | `native/ChatGPTUsageMenuBar.swift` |
 | 构建脚本 | `scripts/build-native-menubar.sh` |
 | 构建命令 | `npm run native:build` |
 | 启动命令 | `npm run native:open` |
-| 构建产物 | `release/PiUsageMenuBar.app` |
+| 构建产物 | `release/PiUsageMenuBar.app`、`release/ChatGPTUsageMenuBar.app` |
 | Pi 会话数据 | `~/.pi/agent/sessions/` |
 | Codex 会话数据 | `~/.codex/sessions/`、`~/.codex/archived_sessions/` |
 | Pi OAuth 配置 | `~/.pi/agent/auth.json` |

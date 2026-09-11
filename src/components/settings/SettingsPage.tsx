@@ -390,12 +390,22 @@ export function SettingsPage() {
               <label className="flex items-center gap-2 text-sm text-gray-400">
                 <input
                   type="checkbox"
-                  checked={settings?.showNative ?? true}
-                  onChange={(e) => updateSettings({ showNative: e.target.checked })}
+                  checked={settings?.showPiNative ?? settings?.showNative ?? true}
+                  onChange={(e) => updateSettings({ showPiNative: e.target.checked })}
                   className="rounded border-gray-600 bg-gray-800 text-blue-500"
                 />
                 <Monitor className="h-3.5 w-3.5 text-blue-400" />
-                {t("settings.show_native")}
+                {t("settings.show_pi_native")}
+              </label>
+              <label className="flex items-center gap-2 text-sm text-gray-400">
+                <input
+                  type="checkbox"
+                  checked={settings?.showChatGPTNative ?? settings?.showNative ?? true}
+                  onChange={(e) => updateSettings({ showChatGPTNative: e.target.checked })}
+                  className="rounded border-gray-600 bg-gray-800 text-blue-500"
+                />
+                <Monitor className="h-3.5 w-3.5 text-blue-400" />
+                {t("settings.show_chatgpt_native")}
               </label>
             </div>
             <p className="mt-2 text-xs text-gray-600">{t("settings.show_native_desc")}</p>
