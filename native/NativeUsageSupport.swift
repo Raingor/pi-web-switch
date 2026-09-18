@@ -28,6 +28,17 @@ struct ProviderTotals {
     var requests: Int = 0
 }
 
+struct TodayProviderTotals {
+    var id: String
+    var tokens: Int64 = 0
+    var input: Int64 = 0
+    var output: Int64 = 0
+    var cacheRead: Int64 = 0
+    var cacheWrite: Int64 = 0
+    var cost: Double = 0
+    var requests: Int = 0
+}
+
 struct CodexUsageWindow {
     var windowSeconds: Int
     var usedPercent: Double
@@ -50,6 +61,7 @@ struct UsageSummary {
     var chatgptToday = UsageTotals()
     var chatgptSevenDays = UsageTotals()
     var providers: [ProviderTotals] = []
+    var todayProviders: [TodayProviderTotals] = []
     var codex: CodexUsageStatus?
     var updatedAt = Date()
     var error: String?
@@ -160,6 +172,7 @@ final class UsageReader {
         var chatgptToday = UsageTotals()
         var chatgptSevenDays = UsageTotals()
         var providers: [String: ProviderTotals] = [:]
+        var todayProviders: [String: TodayProviderTotals] = [:]
 
         let directories = (try? fileManager.contentsOfDirectory(
             at: sessionsDirectory,
@@ -180,7 +193,7 @@ final class UsageReader {
                     let modifiedAt = (try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? nil
                     guard modifiedAt == nil || modifiedAt! >= fileCutoff else { continue }
                     autoreleasepool {
-                        parse(file: file, todayKey: todayKey, sevenDaysKey: sevenDaysKey, today: &today, sevenDays: &sevenDays, providers: &providers)
+                        parse(file: file, todayKey: todayKey, sevenDaysKey: sevenDaysKey, today: &today, sevenDays: &sevenDays, providers: &providers, todayProviders: &todayProviders)
                     }
                 }
             }
@@ -203,6 +216,7 @@ final class UsageReader {
             chatgptToday: chatgptToday,
             chatgptSevenDays: chatgptSevenDays,
             providers: providers.values.sorted { $0.cost > $1.cost }.prefix(5).map { $0 },
+            todayProviders: todayProviders.values.sorted { $0.tokens > $1.tokens }.map { $0 },
             updatedAt: now
         )
     }
@@ -213,7 +227,8 @@ final class UsageReader {
         sevenDaysKey: String,
         today: inout UsageTotals,
         sevenDays: inout UsageTotals,
-        providers: inout [String: ProviderTotals]
+        providers: inout [String: ProviderTotals],
+        todayProviders: inout [String: TodayProviderTotals]
     ) {
         guard let handle = try? FileHandle(forReadingFrom: file) else { return }
         defer { try? handle.close() }
@@ -259,6 +274,15 @@ final class UsageReader {
             providers[provider] = providerTotal
             if dateKey == todayKey {
                 today.add(input: input, output: output, cacheRead: cacheRead, cacheWrite: cacheWrite, cost: cost, requests: 1)
+                var todayProvider = todayProviders[provider] ?? TodayProviderTotals(id: provider)
+                todayProvider.tokens += input + output + cacheRead + cacheWrite
+                todayProvider.input += input
+                todayProvider.output += output
+                todayProvider.cacheRead += cacheRead
+                todayProvider.cacheWrite += cacheWrite
+                todayProvider.cost += cost
+                todayProvider.requests += 1
+                todayProviders[provider] = todayProvider
             }
         }
 

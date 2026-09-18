@@ -8,7 +8,8 @@ final class PiUsagePanel: NSView {
 
     init(summary: UsageSummary) {
         self.summary = summary
-        super.init(frame: NSRect(x: 0, y: 0, width: 400, height: 610))
+        let height: CGFloat = summary.todayProviders.isEmpty ? 610 : 820
+        super.init(frame: NSRect(x: 0, y: 0, width: 400, height: height))
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
         setAccessibilityLabel("Pi 使用情况")
@@ -103,7 +104,24 @@ final class PiUsagePanel: NSView {
         }
 
         let providerRowCount = max(1, min(summary.providers.count, 5))
-        let quotaSectionY = providerSectionY + 42 + CGFloat(providerRowCount * 26) + 20
+        let sectionY = providerSectionY + 42 + CGFloat(providerRowCount * 26) + 20
+        line(sectionY)
+        text("今日提供商排名", 20, sectionY + 15, 180, size: 11, bold: true)
+        text("按 token 量降序", 210, sectionY + 15, 170, size: 10, color: .secondaryLabelColor, right: true)
+        let todayProviderStartY = sectionY + 42
+        for (i, provider) in summary.todayProviders.enumerated() {
+            let y = todayProviderStartY + CGFloat(i * 24)
+            text("\(i + 1). \(provider.id)", 20, y, 140, size: 11)
+            text(formatTokens(provider.tokens), 163, y, 60, size: 11, color: .secondaryLabelColor, right: true)
+            text("\(provider.requests) 次", 227, y, 53, size: 11, right: true)
+            text(formatCost(provider.cost), 284, y, 96, size: 11, right: true)
+        }
+        if summary.todayProviders.isEmpty {
+            text("暂无今日使用记录", 20, todayProviderStartY, 360, color: .secondaryLabelColor)
+        }
+
+        let todayProviderRowCount = max(1, summary.todayProviders.count)
+        let quotaSectionY = todayProviderStartY + CGFloat(todayProviderRowCount * 24) + 20
         line(quotaSectionY)
         text("ChatGPT / Codex 额度", 20, quotaSectionY + 15, 230, size: 11, bold: true)
         if let status = summary.codex, status.loggedIn, status.error == nil {
