@@ -107,20 +107,11 @@ Full light and dark mode with system-follow support. Theme toggles instantly via
 
 ## 🧱 Built-in Providers
 
-The app ships with definitions for **11 built-in providers** and **26 models** (hardcoded from pi's Rust source):
+The built-in catalog is read **live from your local pi installation** — the same data pi ships and [pi.dev/models](https://pi.dev/models) lists (`@earendil-works/pi-ai/dist/providers/data/*.json`). Upgrading pi upgrades this panel; with pi `0.85.1` that is **37 providers and 1,153 models**, 733 of which accept image input. Results are cached for 5 minutes and refreshed when the dev server restarts.
 
-| Provider | Models |
-|----------|--------|
-| Anthropic | Claude Sonnet 4, Sonnet 4.5, Opus 4, Haiku 3.5 |
-| OpenAI | GPT-4o, GPT-4o-mini, GPT-5.1, o3-mini |
-| DeepSeek | DeepSeek V3, DeepSeek R1 |
-| OpenCode | DeepSeek V4 Flash (Free), DeepSeek V4 Flash |
-| OpenCode Go | DeepSeek V4 Flash, V4 Pro, GLM 5.1, Qwen 3.7 Max, MiMo V2.5 |
-| Google Gemini | Gemini 2.5 Flash, Gemini 2.5 Pro |
-| OpenRouter | Claude Sonnet 4, DeepSeek R1 |
-| Mistral | Mistral Large |
-| GitHub Copilot | Copilot GPT-4o |
-| Groq | Llama 3.3 70B |
+When no pi install can be located (e.g. a fresh checkout), the app falls back to a small hand-maintained catalog in `src/data/builtin-providers.ts` — 10 providers / 38 models covering Anthropic, OpenAI, DeepSeek, Google, OpenCode Zen (+ Go), OpenRouter, Mistral, GitHub Copilot and Groq.
+
+Models you add or import are written to `~/.pi/agent/models.json` and merged over the catalog: an entry whose id matches a built-in provider (e.g. `mistral`) augments that provider instead of appearing as a duplicate, and a display name you set there wins over the catalog name.
 
 ## 🚀 Getting Started
 
@@ -238,7 +229,7 @@ pi-web-switch/
         ├── ui/              # StatCard, Badge, Modal, EmptyState
         ├── help/            # HelpButton, ChangelogButton
         ├── dashboard/       # DashboardPage + charts (hourly/daily granularity)
-        ├── chat/            # ChatPage (local pi conversation workspace)
+        ├── generate/        # GeneratePage (image / video generation)
         ├── providers/       # ProvidersModelsPage + forms
         ├── speedtest/       # ModelSpeedTestPage
         ├── subagents/       # SubagentsPage (agents, chains, run history)
@@ -257,6 +248,7 @@ All data is read directly from **`~/.pi/agent/`** on your machine via a Vite mid
 | `~/.pi/agent/models.json` | Custom provider definitions (baseUrl, API type, models) |
 | `~/.pi/agent/sessions/*.jsonl` | Session history with token usage, model, provider per message |
 | `~/.pi/agent/pi-hermes-memory/*.md` | Hermes memory (MEMORY.md, USER.md, failures.md) |
+| local pi install (`@earendil-works/pi-ai`) | Built-in provider & model catalog — read-only |
 
 Changes made in the UI are written back to these files in real time — the pi agent picks them up on next reload.
 
@@ -279,7 +271,7 @@ These endpoints at `/api/pi/*` are served by the Vite middleware, so the fronten
 | POST | `/api/pi/auth` | Write `auth.json` |
 | GET | `/api/pi/models` | Read `models.json` |
 | POST | `/api/pi/models` | Write `models.json` |
-| GET | `/api/pi/builtin-providers` | List hardcoded built-in providers |
+| GET | `/api/pi/builtin-providers` | Built-in provider + model catalog, read from the local pi install (static fallback if absent) |
 | GET | `/api/pi/usage` | Aggregated token/cost/request data from sessions |
 | GET | `/api/pi/usage-range` | Date-range filtered usage (pi sessions) — `?range=today\|7d\|30d\|custom&from=&to=` |
 | GET | `/api/pi/all-usage-range` | Same shape, but combined across **all** sources (pi + cindy + claude + codex + atomcode + copilot) |

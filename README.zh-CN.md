@@ -106,20 +106,11 @@ npm run native:open   # 构建并启动两个菜单栏应用
 
 ## 🧱 内置提供商
 
-应用内置了 **11 个内置提供商** 和 **26 个模型** 的定义（从 pi 的 Rust 源码硬编码）：
+内置提供商与模型目录**直接读取本机 pi 安装**——与 pi 自带、[pi.dev/models](https://pi.dev/models) 展示的是同一份数据（`@earendil-works/pi-ai/dist/providers/data/*.json`）。升级 pi 即升级本面板；以 pi `0.85.1` 为例是 **37 个提供商、1153 个模型**，其中 733 个支持图片输入。结果缓存 5 分钟，重启 dev server 后刷新。
 
-| 提供商 | 模型 |
-|--------|------|
-| Anthropic | Claude Sonnet 4, Sonnet 4.5, Opus 4, Haiku 3.5 |
-| OpenAI | GPT-4o, GPT-4o-mini, GPT-5.1, o3-mini |
-| DeepSeek | DeepSeek V3, DeepSeek R1 |
-| OpenCode | DeepSeek V4 Flash (免费), DeepSeek V4 Flash |
-| OpenCode Go | DeepSeek V4 Flash, V4 Pro, GLM 5.1, Qwen 3.7 Max, MiMo V2.5 |
-| Google Gemini | Gemini 2.5 Flash, Gemini 2.5 Pro |
-| OpenRouter | Claude Sonnet 4, DeepSeek R1 |
-| Mistral | Mistral Large |
-| GitHub Copilot | Copilot GPT-4o |
-| Groq | Llama 3.3 70B |
+找不到本机 pi 安装时（例如刚 clone 下来），会回退到 `src/data/builtin-providers.ts` 里手工维护的精简目录——10 个提供商 / 38 个模型，覆盖 Anthropic、OpenAI、DeepSeek、Google、OpenCode Zen（及 Zen Go）、OpenRouter、Mistral、GitHub Copilot、Groq。
+
+你新增或导入的模型会写入 `~/.pi/agent/models.json` 并合并到目录之上：id 与内置提供商相同（例如 `mistral`）时是补充该提供商，而不是多出一个重复条目；在该文件里设置的显示名优先于目录名。
 
 ## 🚀 快速开始
 
