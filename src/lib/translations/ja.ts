@@ -353,11 +353,11 @@ const ja: Record<string, string> = {
 
   // Compat
   "compat.title": "API 互換性",
-  "compat.desc": "OpenAI 互換 API が一部の機能をサポートしていない場合の動作を上書きします。",
-  "compat.supports_developer_role": "developer ロールをサポート",
-  "compat.supports_developer_role_desc": "システムプロンプトを 'developer' ロールで送信（推論モデル）。API が 'system' ロールのみ受け付ける場合は無効にしてください。",
-  "compat.supports_finish_reason": "finish_reason の厳格な検証",
-  "compat.supports_finish_reason_desc": "ストリーム応答に finish_reason の含有を必須にし、無ければエラーにします。上流がストリームを途中で切断する場合（無料モデルに多い）は無効にして終了理由の自動判定に切り替えてください。",
+  "compat.desc": "通常は変更不要です。隣に書かれたエラーが出たときだけ、その項目を切り替えてください。",
+  "compat.supports_developer_role": "システムプロンプトを developer ロールで送信",
+  "compat.supports_developer_role_desc": "オフ（推奨）：system ロールで送信。ほぼすべての API が受け付けます。オン：developer ロールに切り替え（OpenAI 公式と一部のゲートウェイのみ対応）。400 developer is not one of [...] が出る場合はオフのままにしてください。",
+  "compat.supports_finish_reason": "finish_reason を必須にする",
+  "compat.supports_finish_reason_desc": "オン（既定）：ストリームに finish_reason が無いとエラーにします。Stream ended without finish_reason（無料モデルに多い）が出たらオフにすると、終了理由を自動判定します。",
   "compat.supports_reasoning_effort": "reasoning_effort をサポート",
   "compat.supports_reasoning_effort_desc": "reasoning_effort パラメータを送信します。API がサポートしていない場合は無効にしてください。",
 

@@ -352,11 +352,11 @@ const zhTW: Record<string, string> = {
 
   // Compat
   "compat.title": "API 相容性",
-  "compat.desc": "當 OpenAI 相容 API 不支援某些功能時，覆蓋預設行為。",
-  "compat.supports_developer_role": "支援 developer 角色",
-  "compat.supports_developer_role_desc": "使用 'developer' 角色發送系統提示（推理模型）。如果不支援，請關閉以改用 'system' 角色。",
+  "compat.desc": "一般不用改。只在出現下面寫明的報錯時，才動對應的那一項。",
+  "compat.supports_developer_role": "系統提示用 developer 角色發送",
+  "compat.supports_developer_role_desc": "不勾選（推薦）：用 system 角色，幾乎所有介面都接受。勾選：改用 developer 角色，只有 OpenAI 官方和少數閘道支援。出現 400 developer is not one of [...] 就是上游不接受，必須不勾選。",
   "compat.supports_finish_reason": "嚴格校驗 finish_reason",
-  "compat.supports_finish_reason_desc": "要求串流回應必須包含 finish_reason，否則報錯。上游偶爾掐斷串流（免費模型常見）時，請關閉以改為自動推斷結束原因。",
+  "compat.supports_finish_reason_desc": "勾選（預設）：串流回應裡沒有 finish_reason 就直接報錯。出現 Stream ended without finish_reason（免費模型常見）時取消勾選，pi 會自動判斷結束原因。",
   "compat.supports_reasoning_effort": "支援 reasoning_effort",
   "compat.supports_reasoning_effort_desc": "發送 reasoning_effort 參數。如果 API 不支援，請關閉。",
 

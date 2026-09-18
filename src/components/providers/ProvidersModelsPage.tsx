@@ -652,8 +652,12 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed, modelsJson
   const [deleteModel, setDeleteModel] = useState<Model | null>(null);
   const [selectedModels, setSelectedModels] = useState<Set<string>>(new Set());
   const [batchDeleteConfirm, setBatchDeleteConfirm] = useState(false);
+  // pi auto-detects supportsDeveloperRole=true for generic OpenAI-compatible
+  // endpoints, so an absent compat key means "developer role is used".
+  // Default to true here to mirror pi, otherwise the checkbox under-reports
+  // the effective behavior (and the panel looks dirty right after opening).
   const [supportsDeveloperRole, setSupportsDeveloperRole] = useState(
-    provider.compat?.supportsDeveloperRole ?? false
+    provider.compat?.supportsDeveloperRole ?? true
   );
   const [supportsFinishReason, setSupportsFinishReason] = useState(
     provider.compat?.supportsFinishReason ?? true
@@ -988,8 +992,13 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed, modelsJson
 
   const urlInvalid = baseUrl.trim() !== "" && !isValidHttpUrl(baseUrl.trim());
 
+  // Both compatibility checkboxes count as unsaved changes when toggled.
+  const compatDirty =
+    supportsDeveloperRole !== (provider.compat?.supportsDeveloperRole ?? true) ||
+    supportsFinishReason !== (provider.compat?.supportsFinishReason ?? true);
+
   const dirty =
-    (isCustom && (providerName !== (provider.name ?? "") || baseUrl !== (provider.baseUrl ?? "") || api !== (provider.api ?? "openai-completions") || supportsDeveloperRole !== (provider.compat?.supportsDeveloperRole ?? true) || supportsFinishReason !== (provider.compat?.supportsFinishReason ?? true))) ||
+    (isCustom && (providerName !== (provider.name ?? "") || baseUrl !== (provider.baseUrl ?? "") || api !== (provider.api ?? "openai-completions") || compatDirty)) ||
     (!isCustom && (baseUrl !== (provider.baseUrl ?? "") || api !== (provider.api ?? "openai-completions") || apiKey !== savedKey));
 
   const handleSave = async () => {
@@ -1342,6 +1351,13 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed, modelsJson
           )}
         </div>
       )}
+
+      {/* API compatibility — advanced: only change a box when the matching
+          error message points here. */}
+      <div className="provider-compat-header mt-4">
+        <p className="text-sm font-medium text-gray-300">{t("compat.title")}</p>
+        <p className="mt-0.5 text-xs text-gray-500">{t("compat.desc")}</p>
+      </div>
 
       {/* Developer Role Support */}
       <div className="provider-compat-row flex items-center gap-2">

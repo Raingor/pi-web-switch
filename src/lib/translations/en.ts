@@ -357,11 +357,11 @@ const en: Record<string, string> = {
 
   // Compat
   "compat.title": "API Compatibility",
-  "compat.desc": "Override default behavior for OpenAI-compatible providers that don't support certain features.",
-  "compat.supports_developer_role": "Supports developer role",
-  "compat.supports_developer_role_desc": "Send system prompt as 'developer' role (for reasoning models). Disable if the API only accepts 'system' role.",
-  "compat.supports_finish_reason": "Strict finish_reason check",
-  "compat.supports_finish_reason_desc": "Require streamed responses to include finish_reason, otherwise fail. Disable to infer the stop reason automatically when the upstream drops the stream (common with free models).",
+  "compat.desc": "Usually leave these alone. Change a box only when you hit the error described next to it.",
+  "compat.supports_developer_role": "Send system prompt as 'developer' role",
+  "compat.supports_developer_role_desc": "Unchecked (recommended): use the 'system' role, which almost every API accepts. Checked: use 'developer' instead — only OpenAI itself and a few gateways accept it. If you see 400 developer is not one of [...], leave it unchecked.",
+  "compat.supports_finish_reason": "Require finish_reason in the stream",
+  "compat.supports_finish_reason_desc": "Checked (default): fail as soon as a streamed response has no finish_reason. If you see Stream ended without finish_reason (common with free models), uncheck it and pi infers the stop reason.",
   "compat.supports_reasoning_effort": "Supports reasoning_effort",
   "compat.supports_reasoning_effort_desc": "Send reasoning_effort parameter. Disable if the API does not support it.",
 
