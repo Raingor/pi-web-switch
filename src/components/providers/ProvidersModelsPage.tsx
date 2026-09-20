@@ -16,7 +16,6 @@ import { MODEL_CATALOG, searchCatalog, catalogToModel, catalogEntryId, findCatal
 import {
   Plus,
   Trash2,
-  RotateCcw,
   Edit3,
   Eye,
   Square,
@@ -94,6 +93,40 @@ function isValidHttpUrl(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+type CompatSuggestion = "developer-off" | "developer-on" | "finish-off" | "finish-on";
+
+/** Recognize only actionable, provider-compatibility errors from a test. */
+function detectCompatSuggestion(message: string): CompatSuggestion | null {
+  const normalized = message.toLowerCase();
+  if (
+    normalized.includes("developer is not one of") ||
+    normalized.includes("unsupported role: developer") ||
+    normalized.includes("developer role is not supported")
+  ) {
+    return "developer-off";
+  }
+  if (
+    normalized.includes("role must be developer") ||
+    normalized.includes("developer role is required") ||
+    normalized.includes("requires developer role")
+  ) {
+    return "developer-on";
+  }
+  if (
+    normalized.includes("stream ended without finish_reason") ||
+    normalized.includes("missing finish_reason")
+  ) {
+    return "finish-off";
+  }
+  if (
+    normalized.includes("finish_reason is required") ||
+    normalized.includes("finish_reason required")
+  ) {
+    return "finish-on";
+  }
+  return null;
 }
 
 // Defaults for models without explicit limits: 256K context, 32K output
@@ -662,65 +695,23 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed, modelsJson
   const [supportsFinishReason, setSupportsFinishReason] = useState(
     provider.compat?.supportsFinishReason ?? true
   );
+  const [compatSuggestion, setCompatSuggestion] = useState<CompatSuggestion | null>(null);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [keyError, setKeyError] = useState<string | null>(null);
 
-  // ─── Automatic key failover (429 / insufficient balance) ───
-  // Health state is owned by the pi extension (pi-package/key-failover.ts)
-  // and read through the local API for display + manual reset.
-  const [keyHealth, setKeyHealth] = useState<Record<string, { status?: string; until?: number; reason?: string }>>({});
-  const [failoverBusy, setFailoverBusy] = useState(false);
-
-  useEffect(() => {
-    if (!isCustom) return;
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const res = await fetch("/api/pi/key-state");
-        if (!res.ok) return;
-        const data = await res.json();
-        if (!cancelled) setKeyHealth(data?.[provider.id] ?? {});
-      } catch {
-        /* health state is optional */
-      }
-    };
-    load();
-    const timer = setInterval(load, 15000);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [isCustom, provider.id]);
-
-  const failoverEligible =
-    isCustom && !provider.oauth && !!baseUrl && !!api && savedKeys.length >= 2;
-
-  const handleAutoFailoverChange = async (checked: boolean) => {
-    setFailoverBusy(true);
-    const ok = await updateCustomProvider(provider.id, { autoFailover: checked });
-    setFailoverBusy(false);
-    if (!ok) setKeyError(t("providers_models.save_failed"));
+  const applyCompatSuggestion = (suggestion: CompatSuggestion) => {
+    setSupportsDeveloperRole(suggestion === "developer-on" ? true : suggestion === "developer-off" ? false : supportsDeveloperRole);
+    setSupportsFinishReason(suggestion === "finish-on" ? true : suggestion === "finish-off" ? false : supportsFinishReason);
+    setCompatSuggestion(null);
+    setSaveState("idle");
   };
 
-  const handleResetKeyHealth = async (keyId?: string) => {
-    try {
-      const res = await fetch("/api/pi/key-state/reset", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ providerId: provider.id, keyId }),
-      });
-      const data = await res.json();
-      if (data?.success) {
-        setKeyHealth((prev) => {
-          if (!keyId) return {};
-          const next = { ...prev };
-          delete next[keyId];
-          return next;
-        });
-      }
-    } catch {
-      /* reset is best-effort */
-    }
+  const applyRecommendedCompat = () => {
+    // These are pi-ai's defaults when no provider override is present.
+    setSupportsDeveloperRole(true);
+    setSupportsFinishReason(true);
+    setCompatSuggestion(null);
+    setSaveState("idle");
   };
 
   // Key actually used for outbound calls (test connection, fetch models).
@@ -890,6 +881,9 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed, modelsJson
         body: JSON.stringify({ baseUrl: baseUrl.trim(), modelId, apiKey: effectiveKey, apiType: api ?? undefined }),
       });
       const data = await res.json();
+      if (!data.success && typeof data.message === "string") {
+        setCompatSuggestion(detectCompatSuggestion(data.message));
+      }
       setModelTests((prev) => {
         const next = new Map(prev);
         next.set(modelId, data.success
@@ -1032,6 +1026,9 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed, modelsJson
       const cfgPatch: Partial<CustomProviderConfig> = {};
       if (baseUrl !== (provider.baseUrl ?? "")) cfgPatch.baseUrl = baseUrl || undefined;
       if (api !== (provider.api ?? "openai-completions")) cfgPatch.api = api;
+      if (compatDirty) {
+        cfgPatch.compat = { ...provider.compat, supportsDeveloperRole, supportsFinishReason };
+      }
       if (Object.keys(cfgPatch).length > 0) {
         ok = await updateCustomProvider(provider.id, cfgPatch);
       }
@@ -1220,23 +1217,6 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed, modelsJson
                       {revealed ? k.key : maskKey(k.key)}
                     </code>
                     {isActive && <Badge variant="success">{t("providers_models.api_key_active")}</Badge>}
-                    {keyHealth[k.id]?.status === "paused" && (
-                      <Badge variant="error">{t("providers_models.key_paused_balance")}</Badge>
-                    )}
-                    {keyHealth[k.id]?.status === "cooldown" && (
-                      <Badge variant="warning">
-                        {t("providers_models.key_cooldown", String(Math.max(0, Math.ceil(((keyHealth[k.id]?.until ?? 0) - Date.now()) / 1000))))}
-                      </Badge>
-                    )}
-                    {keyHealth[k.id] && (
-                      <button
-                        onClick={() => handleResetKeyHealth(k.id)}
-                        className="rounded-md p-1.5 text-gray-500 hover:text-blue-400"
-                        title={t("providers_models.key_reset_health")}
-                      >
-                        <RotateCcw className="h-4 w-4" />
-                      </button>
-                    )}
                     <button
                       onClick={() => toggleReveal(k.id)}
                       className="rounded-md p-1.5 text-gray-500 hover:text-gray-300"
@@ -1297,34 +1277,7 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed, modelsJson
           {keys.length > 1 && (
             <p className="mt-1 text-xs text-gray-500">{t("providers_models.api_key_switch_hint")}</p>
           )}
-
-          {/* Automatic failover (429 / insufficient balance) */}
-          <div className="provider-compat-row mt-3 flex items-center gap-2">
-            <input
-              id={`auto-failover-${provider.id}`}
-              type="checkbox"
-              disabled={!failoverEligible || failoverBusy}
-              checked={provider.autoFailover === true}
-              onChange={(e) => handleAutoFailoverChange(e.target.checked)}
-              className="rounded border-gray-600 bg-gray-800 text-blue-500"
-            />
-            <label
-              htmlFor={`auto-failover-${provider.id}`}
-              className="provider-compat-label text-sm text-gray-400"
-            >
-              <span>{t("providers_models.auto_failover")}</span>
-              <span className="provider-compat-description ml-2 text-xs text-gray-500">
-                {failoverEligible
-                  ? t("providers_models.auto_failover_desc")
-                  : t("providers_models.auto_failover_ineligible")}
-              </span>
-            </label>
-          </div>
-          {provider.autoFailover === true && (
-            <p className="mt-1 text-xs text-gray-500">
-              {t("providers_models.auto_failover_note")}
-            </p>
-          )}
+          <p className="provider-manual-key-note mt-2">{t("providers_models.manual_key_switch_note")}</p>
         </div>
       ) : (
         <div>
@@ -1352,15 +1305,41 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed, modelsJson
         </div>
       )}
 
-      {/* API compatibility — advanced: only change a box when the matching
-          error message points here. */}
+      {/* API compatibility — keep the controls visible, but make the safe
+          defaults and the matching error strings actionable. */}
       <div className="provider-compat-header mt-4">
         <p className="text-sm font-medium text-gray-300">{t("compat.title")}</p>
         <p className="mt-0.5 text-xs text-gray-500">{t("compat.desc")}</p>
       </div>
 
+      <div className="compat-helper">
+        <div className="compat-helper-copy">
+          <p className="compat-helper-title">{t("compat.helper_title")}</p>
+          <p className="compat-helper-description">{t("compat.helper_desc")}</p>
+        </div>
+        <button type="button" onClick={applyRecommendedCompat} className="compat-quick-action">
+          {t("compat.helper_defaults")}
+        </button>
+      </div>
+
+      {compatSuggestion && (
+        <div className="compat-helper compat-helper-detected">
+          <div className="compat-helper-copy">
+            <p className="compat-helper-title">{t("compat.helper_detected")}</p>
+            <code className="compat-helper-error">
+              {compatSuggestion.startsWith("developer")
+                ? t("compat.developer_error")
+                : t("compat.finish_error")}
+            </code>
+          </div>
+          <button type="button" onClick={() => applyCompatSuggestion(compatSuggestion)} className="compat-quick-action">
+            {t("compat.helper_apply")}
+          </button>
+        </div>
+      )}
+
       {/* Developer Role Support */}
-      <div className="provider-compat-row flex items-center gap-2">
+      <div className="provider-compat-row flex items-start gap-2">
         <input
           id="supports-developer-role"
           type="checkbox"
@@ -1368,14 +1347,19 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed, modelsJson
           onChange={(e) => setSupportsDeveloperRole(e.target.checked)}
           className="rounded border-gray-600 bg-gray-800 text-blue-500"
         />
-        <label htmlFor="supports-developer-role" className="provider-compat-label text-sm text-gray-400">
-          <span>{t("compat.supports_developer_role")}</span>
-          <span className="provider-compat-description ml-2 text-xs text-gray-500">{t("compat.supports_developer_role_desc")}</span>
-        </label>
+        <div className="min-w-0 flex-1">
+          <label htmlFor="supports-developer-role" className="provider-compat-label text-sm text-gray-400">
+            <span>{t("compat.supports_developer_role")}</span>
+            <span className="provider-compat-description ml-2 text-xs text-gray-500">{t("compat.supports_developer_role_desc")}</span>
+          </label>
+          <button type="button" onClick={() => applyCompatSuggestion(supportsDeveloperRole ? "developer-off" : "developer-on")} className="compat-inline-action">
+            {supportsDeveloperRole ? t("compat.developer_action_off") : t("compat.developer_action_on")}
+          </button>
+        </div>
       </div>
 
       {/* Finish Reason Support */}
-      <div className="provider-compat-row flex items-center gap-2">
+      <div className="provider-compat-row flex items-start gap-2">
         <input
           id="supports-finish-reason"
           type="checkbox"
@@ -1383,10 +1367,15 @@ function ProviderDetail({ provider, onDelete, onDuplicate, onRenamed, modelsJson
           onChange={(e) => setSupportsFinishReason(e.target.checked)}
           className="rounded border-gray-600 bg-gray-800 text-blue-500"
         />
-        <label htmlFor="supports-finish-reason" className="provider-compat-label text-sm text-gray-400">
-          <span>{t("compat.supports_finish_reason")}</span>
-          <span className="provider-compat-description ml-2 text-xs text-gray-500">{t("compat.supports_finish_reason_desc")}</span>
-        </label>
+        <div className="min-w-0 flex-1">
+          <label htmlFor="supports-finish-reason" className="provider-compat-label text-sm text-gray-400">
+            <span>{t("compat.supports_finish_reason")}</span>
+            <span className="provider-compat-description ml-2 text-xs text-gray-500">{t("compat.supports_finish_reason_desc")}</span>
+          </label>
+          <button type="button" onClick={() => applyCompatSuggestion(supportsFinishReason ? "finish-off" : "finish-on")} className="compat-inline-action">
+            {supportsFinishReason ? t("compat.finish_action_off") : t("compat.finish_action_on")}
+          </button>
+        </div>
       </div>
 
       {/* Save / Test / Feedback row */}

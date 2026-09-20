@@ -35,7 +35,8 @@
 ## ✨ Features
 
 ### 📊 Dashboard
-- **Usage Statistics** — Today / 7 days / 30 days / Custom date range selector with auto-refresh (5s/10s/30s/60s)
+- **Usage Statistics** — All time / Today / 7 days / 30 days / Custom date range selector with auto-refresh (5s/10s/30s/60s)
+- **All Sources Overview** — Combine all locally supported usage sources in one dashboard, while keeping Pi and ChatGPT/Codex views available separately
 - **Token Breakdown** — Exact token count with approximate display (e.g. `1,631,022 ≈ 1.6M`) and Input/Output/Cache Hit/Cache Create breakdown
 - **Cost Tracking** — Daily cost chart + Provider/Model stats tabs with aggregated data
 - **Cache Hit Rate** — Visual progress bar showing cache efficiency
@@ -273,8 +274,8 @@ These endpoints at `/api/pi/*` are served by the Vite middleware, so the fronten
 | POST | `/api/pi/models` | Write `models.json` |
 | GET | `/api/pi/builtin-providers` | Built-in provider + model catalog, read from the local pi install (static fallback if absent) |
 | GET | `/api/pi/usage` | Aggregated token/cost/request data from sessions |
-| GET | `/api/pi/usage-range` | Date-range filtered usage (pi sessions) — `?range=today\|7d\|30d\|custom&from=&to=` |
-| GET | `/api/pi/all-usage-range` | Same shape, but combined across **all** sources (pi + cindy + claude + codex + atomcode + copilot) |
+| GET | `/api/pi/usage-range` | Date-range filtered usage (pi sessions) — `?range=all\|today\|7d\|30d\|custom&from=&to=` |
+| GET | `/api/pi/all-usage-range` | Same shape, but combined across **all** local sources (pi + cindy + claude + codex + ChatGPT/Codex Desktop + atomcode + copilot) |
 | GET | `/api/pi/{cindy-pi\|claude\|codex\|opencode\|gemini\|grok\|atomcode\|copilot}-usage-range` | Per-source usage range |
 | GET | `/api/pi/copilot-usage-range` | Local Copilot CLI usage from `~/.copilot/session-store.db` (tokens / requests per day per model; no GitHub API or token required) |
 | GET | `/api/pi/copilot-config` | Read Copilot GitHub config (username, token) |

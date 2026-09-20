@@ -120,6 +120,7 @@ function mergeProviders(
         baseUrl: override?.baseUrl ?? p.baseUrl,
         api: override?.api ?? p.api,
         headers: override?.headers ?? p.headers,
+        compat: override?.compat ?? p.compat,
         // hasAuth = a key is actually saved (auth.json or models.json override) —
         // the static builtin flag only means the provider supports auth.
         hasAuth: !!auth[p.id] || !!override?.apiKey,

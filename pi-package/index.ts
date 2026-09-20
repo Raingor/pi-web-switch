@@ -4,16 +4,8 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  createFailoverRuntime,
-  readHealthState,
-  resetProviderHealth,
-  writeHealthState,
-} from "./key-failover.ts";
 
 const PI_SWITCH_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const KEY_STATE_FILENAME = "pi-web-switch-key-state.json";
-
 let serverProcess: ReturnType<typeof spawn> | null = null;
 
 function getPackageManager(): "npm" | "pnpm" | "yarn" {
@@ -207,22 +199,6 @@ function shortDate(iso: string): string {
   return `${parts[1]}/${parts[2]}`;
 }
 
-// ─── Key failover registration ───────────────────────────
-
-function readModelsJsonSafe(): { providers?: Record<string, unknown> } | undefined {
-  try {
-    const path = join(getAgentDir(), "models.json");
-    if (!existsSync(path)) return undefined;
-    return JSON.parse(readFileSync(path, "utf-8"));
-  } catch {
-    return undefined;
-  }
-}
-
-function keyStatePath(): string {
-  return join(getAgentDir(), KEY_STATE_FILENAME);
-}
-
 // ─── Extension entry ─────────────────────────────────────
 
 export default function (pi: ExtensionAPI) {
@@ -325,44 +301,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // Key-pool automatic failover: register stream wrappers for every eligible
-  // provider (opt-in via the web UI toggle). Pool and health state are reread
-  // per request, so web-UI edits apply without re-registration. Re-synced on
-  // session_start / model_select so api-type or eligibility changes are picked
-  // up too. This covers terminal Pi CLI requests.
-  const failover = createFailoverRuntime(pi, {
-    loadModelsJson: () => readModelsJsonSafe() as never,
-    healthStatePath: keyStatePath(),
-  });
-  const syncFailover = () => {
-    try {
-      failover.sync();
-    } catch (err) {
-      console.error(`[pi-web-switch] key failover sync failed: ${String(err)}`);
-    }
-  };
-  syncFailover();
-  pi.on("session_start", async () => syncFailover());
-  pi.on("model_select", async () => syncFailover());
-
-  // Expose key-health reset from the terminal: /pi-key-reset <providerId> [keyId]
-  pi.registerCommand("pi-key-reset", {
-    description: "Reset automatic-failover key health for a provider (paused/cooldown keys)",
-    handler: async (args, ctx) => {
-      const [providerId, keyId] = (args ?? "").trim().split(/\s+/).filter(Boolean);
-      if (!providerId) {
-        ctx.ui.notify("Usage: /pi-key-reset <providerId> [keyId]", "error");
-        return;
-      }
-      const path = keyStatePath();
-      const next = readHealthState(path);
-      if (!next[providerId]) {
-        ctx.ui.notify(`No key health state recorded for '${providerId}'.`, "info");
-        return;
-      }
-      const updated = resetProviderHealth(next, providerId, keyId);
-      writeHealthState(path, updated);
-      ctx.ui.notify(keyId ? `Reset key ${keyId} of ${providerId}.` : `Reset all keys of ${providerId}.`, "info");
-    },
-  });
+  // Key-pool selection remains manual. The former automatic-failover runtime
+  // is intentionally not registered: saved autoFailover fields are ignored so
+  // upgrading cannot silently start switching a user's keys again.
 }

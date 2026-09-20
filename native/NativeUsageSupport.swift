@@ -1,6 +1,13 @@
 import AppKit
 import Foundation
 
+func nativeMenuBackgroundColor(for appearance: NSAppearance = NSApp.effectiveAppearance) -> NSColor {
+    let dark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+    return dark
+        ? NSColor(calibratedWhite: 0.12, alpha: 1)
+        : NSColor(calibratedWhite: 0.97, alpha: 1)
+}
+
 struct UsageTotals {
     var tokens: Int64 = 0
     var input: Int64 = 0

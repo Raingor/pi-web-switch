@@ -1,5 +1,9 @@
 /**
- * Provider API-key automatic failover for pi-web-switch.
+ * Legacy provider API-key automatic failover implementation.
+ *
+ * The package entrypoint no longer registers this runtime. It remains as a
+ * compatibility/test module so old state and existing unit coverage can be
+ * handled without silently re-enabling automatic key switching.
  *
  * When a custom provider (relay) has an opted-in key pool and the active key
  * hits a rate limit (HTTP 429) or runs out of balance, retry the request with

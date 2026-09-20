@@ -100,12 +100,12 @@ interface UsageRangeData {
   notice?: "no-config" | "api-error";
 }
 
-type SourceKey = "pi" | "chatgpt";
-type RangeKey = "today" | "7d" | "30d" | "custom";
+type SourceKey = "all" | "pi" | "chatgpt";
+type RangeKey = "all" | "today" | "7d" | "30d" | "custom";
 type TabKey = "log" | "provider" | "model";
 type SortDir = "asc" | "desc";
 
-const RANGE_KEYS: RangeKey[] = ["today", "7d", "30d", "custom"];
+const RANGE_KEYS: RangeKey[] = ["all", "today", "7d", "30d", "custom"];
 
 const COLORS = ["#00d8ff", "#9ef01a", "#ffb84d", "#9f8cff", "#ff5c7a"];
 
@@ -146,16 +146,46 @@ function formatCostShort(n: number): string {
   return `$${n.toFixed(4)}`;
 }
 
-function formatDateShort(dateStr: string): string {
-  // Parse as a China-time (UTC+8) calendar date and format in that timezone.
-  const [y, m, dNum] = dateStr.split("-").map(Number);
-  if (!y || !m || !dNum) return dateStr;
+type TrendGranularity = "hour" | "day" | "month";
+
+function formatDateShort(dateStr: string, lang = "en", granularity: TrendGranularity = "day"): string {
+  // Parse as a China-time (UTC+8) calendar date and format in the active locale.
+  const [y, m, dNum = 1] = dateStr.split("-").map(Number);
+  if (!y || !m) return dateStr;
   const d = new Date(Date.UTC(y, m - 1, dNum));
-  return d.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    timeZone: "Asia/Shanghai",
-  });
+  return d.toLocaleDateString(lang, granularity === "month"
+    ? { year: "numeric", month: "short", timeZone: "Asia/Shanghai" }
+    : { month: "short", day: "numeric", timeZone: "Asia/Shanghai" });
+}
+
+type DailyUsageRow = UsageRangeData["dailyBreakdown"][number];
+
+function getDataSpanDays(rows: DailyUsageRow[]): number {
+  if (rows.length < 2) return 0;
+  const first = Date.parse(`${rows[0]!.date}T00:00:00Z`);
+  const last = Date.parse(`${rows[rows.length - 1]!.date}T00:00:00Z`);
+  return Number.isFinite(first) && Number.isFinite(last)
+    ? Math.max(0, Math.round((last - first) / 86_400_000))
+    : 0;
+}
+
+function aggregateByMonth(rows: DailyUsageRow[]): DailyUsageRow[] {
+  const buckets = new Map<string, DailyUsageRow>();
+  for (const row of rows) {
+    const month = row.date.slice(0, 7);
+    const existing = buckets.get(month);
+    if (existing) {
+      existing.input += row.input;
+      existing.output += row.output;
+      existing.cacheRead += row.cacheRead;
+      existing.cacheWrite += row.cacheWrite;
+      existing.cost += row.cost;
+      existing.requests += row.requests;
+    } else {
+      buckets.set(month, { ...row, date: `${month}-01` });
+    }
+  }
+  return Array.from(buckets.values()).sort((a, b) => a.date.localeCompare(b.date));
 }
 
 function cnTodayStr(): string {
@@ -345,18 +375,22 @@ export function DashboardPage() {
   const { t, lang } = useTranslation();
   const { currency, toggle: toggleCurrency } = useCurrency();
   const { initialized } = useConfigStore();
-  const [source, setSource] = useState<SourceKey>("pi");
+  const [source, setSource] = useState<SourceKey>("all");
   const [range, setRange] = useState<RangeKey>("today");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   const [tab, setTab] = useState<TabKey>("log");
   const [data, setData] = useState<UsageRangeData | null>(null);
+  const [loadedQuery, setLoadedQuery] = useState<{ source: SourceKey; range: RangeKey }>({ source: "all", range: "today" });
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [refreshInterval, setRefreshInterval] = useState(30);
   const [showIntervalPicker, setShowIntervalPicker] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const [analyticsOpen, setAnalyticsOpen] = useState(false);
+  const [consoleOpen, setConsoleOpen] = useState(false);
   const [logPage, setLogPage] = useState(1);
   const [providerSort, setProviderSort] = useState<{ key: string; dir: SortDir }>({ key: "totalCost", dir: "desc" });
   const [modelSort, setModelSort] = useState<{ key: string; dir: SortDir }>({ key: "totalCost", dir: "desc" });
@@ -368,22 +402,33 @@ export function DashboardPage() {
     if (!initialized || customInvalid) return;
     const baseUrl = source === "chatgpt"
       ? "/api/pi/chatgpt-usage-range"
-      : "/api/pi/usage-range";
+      : source === "all"
+        ? "/api/pi/all-usage-range"
+        : "/api/pi/usage-range";
     // force=true adds refresh=1 so the API rescan bypasses its 30s session cache
     let url = `${baseUrl}?range=${range}${force ? "&refresh=1" : ""}`;
     if (range === "custom" && customFrom) {
       url += `&from=${customFrom}&to=${customTo || customFrom}`;
     }
     setRefreshing(true);
+    setError(null);
     fetch(url)
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`usage request failed: ${r.status}`);
+        return r.json();
+      })
       .then((d) => {
         setData(d);
+        setLoadedQuery({ source, range });
         setLoading(false);
         setRefreshing(false);
         setLastUpdated(new Date().toLocaleTimeString());
       })
-      .catch(() => { setLoading(false); setRefreshing(false); });
+      .catch(() => {
+        setLoading(false);
+        setRefreshing(false);
+        setError("dashboard.load_error");
+      });
 
   }, [initialized, source, range, customFrom, customTo, customInvalid]);
 
@@ -407,8 +452,8 @@ export function DashboardPage() {
   // Reset request-log pagination when the queried range or source changes
   useEffect(() => { setLogPage(1); }, [range, customFrom, customTo, source]);
 
-  // Reset loading state when source changes
-  useEffect(() => { setLoading(true); }, [source]);
+  // Keep the previous snapshot visible while a new source/range is loading.
+  useEffect(() => { setLoading(true); }, [source, range, customFrom, customTo]);
 
   // Auto-refresh with configurable interval (seconds)
   useEffect(() => {
@@ -418,19 +463,33 @@ export function DashboardPage() {
   }, [autoRefresh, refreshInterval, fetchData]);
 
   const today = cnTodayStr();
+  const displaySource = data ? loadedQuery.source : source;
+  const displayRange = data ? loadedQuery.range : range;
 
-  // Chart data: hourly for "today", daily for 7d/30d/custom
-  const rawBreakdown = range === "today" ? data?.hourlyBreakdown : data?.dailyBreakdown;
+  // Chart data: hourly for today, daily for short ranges, and monthly for long histories.
+  const dailyRows = data?.dailyBreakdown ?? [];
+  const dataSpanDays = getDataSpanDays(dailyRows);
+  const chartGranularity: TrendGranularity = displayRange === "today"
+    ? "hour"
+    : dataSpanDays > 90
+      ? "month"
+      : "day";
+  const trendRows = chartGranularity === "month" ? aggregateByMonth(dailyRows) : dailyRows;
+  const rawBreakdown = displayRange === "today" ? data?.hourlyBreakdown : trendRows;
   const chartData = (rawBreakdown ?? []).map((d: any) => ({
-    date: range === "today" ? d.hour?.slice(-5) : formatDateShort(d.date || d.hour),
+    date: displayRange === "today" ? d.hour?.slice(-5) : formatDateShort(d.date || d.hour, lang, chartGranularity),
     rawDate: d.date || d.hour,
     input: Math.round(d.input / 1000),
     output: Math.round(d.output / 1000),
     cacheRead: Math.round(d.cacheRead / 1000),
     cacheWrite: Math.round(d.cacheWrite / 1000),
-    cost: parseFloat(d.cost.toFixed(4)),
+    cost: parseFloat((currency === "CNY" ? d.cost * USD_TO_CNY : d.cost).toFixed(4)),
     requests: d.requests,
   }));
+
+  const dataRangeLabel = dailyRows.length > 0
+    ? `${formatDateShort(dailyRows[0]!.date, lang)} - ${formatDateShort(dailyRows[dailyRows.length - 1]!.date, lang)}`
+    : t("dashboard.no_data");
 
   // Sorted stats + request-log pagination
   const sortedProviders = sortRows(data?.providerStats ?? [], providerSort.key, providerSort.dir);
@@ -459,11 +518,13 @@ export function DashboardPage() {
     const totalTokens = Math.max(current.totalTokens, 0);
     const totalRequests = Math.max(current.totalRequests, 0);
     const cacheTokens = current.totalCacheRead + current.totalCacheWrite;
-    const activitySource = range === "today" ? current.hourlyBreakdown : current.dailyBreakdown;
+    const activitySource = displayRange === "today" ? current.hourlyBreakdown : trendRows;
     const peak = activitySource.reduce<{ label: string; requests: number; tokens: number } | null>((best, row: any) => {
       const requests = row.requests ?? 0;
       const tokens = (row.input ?? 0) + (row.output ?? 0) + (row.cacheRead ?? 0) + (row.cacheWrite ?? 0);
-      const label = range === "today" ? String(row.hour ?? "").slice(-5) : formatDateShort(row.date || row.hour || "");
+      const label = displayRange === "today"
+        ? String(row.hour ?? "").slice(-5)
+        : formatDateShort(row.date || row.hour || "", lang, chartGranularity);
       if (!best || requests > best.requests || (requests === best.requests && tokens > best.tokens)) {
         return { label, requests, tokens };
       }
@@ -492,14 +553,22 @@ export function DashboardPage() {
       providerTokenTotal,
       composition,
       activity: activitySource.map((row: any) => ({
-        label: range === "today" ? String(row.hour ?? "").slice(-5) : formatDateShort(row.date || row.hour || ""),
+        label: displayRange === "today"
+          ? String(row.hour ?? "").slice(-5)
+          : formatDateShort(row.date || row.hour || "", lang, chartGranularity),
         requests: row.requests ?? 0,
         tokens: Math.round(((row.input ?? 0) + (row.output ?? 0) + (row.cacheRead ?? 0) + (row.cacheWrite ?? 0)) / 1000),
       })),
     };
-  }, [data, range]);
+  }, [data, displayRange, trendRows, lang, chartGranularity]);
 
-  const fmtCostCell = (v: number) => (currency === "CNY" ? `¥${(v * USD_TO_CNY).toFixed(4)}` : formatCostShort(v));
+  const isSubscriptionSource = displaySource === "chatgpt";
+  const fmtCostCell = (v: number) => isSubscriptionSource ? "—" : (currency === "CNY" ? `¥${(v * USD_TO_CNY).toFixed(4)}` : formatCostShort(v));
+  const totalCostLabel = isSubscriptionSource ? t("dashboard.subscription_usage") : formatCost(data?.totalCost ?? 0, currency);
+  const totalCostSubtitle = isSubscriptionSource
+    ? t("dashboard.not_billed")
+    : `${currency === "CNY" ? `¥${((data?.totalCost ?? 0) * USD_TO_CNY).toFixed(4)}` : `$${(data?.totalCost ?? 0).toFixed(4)}`} ${currency}`;
+  const costAxisLabel = t(currency === "CNY" ? "dashboard.cost_label_cny" : "dashboard.cost_label_usd");
 
   const toggleSort = (setter: typeof setProviderSort) => (key: string) =>
     setter((s) => (s.key === key ? { key, dir: s.dir === "desc" ? "asc" : "desc" } : { key, dir: "desc" }));
@@ -507,15 +576,15 @@ export function DashboardPage() {
   const handleExport = () => {
     if (!data) return;
     if (tab === "log") {
-      downloadCsv(`pi-usage-log-${range}.csv`,
+      downloadCsv(`pi-usage-log-${displayRange}.csv`,
         ["time", "provider", "model", "input", "output", "cost_usd", "requests"],
         data.requestLog.map((r) => [r.timestamp, r.providerId, r.modelId, r.input, r.output, r.cost, r.requests]));
     } else if (tab === "provider") {
-      downloadCsv(`pi-usage-provider-${range}.csv`,
+      downloadCsv(`pi-usage-provider-${displayRange}.csv`,
         ["provider", "tokens", "input", "output", "cost_usd", "requests", "models"],
         sortedProviders.map((p) => [p.providerId, p.totalTokens, p.totalInput, p.totalOutput, p.totalCost, p.totalRequests, p.modelCount]));
     } else {
-      downloadCsv(`pi-usage-model-${range}.csv`,
+      downloadCsv(`pi-usage-model-${displayRange}.csv`,
         ["model", "provider", "tokens", "input", "output", "cost_usd", "requests"],
         sortedModels.map((m) => [m.modelId, m.providerId, m.totalTokens, m.totalInput, m.totalOutput, m.totalCost, m.totalRequests]));
     }
@@ -529,9 +598,15 @@ export function DashboardPage() {
           <div className="page-kicker"><span /> TELEMETRY // LIVE OPERATIONS</div>
           <h1 className="text-xl font-bold" style={{ color: "var(--page-text)" }}>{t("dashboard.title")}</h1>
           <p className="text-xs mt-0.5" style={{ color: "var(--muted-text)" }}>
-            {data ? t("dashboard.requests_count", String(data.requestLog.length), formatCost(data.totalCost, currency)) : ""}
+            {data ? t("dashboard.requests_count", formatNumber(data.totalRequests), isSubscriptionSource ? t("dashboard.not_billed") : formatCost(data.totalCost, currency)) : ""}
             {lastUpdated && <span className="ml-2">· {t("dashboard.last_updated", lastUpdated)}</span>}
           </p>
+          {data && (
+            <p className="dashboard-scope-line">
+              {t(displaySource === "all" ? "dashboard.source_all" : displaySource === "chatgpt" ? "dashboard.source_chatgpt" : "dashboard.source_pi")} · {t(`dashboard.range.${displayRange}`)} · {dataRangeLabel}
+              {refreshing && <span> · {t("dashboard.refreshing")}</span>}
+            </p>
+          )}
           {data?.notice && (
             <p
               className="mt-1 inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs"
@@ -542,6 +617,12 @@ export function DashboardPage() {
               }}
             >
               {data.notice === "no-config" ? t("dashboard.copilot_not_configured") : t("dashboard.copilot_api_error")}
+            </p>
+          )}
+          {error && (
+            <p className="dashboard-error-banner" role="alert">
+              <span>{t(error)}</span>
+              <button type="button" onClick={() => fetchData(true)}>{t("dashboard.retry")}</button>
             </p>
           )}
         </div>
@@ -639,6 +720,7 @@ export function DashboardPage() {
         <span className="dashboard-source-label">{t("dashboard.data_source")}</span>
         <div className="dashboard-source-options">
           {([
+            ["all", "dashboard.source_all"],
             ["pi", "dashboard.source_pi"],
             ["chatgpt", "dashboard.source_chatgpt"],
           ] as const).map(([key, label]) => (
@@ -700,13 +782,22 @@ export function DashboardPage() {
       )}
 
       {/* Loading State */}
-      {loading && (
+      {loading && !data && (
         <div className="flex items-center justify-center h-64">
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-gray-600 border-t-blue-500" />
         </div>
       )}
 
-      {!loading && data && (
+      {!loading && !data && error && (
+        <div className="dashboard-empty-state" role="alert">
+          <RefreshCw className="h-5 w-5" style={{ color: "var(--signal-cyan)" }} />
+          <strong>{t("dashboard.load_error")}</strong>
+          <span>{t("dashboard.load_error_hint")}</span>
+          <button type="button" onClick={() => fetchData(true)}>{t("dashboard.retry")}</button>
+        </div>
+      )}
+
+      {data && (
         <div className={cn("space-y-5 transition-opacity", refreshing && "opacity-60")}>
           {/* Overview Cards */}
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -733,9 +824,9 @@ export function DashboardPage() {
 
             <StatCard
               title={t("dashboard.total_cost")}
-              value={formatCost(data.totalCost, currency)}
+              value={totalCostLabel}
               icon={<DollarSign className="h-4 w-4" style={{ color: "#f59e0b" }} />}
-              subtitle={`${currency === "CNY" ? `¥${(data.totalCost * USD_TO_CNY).toFixed(4)}` : `$${data.totalCost.toFixed(4)}`} ${currency}`}
+              subtitle={totalCostSubtitle}
             />
 
             <StatCard
@@ -747,6 +838,19 @@ export function DashboardPage() {
           </div>
 
           {/* Rich analytics overview */}
+          <details
+            className="dashboard-details"
+            open={analyticsOpen}
+            onToggle={(event) => setAnalyticsOpen(event.currentTarget.open)}
+          >
+            <summary>
+              <span>
+                <strong>{t("dashboard.detailed_analysis")}</strong>
+                <small>{t("dashboard.detailed_analysis_hint")}</small>
+              </span>
+              <span className="dashboard-details-summary-meta">{analytics.activeModels} {t("dashboard.active_models")}</span>
+            </summary>
+            <div className="dashboard-details-body">
           <div className="dashboard-analytics-grid">
             <section className="tech-panel analytics-overview-panel">
               <div className="analytics-panel-header">
@@ -850,24 +954,36 @@ export function DashboardPage() {
               <div className="analytics-panel-header">
                 <div>
                   <span className="analytics-panel-kicker">ROUTING MATRIX // 03</span>
-                  <h3>{t("dashboard.provider_mix")}</h3>
+                  <h3>{t(displaySource === "chatgpt" ? "dashboard.model_mix" : "dashboard.provider_mix")}</h3>
                 </div>
                 <Layers3 className="h-4 w-4" style={{ color: "var(--signal-amber)" }} />
               </div>
               <div className="distribution-list">
-                {analytics.providers.length === 0 ? (
+                {(displaySource === "chatgpt" ? analytics.models : analytics.providers).length === 0 ? (
                   <p className="analytics-no-data">{t("dashboard.no_data")}</p>
-                ) : analytics.providers.slice(0, 5).map((provider, index) => (
-                  <DistributionRow
-                    key={provider.providerId}
-                    name={provider.providerId}
-                    meta={t("dashboard.provider_models", String(provider.modelCount))}
-                    value={provider.totalTokens}
-                    percentage={analytics.providerTokenTotal > 0 ? (provider.totalTokens / analytics.providerTokenTotal) * 100 : 0}
-                    valueLabel={formatTokensShort(provider.totalTokens, lang)}
-                    color={COLORS[index % COLORS.length] ?? COLORS[0]!}
-                  />
-                ))}
+                ) : displaySource === "chatgpt"
+                  ? analytics.models.slice(0, 5).map((model, index) => (
+                    <DistributionRow
+                      key={`${model.providerId}/${model.modelId}`}
+                      name={model.modelId}
+                      meta={`${model.providerId} · ${formatNumber(model.totalRequests)} ${t("dashboard.requests")}`}
+                      value={model.totalTokens}
+                      percentage={analytics.totalTokens > 0 ? (model.totalTokens / analytics.totalTokens) * 100 : 0}
+                      valueLabel={formatTokensShort(model.totalTokens, lang)}
+                      color={COLORS[index % COLORS.length] ?? COLORS[0]!}
+                    />
+                  ))
+                  : analytics.providers.slice(0, 5).map((provider, index) => (
+                    <DistributionRow
+                      key={provider.providerId}
+                      name={provider.providerId}
+                      meta={t("dashboard.provider_models", String(provider.modelCount))}
+                      value={provider.totalTokens}
+                      percentage={analytics.providerTokenTotal > 0 ? (provider.totalTokens / analytics.providerTokenTotal) * 100 : 0}
+                      valueLabel={formatTokensShort(provider.totalTokens, lang)}
+                      color={COLORS[index % COLORS.length] ?? COLORS[0]!}
+                    />
+                  ))}
               </div>
             </section>
 
@@ -924,19 +1040,23 @@ export function DashboardPage() {
               </div>
             </section>
           </div>
+            </div>
+          </details>
 
           {/* Usage Trend Chart */}
           <div className="tech-panel telemetry-chart p-5" style={{ borderColor: "var(--card-border)", backgroundColor: "var(--card-bg)" }}>
             <h3 className="text-sm font-semibold mb-1" style={{ color: "var(--page-text)" }}>{t("dashboard.usage_trend")}</h3>
             <p className="text-xs mb-4" style={{ color: "var(--muted-text)" }}>
-              {range === "today" ? t("dashboard.range.today") : `${formatDateShort(chartData[0]?.rawDate || "")} - ${formatDateShort(chartData[chartData.length - 1]?.rawDate || "")}`}
+              {displayRange === "today"
+                ? t("dashboard.range.today")
+                : `${dataRangeLabel}${chartGranularity === "month" ? ` · ${t("dashboard.monthly_view")}` : ""}`}
             </p>
             <ResponsiveContainer width="100%" height={300}>
               <AreaChart data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--card-border)" />
                 <XAxis dataKey="date" tick={{ fontSize: 11, fill: "var(--muted-text)" }} axisLine={false} tickLine={false} />
                 <YAxis yAxisId="tokens" tick={{ fontSize: 11, fill: "var(--muted-text)" }} axisLine={false} tickLine={false} label={{ value: t("dashboard.tokens_k"), angle: -90, position: "insideLeft", style: { fill: "var(--muted-text)", fontSize: 11 } }} />
-                <YAxis yAxisId="cost" orientation="right" tick={{ fontSize: 11, fill: "var(--muted-text)" }} axisLine={false} tickLine={false} label={{ value: t("dashboard.cost_label"), angle: 90, position: "insideRight", style: { fill: "var(--muted-text)", fontSize: 11 } }} />
+                <YAxis yAxisId="cost" orientation="right" tick={{ fontSize: 11, fill: "var(--muted-text)" }} axisLine={false} tickLine={false} label={{ value: costAxisLabel, angle: 90, position: "insideRight", style: { fill: "var(--muted-text)", fontSize: 11 } }} />
                 <Tooltip
                   contentStyle={{
                     backgroundColor: "var(--card-bg)",
@@ -950,7 +1070,7 @@ export function DashboardPage() {
                 <Area yAxisId="tokens" type="monotone" dataKey="output" stroke={CHART_LINE_COLORS.output} fill="none" strokeWidth={2} dot={false} name={t("dashboard.output")} />
                 <Area yAxisId="tokens" type="monotone" dataKey="cacheRead" stroke={CHART_LINE_COLORS.cacheRead} fill="none" strokeWidth={2} strokeDasharray="4 2" dot={false} name={t("dashboard.cache_hit")} />
                 <Area yAxisId="tokens" type="monotone" dataKey="cacheWrite" stroke={CHART_LINE_COLORS.cacheWrite} fill="none" strokeWidth={2} strokeDasharray="2 2" dot={false} name={t("dashboard.cache_create")} />
-                <Area yAxisId="cost" type="monotone" dataKey="cost" stroke={CHART_LINE_COLORS.cost} fill="none" strokeWidth={2} strokeDasharray="6 3" dot={false} name={t("dashboard.cost")} />
+                <Area yAxisId="cost" type="monotone" dataKey="cost" stroke={CHART_LINE_COLORS.cost} fill="none" strokeWidth={2} strokeDasharray="6 3" dot={false} name={costAxisLabel} />
                 <Legend
                   wrapperStyle={{ fontSize: "11px", color: "var(--muted-text)", paddingTop: "8px" }}
                 />
@@ -959,7 +1079,19 @@ export function DashboardPage() {
           </div>
 
           {/* Tabs: Request Log / Provider / Model */}
-          <div className="tech-panel data-console overflow-hidden" style={{ borderColor: "var(--card-border)", backgroundColor: "var(--card-bg)" }}>
+          <details
+            className="dashboard-details dashboard-console-details"
+            open={consoleOpen}
+            onToggle={(event) => setConsoleOpen(event.currentTarget.open)}
+          >
+            <summary>
+              <span>
+                <strong>{t("dashboard.raw_data")}</strong>
+                <small>{t("dashboard.raw_data_hint")}</small>
+              </span>
+              <span className="dashboard-details-summary-meta">{t("dashboard.total_items", String(data.requestLog.length))}</span>
+            </summary>
+            <div className="tech-panel data-console overflow-hidden" style={{ borderColor: "var(--card-border)", backgroundColor: "var(--card-bg)" }}>
             {/* Tab Header */}
             <div className="flex items-center border-b" style={{ borderColor: "var(--card-border)" }}>
               {([
@@ -1139,7 +1271,8 @@ export function DashboardPage() {
                 </table>
               )}
             </div>
-          </div>
+            </div>
+          </details>
         </div>
       )}
     </div>

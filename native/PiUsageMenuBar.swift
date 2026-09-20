@@ -73,6 +73,8 @@ final class PiUsagePanel: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
+        nativeMenuBackgroundColor(for: effectiveAppearance).setFill()
+        bounds.fill()
         text("π", 20, 12, 26, size: 24, color: .systemTeal)
         text("Pi 使用情况", 52, 15, 180, size: 17, bold: true)
         let clock = DateFormatter()

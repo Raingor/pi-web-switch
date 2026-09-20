@@ -1112,6 +1112,38 @@ export function clearCopilotCaches(): void {
   copilotUsageCache = null;
 }
 
+// Combined dashboard cache: the all-sources view may read several local
+// stores, including Cindy SQLite databases and Codex rollout JSONL files.
+const COMBINED_USAGE_TTL_MS = 30_000;
+let combinedUsageCache: { records: UsageRecord[]; at: number } | null = null;
+
+/** Drop the combined usage snapshot so the next all-sources request rescans. */
+export function clearCombinedUsageCache(): void {
+  combinedUsageCache = null;
+}
+
+/**
+ * Combine every locally supported usage source for the Dashboard's all-sources
+ * view. Native menu-bar apps intentionally keep their Pi/ChatGPT scopes split.
+ */
+export function readAllCombinedUsage(): UsageRecord[] {
+  if (combinedUsageCache && Date.now() - combinedUsageCache.at < COMBINED_USAGE_TTL_MS) {
+    return combinedUsageCache.records;
+  }
+  const all: UsageRecord[] = [
+    ...readAllUsage(),
+    ...readCindyUsage(),
+    ...readClaudeUsage(),
+    ...readCodexUsage(),
+    ...readChatgptUsage(),
+    ...readAtomcodeUsage(),
+    ...readCopilotUsage(),
+  ];
+  all.sort((a, b) => a.date.localeCompare(b.date));
+  combinedUsageCache = { records: all, at: Date.now() };
+  return all;
+}
+
 // ─── Provider-Based Filtering ──────────────────────────
 
 /**

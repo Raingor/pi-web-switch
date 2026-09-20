@@ -97,7 +97,7 @@ export interface Provider {
   apiKey?: string;
   apiKeys?: ProviderApiKey[];
   activeKeyId?: string;
-  /** Opt-in: automatic key failover on 429 / insufficient balance. */
+  /** Legacy config field; automatic key failover is no longer registered. */
   autoFailover?: boolean;
   authHeader?: boolean;
   headers?: Record<string, string>;
@@ -209,6 +209,7 @@ export interface CustomProviderConfig {
   apiKey?: string;
   apiKeys?: ProviderApiKey[];
   activeKeyId?: string;
+  /** Legacy config field; retained for upgrades but ignored at runtime. */
   autoFailover?: boolean;
   authHeader?: boolean;
   headers?: Record<string, string>;

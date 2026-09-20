@@ -72,6 +72,8 @@ final class ChatGPTUsagePanel: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
+        nativeMenuBackgroundColor(for: effectiveAppearance).setFill()
+        bounds.fill()
         text("GPT", 20, 12, 60, size: 24, color: .systemTeal)
         text("ChatGPT 使用情况", 78, 15, 210, size: 17, bold: true)
         let clock = DateFormatter()

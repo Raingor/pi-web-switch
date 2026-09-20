@@ -630,7 +630,7 @@ function piApiPlugin(): Plugin {
           return res.end(JSON.stringify({ success: ok }));
         }
 
-        // Handle GET /api/pi/usage-range?range=today|7d|30d|custom&from=...&to=...
+        // Handle GET /api/pi/usage-range?range=all|today|7d|30d|custom&from=...&to=...
         if (method === "GET" && pathOnly === "/api/pi/usage-range") {
           const parsedUrl = new URL(url, "http://localhost");
           const range = parsedUrl.searchParams.get("range") || "today";
@@ -644,6 +644,24 @@ function piApiPlugin(): Plugin {
 
           const allRecords = pi.readAllUsage();
           const usage = pi.getUsageByRange(allRecords, fromDate, toDate);
+          res.setHeader("Content-Type", "application/json");
+          return res.end(JSON.stringify(usage));
+        }
+
+        // Handle GET /api/pi/all-usage-range for the combined all-sources view.
+        if (method === "GET" && pathOnly === "/api/pi/all-usage-range") {
+          const parsedUrl = new URL(url, "http://localhost");
+          const range = parsedUrl.searchParams.get("range") || "today";
+          const fromParam = parsedUrl.searchParams.get("from") || "";
+          const toParam = parsedUrl.searchParams.get("to") || "";
+          if (parsedUrl.searchParams.get("refresh") === "1") {
+            pi.clearUsageCache();
+            pi.clearChatgptUsageCache();
+            pi.clearCopilotCaches();
+            pi.clearCombinedUsageCache();
+          }
+          const { fromDate, toDate } = resolveDateRange(range, fromParam, toParam);
+          const usage = pi.getUsageByRange(pi.readAllCombinedUsage(), fromDate, toDate);
           res.setHeader("Content-Type", "application/json");
           return res.end(JSON.stringify(usage));
         }
@@ -666,7 +684,8 @@ function piApiPlugin(): Plugin {
             return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, "0")}-${String(shifted.getUTCDate()).padStart(2, "0")}`;
           };
           let fromDate: string;
-          if (range === "today") fromDate = toDate;
+          if (range === "all") fromDate = "0000-01-01";
+          else if (range === "today") fromDate = toDate;
           else if (range === "7d") fromDate = shiftDate(toDate, 6);
           else if (range === "30d") fromDate = shiftDate(toDate, 29);
           else if (range === "custom" && fromParam) { fromDate = fromParam; if (toParam) toDate = toParam; }
