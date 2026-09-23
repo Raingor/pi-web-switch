@@ -529,6 +529,51 @@ function piApiPlugin(): Plugin {
             }
           });
         },
+        "GET /api/pi/typesafe-config"(_, res) {
+          const config = pi.readTypeSafeConfig();
+          const key = config.apiKey;
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({
+            baseUrl: config.baseUrl,
+            model: config.model,
+            hasKey: !!key,
+            maskedKey: key ? (key.length > 12 ? `${key.slice(0, 7)}…${key.slice(-4)}` : "••••••••") : "",
+          }));
+        },
+        "POST /api/pi/typesafe-config"(req, res) {
+          let body = "";
+          req.on("data", (chunk: string) => (body += chunk));
+          req.on("end", () => {
+            try {
+              const input = JSON.parse(body) as { apiKey?: string; model?: string };
+              const ok = pi.writeTypeSafeConfig(input);
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ success: ok }));
+            } catch {
+              res.statusCode = 400;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ success: false, message: "Invalid request body" }));
+            }
+          });
+        },
+        "POST /api/pi/typesafe-evaluate"(req, res) {
+          let body = "";
+          req.on("data", (chunk: string) => (body += chunk));
+          req.on("end", async () => {
+            try {
+              const input = JSON.parse(body) as { state?: unknown; questions?: Record<string, unknown>; model?: string };
+              if (input.state === undefined || !input.questions) throw new Error("state and questions are required");
+              const result = await pi.evaluateTypeSafe({ state: input.state, questions: input.questions, model: input.model });
+              res.statusCode = result.success ? 200 : (result.status && result.status >= 400 ? result.status : 400);
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify(result));
+            } catch (error) {
+              res.statusCode = 400;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ success: false, message: error instanceof Error ? error.message : "Invalid request body" }));
+            }
+          });
+        },
         "POST /api/pi/agnes-chat"(req, res) {
           let body = "";
           req.on("data", (chunk: string) => (body += chunk));

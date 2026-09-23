@@ -1,137 +1,66 @@
-# Task Plan: Usage-range audit and Web Pi Chat
+# Task Plan: Call local pi (Web Chat)
 
 ## Goal
 
-Verify and correct the usage-statistics date-range calculations, then build a branch-scoped Web Chat module that runs local pi and supports switching sessions.
+Transform pi-web-switch so it calls the local `pi` CLI from the browser — a Web Chat module that spawns `pi --mode json --print --session-id` as a child process, streams structured NDJSON events to the UI as SSE, supports session switching, and can stop in-flight runs. Settings content follows pi-web-switch's existing config structures.
 
 ## Current Phase
 
-Phase 14 — Pi CLI settings parity complete
+Phase 6 — Stabilize model picker (complete)
 
 ## Phases
 
-### Phase 1: Audit current behavior
-
-- [x] Trace the 7-day, 30-day, and custom-range date-boundary calculations.
-- [x] Identify the existing session and pi execution APIs that can power Web Chat.
-- [x] Record findings and constraints.
+### Phase 1: Requirements & Discovery
+- [x] Understand the prior Web Chat feature and why it was removed (`381a2da`).
+- [x] Record findings.
 - **Status:** complete
 
-### Phase 2: Branch and architecture
-
-- [ ] Create the `codex/web-pi-chat` branch without discarding current worktree changes.
-- [ ] Define server routes, session persistence, and Chat UI integration.
-- [ ] Decide how to stream pi output and safely stop active runs.
+### Phase 2: Restore server-side local-pi invocation
+- [x] Add `runWebChat`, `stopWebChat`, `chooseChatDirectory`, `listActiveWebChats` + interfaces to `server/pi-reader.ts` (`resolvePiBinary` already present).
+- [x] Add chat SSE endpoints to `vite.config.ts` (`GET /api/pi/chat/active`, `POST /api/pi/chat`, `POST /api/pi/chat/stop`, `POST /api/pi/chat/select-directory`).
+- [x] Verify build typecheck.
 - **Status:** complete
 
-### Phase 3: Usage statistics correction
-
-- [x] Correct the date-window calculation for China-time calendar days.
-- [ ] Add focused calendar-boundary unit tests (follow-up).
+### Phase 3: Restore client-side Chat UI
+- [x] Restore `src/types/chat.ts`.
+- [x] Restore `src/components/chat/ChatPage.tsx`.
+- [x] Wire `/chat` route in `src/App.tsx` and nav entry in `BasicSidebar`.
+- [x] Add `nav.chat` translation keys (en/zh-CN/zh-TW/ja).
 - **Status:** complete
 
-### Phase 4: Web Chat implementation
-
-- [x] Add a server-side local pi chat endpoint.
-- [x] Add a Web Chat page with session list, new-session action, and session switching.
-- [x] Add navigation and translations.
+### Phase 4: Verification
+- [x] Run `npx tsc --noEmit`, `npx vitest run`, `npx vite build`.
+- [x] End-to-end smoke test against local pi 0.87.0 (SSE deltas + done + session persist).
 - **Status:** complete
 
-### Phase 5: Verification and delivery
-
-- [x] Run unit tests and production build.
-- [x] Document outcomes and remaining limitations.
+### Phase 5: Reopen Chat and improve reliability
+- [x] Reconcile the current working tree against historical commit `a2480cd` (the API, styles and types were present; `ChatPage.tsx` and route/nav were missing).
+- [x] Restore the original Chat UI without reverting unrelated local Jev or server changes.
+- [x] Re-enable full-height `/chat`, four-language labels and a Sessions preview link to continue existing sessions.
+- [x] Add New chat action; use pi's default model when a remembered model is unavailable; report broken streams instead of silently finishing.
+- [x] Pin resumed sessions to their original workspace and reject concurrent runs of the same session.
+- [x] Verify with fake-pi regression tests, full test suite, build and HTTP smoke test.
 - **Status:** complete
 
-### Phase 6: Real-session validation and session titles
-
-- [x] Identify why the Web Chat list falls back to unnamed sessions.
-- [x] Extract a concise title from the first user message and add a stable fallback label.
-- [x] Run an actual local Pi request and verify its session appears with a title.
-- [x] Verify browser rendering of the session title.
-- **Status:** complete
-
-### Phase 7: Codex-style workspace navigation
-
-- [x] Define a chat-first navigation model that keeps legacy routes available.
-- [x] Replace the global sidebar with conversation navigation and a Settings entry.
-- [x] Build a Settings workspace containing all existing control panels.
-- [x] Make the Chat page respond to sidebar session selection.
-- [x] Validate desktop rendering, then run tests and build.
-- **Status:** complete
-
-### Phase 8: Chat parity foundations
-
-- [x] Diagnose missing session-history loading and flattened project grouping.
-- [x] Add a validated full session-history API and hydrate Chat on selection.
-- [x] Group the conversation rail by project directory with expand/collapse.
-- [x] Add client-visible generation state and a stop control.
-- [x] Verify with a real persisted session, browser flow, tests, and build.
-- **Status:** complete
-
-### Phase 9: Conversation menu
-
-- [x] Wire the visual three-dot control to a real menu without changing the selected chat.
-- [x] Verify menu actions and production build.
-- **Status:** complete
-
-### Phase 10: Recoverable session deletion
-
-- [x] Add a confirmed Move to Trash action to the conversation menu.
-- [x] Verify the action is exposed without deleting a user session, then build and test.
-- **Status:** complete
-
-### Phase 11: History readability
-
-- [x] Identify tool-call rows as the source of noisy historical rendering.
-- [x] Collapse consecutive tool rows and add lightweight Markdown reading styles.
-- [x] Validate against a real tool-heavy session, then build and test.
-- **Status:** complete
-
-### Phase 12: Focused chat background
-
-- [x] Remove the application grid from the full-height Chat workspace.
-- **Status:** complete
-
-### Phase 13: Stable project ordering
-
-- [x] Replace activity-based project-group sorting with stable folder ordering.
-- **Status:** complete
-
-### Phase 14: Pi CLI settings parity
-
-- [x] Enumerate the active Pi version's `/settings` menu and exact `settings.json` keys.
-- [x] Add safe read/write API support while preserving unrelated settings.
-- [x] Add a dedicated CLI Settings panel with matching controls and descriptions.
-- [x] Verify persistence with a reversible browser write, unit tests, and production build.
+### Phase 6: Stabilize model picker
+- [x] Inspect screenshot and reproduce the model menu with providers of differing model counts.
+- [x] Stop the bottom-anchored menu from changing height when the hovered provider changes; constrain height on short viewports and keep each column scrollable.
+- [x] Verify fixed menu bounds in Chrome across provider changes, then run tests/build/diff check.
 - **Status:** complete
 
 ## Key Questions
 
-1. Do current 7-day/30-day ranges include today and use calendar days rather than rolling 24-hour windows?
-2. Can the existing local pi CLI/session format be reused safely for browser-originated chats?
-3. Which local transport gives responsive streaming without disrupting Vite HMR?
+1. Should the Chat workspace use the full Codex-style mode toggle? — Kept simple: a standalone `/chat` route + nav entry, fitting the current `main` AppShell.
 
 ## Decisions Made
 
 | Decision | Rationale |
 |----------|-----------|
-| Use a dedicated `codex/web-pi-chat` branch | Keeps the new chat feature isolated while preserving current uncommitted work. |
-| Treat all date ranges as China-time calendar dates | Existing usage parser already buckets records in UTC+8. |
+| Restore from `a2480cd` commit | Last clean, tested version of the local-pi calling feature. |
+| Standalone `/chat` route (no ui-mode toggle) | Fits current `main` AppShell/BasicSidebar without forcing the reverted Codex redesign. |
 
 ## Errors Encountered
 
 | Error | Attempt | Resolution |
 |-------|---------|------------|
-| None yet | 1 | — |
-
-### Phase 15: Provider key-pool automatic failover (terminal Pi)
-
-- [x] Research Pi extension/provider-composer integration (recovered from failed worker run)
-- [x] Implement `pi-package/key-failover.ts` core logic (eligibility, classification, health state, stream wrapper)
-- [x] Repair `pi-package/index.ts` to current Pi extension API (JSX removal, registerCommand signature, agent-dir resolution) and wire failover registration
-- [x] Add `autoFailover` flag: types, store, ProvidersModelsPage toggle + key status/reset UI, server routes, translations
-- [x] Unit tests (mocked streams: 429→next, balance→pause, exhaustion, cooldown expiry, no-replay-after-output, abort, passthrough)
-- [x] Isolated runtime e2e: PI_CODING_AGENT_DIR sandbox + local fake relay + real `pi` CLI（2026-09-08 通过：429 冷却切换、402/403 暂停切换、状态清理后恢复）
-- [x] Production build
-- **Status:** complete; residual_risk=concurrent_health_state_writes
+| `timeout` not available on macOSBSD tool | 1 | Dropped the `timeout` wrapper; pi completes within its lifecycle. |

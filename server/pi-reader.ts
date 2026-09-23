@@ -1,9 +1,9 @@
 import { readFileSync, readdirSync, existsSync, statSync, unlinkSync, writeFileSync, mkdirSync, renameSync, chmodSync, realpathSync } from "fs";
+import { randomUUID } from "node:crypto";
 import { homedir, platform } from "os";
 import { join, resolve, dirname, relative, sep, delimiter } from "path";
 import { spawnSync, spawn } from "child_process";
 import { DatabaseSync } from "node:sqlite";
-import { randomUUID } from "node:crypto";
 
 const PI_DIR = join(homedir(), ".pi", "agent");
 const CODEX_DIR = join(homedir(), ".codex");
@@ -2426,6 +2426,7 @@ function getPiVersion(): string | null {
   return resolvePiBinary()?.version ?? null;
 }
 
+
 // ─── Web Chat: run local pi via the browser ───────────────────
 // The dashboard talks to pi through its own dev server. These functions
 // spawn the local `pi` CLI in JSON streaming mode, relay structured NDJSON
@@ -3331,6 +3332,125 @@ export async function testModel(
   }
 }
 
+// ─── TypeSafe / Jev evaluation credentials ─────────────────
+// Jev is a structured-evaluation model, not a Pi chat provider. Keep its
+// credentials in a dedicated 0600 file so it can be used by the web evaluator
+// without exposing a non-chat API to Pi's normal model picker.
+const TYPESAFE_CONFIG_FILE = "typesafe-config.json";
+const TYPESAFE_DEFAULT_BASE_URL = "https://api.typesafe.ai/v1";
+const TYPESAFE_DEFAULT_MODEL = "jev-latest";
+
+export interface TypeSafeConfig {
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+}
+
+function typeSafeConfigPath(): string {
+  return piPath(TYPESAFE_CONFIG_FILE);
+}
+
+export function readTypeSafeConfig(): TypeSafeConfig {
+  try {
+    if (!existsSync(typeSafeConfigPath())) {
+      return { apiKey: "", baseUrl: TYPESAFE_DEFAULT_BASE_URL, model: TYPESAFE_DEFAULT_MODEL };
+    }
+    const parsed = JSON.parse(readFileSync(typeSafeConfigPath(), "utf-8")) as Record<string, unknown>;
+    const apiKey = typeof parsed.apiKey === "string" ? parsed.apiKey.trim() : "";
+    const baseUrl = typeof parsed.baseUrl === "string" && parsed.baseUrl.trim()
+      ? parsed.baseUrl.trim().replace(/\/+$/, "")
+      : TYPESAFE_DEFAULT_BASE_URL;
+    const model = typeof parsed.model === "string" && /^(jev-(latest|preview)|jev-\d+\.\d+\.\d+)$/.test(parsed.model.trim())
+      ? parsed.model.trim()
+      : TYPESAFE_DEFAULT_MODEL;
+    return { apiKey, baseUrl, model };
+  } catch {
+    return { apiKey: "", baseUrl: TYPESAFE_DEFAULT_BASE_URL, model: TYPESAFE_DEFAULT_MODEL };
+  }
+}
+
+/** Persist the Jev key/model with owner-only permissions. */
+export function writeTypeSafeConfig(config: Partial<TypeSafeConfig>): boolean {
+  try {
+    const current = readTypeSafeConfig();
+    const apiKey = typeof config.apiKey === "string" ? config.apiKey.trim() : current.apiKey;
+    const modelInput = typeof config.model === "string" ? config.model.trim() : current.model;
+    const model = /^(jev-(latest|preview)|jev-\d+\.\d+\.\d+)$/.test(modelInput)
+      ? modelInput
+      : current.model;
+    mkdirSync(PI_DIR, { recursive: true });
+    writeFileSync(
+      typeSafeConfigPath(),
+      JSON.stringify({ apiKey, baseUrl: TYPESAFE_DEFAULT_BASE_URL, model }, null, 2),
+      { encoding: "utf-8", mode: 0o600 }
+    );
+    chmodSync(typeSafeConfigPath(), 0o600);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export interface TypeSafeEvaluationInput {
+  state: unknown;
+  questions: Record<string, unknown>;
+  model?: string;
+}
+
+export async function evaluateTypeSafe(input: TypeSafeEvaluationInput): Promise<{
+  success: boolean;
+  status?: number;
+  latencyMs: number;
+  data?: unknown;
+  message?: string;
+}> {
+  const started = Date.now();
+  const config = readTypeSafeConfig();
+  const apiKey = config.apiKey.startsWith("$")
+    ? process.env[config.apiKey.slice(1)] ?? ""
+    : config.apiKey;
+  if (!apiKey) return { success: false, latencyMs: 0, message: "missing api key" };
+  const model = input.model && /^(jev-(latest|preview)|jev-\d+\.\d+\.\d+)$/.test(input.model)
+    ? input.model
+    : config.model;
+  if (!input.questions || typeof input.questions !== "object" || Array.isArray(input.questions)) {
+    return { success: false, latencyMs: Date.now() - started, message: "questions must be an object" };
+  }
+
+  try {
+    const response = await fetch(`${config.baseUrl}/systemone`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ state: input.state, model, questions: input.questions }),
+      signal: AbortSignal.timeout(120_000),
+    });
+    const text = await response.text();
+    let data: unknown;
+    try { data = text ? JSON.parse(text) : undefined; } catch { data = { raw: text.slice(0, 1000) }; }
+    const latencyMs = Date.now() - started;
+    if (!response.ok) {
+      const body = data as { error?: { message?: string } } | undefined;
+      return {
+        success: false,
+        status: response.status,
+        latencyMs,
+        message: body?.error?.message || `HTTP ${response.status}`,
+        data,
+      };
+    }
+    return { success: true, status: response.status, latencyMs, data };
+  } catch (error) {
+    return {
+      success: false,
+      latencyMs: Date.now() - started,
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 // ─── Agnes Generation Credentials ─────────────────────────
 // The generation zone targets one gateway, so its key lives in its own 0600
 // file instead of models.json — pi never reads it and it is not a chat provider.
@@ -4118,7 +4238,7 @@ function findPiAiProvidersDir(): string | null {
   if (bin) {
     const real = spawnSync("readlink", ["-f", bin], { encoding: "utf8", timeout: 5000 });
     const cli = real.status === 0 ? real.stdout.trim() : "";
-    if (cli) roots.push(resolve(dirname(cli), "..")); // package root
+    if (cli) roots.push(resolve(dirname(cli), "../..")); // .../pi-coding-agent package root
   }
 
   // Known install locations as fallback

@@ -8,6 +8,7 @@ import { SubagentsPage } from "@/components/subagents/SubagentsPage";
 import { SettingsPage } from "@/components/settings/SettingsPage";
 import { ModelSpeedTestPage } from "@/components/speedtest/ModelSpeedTestPage";
 import { GeneratePage } from "@/components/generate/GeneratePage";
+import { JevPage } from "@/components/jev/JevPage";
 import { ChatPage } from "@/components/chat/ChatPage";
 
 export default function App() {
@@ -25,6 +26,7 @@ export default function App() {
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/speed-test" element={<ModelSpeedTestPage />} />
           <Route path="/generate" element={<GeneratePage />} />
+          <Route path="/jev" element={<JevPage />} />
         </Route>
       </Routes>
     </BrowserRouter>

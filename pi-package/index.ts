@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { streamSimple as piStreamSimple } from "@earendil-works/pi-ai/compat";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
@@ -12,6 +13,137 @@ function getPackageManager(): "npm" | "pnpm" | "yarn" {
   if (existsSync(join(PI_SWITCH_DIR, "pnpm-lock.yaml"))) return "pnpm";
   if (existsSync(join(PI_SWITCH_DIR, "yarn.lock"))) return "yarn";
   return "npm";
+}
+
+/**
+ * AgentRouter/DeepSeek V4 can stream reasoning as content blocks instead of
+ * OpenAI's top-level `reasoning_content` field. Pi's OpenAI adapter only
+ * persists the latter, so normalize the response before the adapter consumes
+ * it. This keeps the thinking block in the session and lets the next tool turn
+ * replay it as required by the provider.
+ */
+function normalizeAgentRouterPayload(payload: unknown): unknown {
+  if (!payload || typeof payload !== "object") return payload;
+  const root = payload as Record<string, unknown>;
+  const choices = Array.isArray(root.choices) ? root.choices : undefined;
+  if (!choices) return payload;
+
+  let changed = false;
+  const normalizedChoices = choices.map((choice) => {
+    if (!choice || typeof choice !== "object") return choice;
+    const current = choice as Record<string, unknown>;
+    const delta = current.delta;
+    const message = current.message;
+    const target = delta && typeof delta === "object"
+      ? { key: "delta", value: delta as Record<string, unknown> }
+      : message && typeof message === "object"
+        ? { key: "message", value: message as Record<string, unknown> }
+        : undefined;
+    if (!target || !Array.isArray(target.value.content)) return choice;
+
+    const blocks = target.value.content as unknown[];
+    const thinking = blocks
+      .filter((block): block is Record<string, unknown> =>
+        Boolean(block && typeof block === "object" && (block as Record<string, unknown>).type === "thinking")
+      )
+      .map((block) => typeof block.thinking === "string" ? block.thinking : "")
+      .join("");
+    const text = blocks
+      .filter((block): block is Record<string, unknown> =>
+        Boolean(block && typeof block === "object" && (block as Record<string, unknown>).type !== "thinking")
+      )
+      .map((block) => {
+        if (typeof block.text === "string") return block.text;
+        if (typeof block.output === "string") return block.output;
+        return "";
+      })
+      .join("");
+
+    if (!thinking && !text) return choice;
+    changed = true;
+    const nextTarget: Record<string, unknown> = { ...target.value };
+    delete nextTarget.content;
+    if (text) nextTarget.content = text;
+    if (thinking) nextTarget.reasoning_content = thinking;
+    return { ...current, [target.key]: nextTarget };
+  });
+
+  return changed ? { ...root, choices: normalizedChoices } : payload;
+}
+
+function createAgentRouterFetch(baseFetch: typeof globalThis.fetch): typeof globalThis.fetch {
+  return async (input, init) => {
+    const response = await baseFetch(input, init);
+    const contentType = response.headers.get("content-type") ?? "";
+    if (!response.body || (!contentType.includes("text/event-stream") && !contentType.includes("application/json"))) {
+      return response;
+    }
+
+    if (contentType.includes("application/json")) {
+      const payload = await response.json();
+      const normalized = normalizeAgentRouterPayload(payload);
+      return new Response(JSON.stringify(normalized), {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+      });
+    }
+
+    const decoder = new TextDecoder();
+    const encoder = new TextEncoder();
+    let pending = "";
+    const transform = new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        pending += decoder.decode(chunk, { stream: true });
+        const lines = pending.split("\\n");
+        pending = lines.pop() ?? "";
+        for (const line of lines) {
+          controller.enqueue(encoder.encode(normalizeAgentRouterSseLine(line)));
+        }
+      },
+      flush(controller) {
+        pending += decoder.decode();
+        if (pending) controller.enqueue(encoder.encode(normalizeAgentRouterSseLine(pending)));
+      },
+    });
+
+    response.body.pipeTo(transform.writable).catch(() => undefined);
+    return new Response(transform.readable, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    });
+  };
+}
+
+function normalizeAgentRouterSseLine(line: string): string {
+  if (!line.startsWith("data:")) return `${line}\\n`;
+  const raw = line.slice(5).trim();
+  if (!raw || raw === "[DONE]") return `${line}\\n`;
+  try {
+    const normalized = normalizeAgentRouterPayload(JSON.parse(raw));
+    return `data: ${JSON.stringify(normalized)}\\n`;
+  } catch {
+    return `${line}\\n`;
+  }
+}
+
+function registerAgentRouterThinkingCompatibility(pi: ExtensionAPI): void {
+  const modelsPath = join(getAgentDir(), "models.json");
+  try {
+    const config = JSON.parse(readFileSync(modelsPath, "utf8")) as { providers?: Record<string, unknown> };
+    if (!config.providers?.agentrouter) return;
+  } catch {
+    return;
+  }
+
+  pi.registerProvider("agentrouter", {
+    api: "openai-completions",
+    streamSimple: (model, context, options) => piStreamSimple(model, context, {
+      ...options,
+      fetch: createAgentRouterFetch(options?.fetch ?? globalThis.fetch),
+    }),
+  });
 }
 
 // ─── Usage reader ────────────────────────────────────────
@@ -202,6 +334,8 @@ function shortDate(iso: string): string {
 // ─── Extension entry ─────────────────────────────────────
 
 export default function (pi: ExtensionAPI) {
+  registerAgentRouterThinkingCompatibility(pi);
+
   // /pi-switch start|stop|status — launch the dashboard web UI
   pi.registerCommand("pi-switch", {
     description: "Start or stop the pi-web-switch dashboard (start|stop|status [port])",

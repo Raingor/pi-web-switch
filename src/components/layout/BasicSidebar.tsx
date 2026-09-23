@@ -13,6 +13,7 @@ import {
   Gauge,
   Sparkles,
   Send,
+  ShieldCheck,
   MessageSquare,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -33,6 +34,7 @@ const navItems = [
   { to: "/settings", icon: Settings, key: "nav.settings", code: "07" },
   { to: "/speed-test", icon: Gauge, key: "nav.speed_test", code: "08" },
   { to: "/generate", icon: Sparkles, key: "nav.generate", code: "09" },
+  { to: "/jev", icon: ShieldCheck, key: "nav.jev", code: "10" },
 ];
 
 interface SidebarProps {
