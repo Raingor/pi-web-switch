@@ -8,6 +8,7 @@ import { SubagentsPage } from "@/components/subagents/SubagentsPage";
 import { SettingsPage } from "@/components/settings/SettingsPage";
 import { ModelSpeedTestPage } from "@/components/speedtest/ModelSpeedTestPage";
 import { GeneratePage } from "@/components/generate/GeneratePage";
+import { ChatPage } from "@/components/chat/ChatPage";
 
 export default function App() {
   return (
@@ -15,6 +16,7 @@ export default function App() {
       <Routes>
         <Route element={<AppShell />}>
           <Route path="/" element={<DashboardPage />} />
+          <Route path="/chat" element={<ChatPage />} />
           <Route path="/sessions" element={<SessionsPage />} />
           <Route path="/memory" element={<MemoryPage />} />
           <Route path="/providers" element={<ProvidersModelsPage />} />

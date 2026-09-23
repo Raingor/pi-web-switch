@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { Link } from "react-router-dom";
 import { useConfigStore } from "@/store/config-store";
 import { useTranslation } from "@/lib/i18n";
 import {
@@ -1010,6 +1011,15 @@ function countExpandableNodes(nodes: TreeNode[]): number {
         title={previewTarget ? sessionDisplayName(previewTarget) : t("sessions.preview_title")}
         size="lg"
       >
+        {previewTarget?.id && (
+          <Link
+            to={`/chat?session=${encodeURIComponent(previewTarget.id)}`}
+            className="mb-3 inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium"
+            style={{ color: "var(--signal-cyan)", borderColor: "var(--card-border)" }}
+          >
+            <MessageSquare className="h-4 w-4" /> {t("chat.continue")}
+          </Link>
+        )}
         <div className="max-h-[60vh] overflow-y-auto space-y-2.5">
           {previewError ? (
             <p className="text-sm py-6 text-center" style={{ color: "#ef4444" }}>{t("sessions.preview_failed")}</p>

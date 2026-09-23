@@ -1,11 +1,12 @@
 import { useState } from "react";
-import { Outlet } from "react-router-dom";
+import { Outlet, useLocation } from "react-router-dom";
 import { Menu, RadioTower } from "lucide-react";
 import { BasicSidebar } from "./BasicSidebar";
 import { HelpButton } from "@/components/help/HelpButton";
 
 export function AppShell() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const isChatPage = useLocation().pathname === "/chat";
 
   return (
     <div className="app-shell">
@@ -44,10 +45,8 @@ export function AppShell() {
           <span className="system-pulse" aria-hidden="true" />
         </header>
 
-        <main className="app-main">
-          <div className="app-canvas">
-            <Outlet />
-          </div>
+        <main className={isChatPage ? "app-main app-main-full" : "app-main"}>
+          {isChatPage ? <Outlet /> : <div className="app-canvas"><Outlet /></div>}
         </main>
       </div>
 

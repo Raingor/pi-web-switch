@@ -176,6 +176,55 @@ function piApiPlugin(): Plugin {
           res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify(usage));
         },
+        "GET /api/pi/chat/active"(_, res) {
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ sessionIds: pi.listActiveWebChats() }));
+        },
+        "POST /api/pi/chat"(req, res) {
+          let body = "";
+          req.on("data", (chunk: string) => (body += chunk));
+          req.on("end", async () => {
+            try {
+              const { prompt, sessionId, projectPath, model, thinking } = JSON.parse(body) as { prompt?: string; sessionId?: string; projectPath?: string; model?: string; thinking?: string };
+              if (typeof prompt !== "string" || !prompt.trim()) throw new Error("missing prompt");
+              res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+              res.setHeader("Cache-Control", "no-cache, no-transform");
+              res.setHeader("Connection", "keep-alive");
+              const send = (event: string, data: unknown) =>
+                res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+              const result = await pi.runWebChat(prompt.trim(), sessionId, (chunk) => send("delta", chunk), projectPath, model, thinking, (status) => send("status", status), (step) => send("step", step));
+              if (result.error) send("error", result.error);
+              else send("done", { sessionId: result.sessionId });
+              res.end();
+            } catch (error) {
+              res.statusCode = 400;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ error: error instanceof Error ? error.message : "Invalid request" }));
+            }
+          });
+        },
+        "POST /api/pi/chat/stop"(req, res) {
+          let body = "";
+          req.on("data", (chunk: string) => (body += chunk));
+          req.on("end", () => {
+            try {
+              const { sessionId } = JSON.parse(body) as { sessionId?: string };
+              const stopped = typeof sessionId === "string" && pi.stopWebChat(sessionId);
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ stopped }));
+            } catch {
+              res.statusCode = 400;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ stopped: false }));
+            }
+          });
+        },
+        "POST /api/pi/chat/select-directory"(_, res) {
+          pi.chooseChatDirectory().then((path) => {
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ path }));
+          });
+        },
         "GET /api/pi/sessions"(_, res) {
           const sessions = pi.listSessions();
           res.setHeader("Content-Type", "application/json");
