@@ -1,66 +1,51 @@
-# Task Plan: Call local pi (Web Chat)
+# Task Plan: Remove the Web Chat module
 
 ## Goal
 
-Transform pi-web-switch so it calls the local `pi` CLI from the browser — a Web Chat module that spawns `pi --mode json --print --session-id` as a child process, streams structured NDJSON events to the UI as SSE, supports session switching, and can stop in-flight runs. Settings content follows pi-web-switch's existing config structures.
+Remove the local-pi Web Chat feature from pi-web-switch cleanly: delete the
+Chat UI, its route and nav entry, all Chat-only server endpoints and functions,
+the Chat-only CSS, and the four-language Chat labels — without touching Sessions,
+trash/restore, usage, Jev, or any other unrelated feature.
 
 ## Current Phase
 
-Phase 6 — Stabilize model picker (complete)
+Phase 9 — Remove Chat module (complete)
 
-## Phases
+## Scope
 
-### Phase 1: Requirements & Discovery
-- [x] Understand the prior Web Chat feature and why it was removed (`381a2da`).
-- [x] Record findings.
-- **Status:** complete
+### Deleted files
+- `src/components/chat/` (ChatPage.tsx, TaskSidebar.tsx, task-list.ts, task-list.test.ts)
+- `src/types/chat.ts`
+- `src/hooks/useSessionUsage.ts` (Chat-only, unused elsewhere)
+- `server/web-chat.test.ts`
 
-### Phase 2: Restore server-side local-pi invocation
-- [x] Add `runWebChat`, `stopWebChat`, `chooseChatDirectory`, `listActiveWebChats` + interfaces to `server/pi-reader.ts` (`resolvePiBinary` already present).
-- [x] Add chat SSE endpoints to `vite.config.ts` (`GET /api/pi/chat/active`, `POST /api/pi/chat`, `POST /api/pi/chat/stop`, `POST /api/pi/chat/select-directory`).
-- [x] Verify build typecheck.
-- **Status:** complete
+### Edited files
+- `src/App.tsx` — dropped the `ChatPage` lazy import and `/chat` route.
+- `src/components/layout/BasicSidebar.tsx` — removed the Chat nav item, renumbered nav codes, dropped the now-unused `MessageSquare` import.
+- `src/components/layout/AppShell.tsx` — removed the `/chat` full-height branch and the now-unused `useLocation` import.
+- `src/components/sessions/SessionsPage.tsx` — removed the "Continue in Chat" preview link and the now-unused `Link` import.
+- `vite.config.ts` — removed `GET /api/pi/chat/active`, `POST /api/pi/chat`, `POST /api/pi/chat/stop`, `POST /api/pi/chat/select-directory`, `POST /api/pi/sessions/trash-batch`, `GET /api/pi/session-usage`, `GET /api/pi/session-history`, `POST /api/pi/session-message`.
+- `server/pi-reader.ts` — removed `runWebChat`, `stopWebChat`, `listActiveWebChats`, `chooseChatDirectory`, `activeWebChats`, the `WebChat*` interfaces, `trashSessions`/`TrashSessionsResult`, `readSessionHistory`, `readSessionUsage`/`SessionUsageSummary`, `lookupContextWindow`, `findSessionById`, and `updateSessionUserMessage`.
+- `src/index.css` — removed every `.codex-*` rule and `.app-main-full` via a PostCSS AST pass (mixed selectors kept their non-Chat parts; emptied `@media` blocks removed).
+- `src/lib/translations/{en,zh-CN,zh-TW,ja}.ts` — removed all `chat.*` keys and `nav.chat`.
 
-### Phase 3: Restore client-side Chat UI
-- [x] Restore `src/types/chat.ts`.
-- [x] Restore `src/components/chat/ChatPage.tsx`.
-- [x] Wire `/chat` route in `src/App.tsx` and nav entry in `BasicSidebar`.
-- [x] Add `nav.chat` translation keys (en/zh-CN/zh-TW/ja).
-- **Status:** complete
+### Kept (shared / unrelated — verified in use)
+- `trashSessionFile`, `/api/pi/trash`, `/api/pi/session/trash`, `auto-trash`, `restoreFromTrash` (Sessions trash tab).
+- `readSessionPreview` + `GET /api/pi/session-preview` (Sessions preview).
+- The mtime+size session metadata cache in `pi-reader.ts` (general `listSessions` optimization).
+- `agnes-chat`/`chatAgnes`, `chatgpt-usage-range`, `codex-usage-status`, OpenAI `chat/completions` label — unrelated to the Web Chat module.
 
-### Phase 4: Verification
-- [x] Run `npx tsc --noEmit`, `npx vitest run`, `npx vite build`.
-- [x] End-to-end smoke test against local pi 0.87.0 (SSE deltas + done + session persist).
-- **Status:** complete
+## Verification
 
-### Phase 5: Reopen Chat and improve reliability
-- [x] Reconcile the current working tree against historical commit `a2480cd` (the API, styles and types were present; `ChatPage.tsx` and route/nav were missing).
-- [x] Restore the original Chat UI without reverting unrelated local Jev or server changes.
-- [x] Re-enable full-height `/chat`, four-language labels and a Sessions preview link to continue existing sessions.
-- [x] Add New chat action; use pi's default model when a remembered model is unavailable; report broken streams instead of silently finishing.
-- [x] Pin resumed sessions to their original workspace and reject concurrent runs of the same session.
-- [x] Verify with fake-pi regression tests, full test suite, build and HTTP smoke test.
-- **Status:** complete
+- `npx tsc --noEmit` — no errors.
+- `npm test -- --run` — 6 files, 101/101 passing (Chat's 6 tests removed with the feature).
+- `npm run build` — succeeds; no `ChatPage` chunk; `main` chunk 448 kB → 436 kB; CSS 152 kB → ~96 kB.
+- `git diff --check` — clean.
+- Repository-wide scan — no `web-chat`, `runWebChat`, `WebChat`, `ChatPage`, `TaskSidebar`, `codex-`, `nav.chat`, `trash-batch`, or `/api/pi/chat` references remain (only unrelated `codex-usage`/`chatgpt`/`agnes-chat` matches).
 
-### Phase 6: Stabilize model picker
-- [x] Inspect screenshot and reproduce the model menu with providers of differing model counts.
-- [x] Stop the bottom-anchored menu from changing height when the hovered provider changes; constrain height on short viewports and keep each column scrollable.
-- [x] Verify fixed menu bounds in Chrome across provider changes, then run tests/build/diff check.
-- **Status:** complete
+## Notes
 
-## Key Questions
-
-1. Should the Chat workspace use the full Codex-style mode toggle? — Kept simple: a standalone `/chat` route + nav entry, fitting the current `main` AppShell.
-
-## Decisions Made
-
-| Decision | Rationale |
-|----------|-----------|
-| Restore from `a2480cd` commit | Last clean, tested version of the local-pi calling feature. |
-| Standalone `/chat` route (no ui-mode toggle) | Fits current `main` AppShell/BasicSidebar without forcing the reverted Codex redesign. |
-
-## Errors Encountered
-
-| Error | Attempt | Resolution |
-|-------|---------|------------|
-| `timeout` not available on macOSBSD tool | 1 | Dropped the `timeout` wrapper; pi completes within its lifecycle. |
+Earlier phases (1–8) restored and enhanced Web Chat and applied four performance
+optimizations (session cache, sidebar split + memo, dialog a11y, route lazy
+loading). The session metadata cache and route lazy loading are general wins and
+stay; the Chat-specific work was removed as part of this phase.

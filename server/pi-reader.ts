@@ -1574,9 +1574,41 @@ function decodeProjectName(dirName: string): { projectPath: string; projectName:
   return { projectPath: decoded, projectName };
 }
 
+// ─── Session metadata cache ─────────────────────────────
+// listSessions() is called by /api/pi/sessions and reused by session preview,
+// trash listing, and archival. Re-reading + JSON.parsing every session file on
+// each call is the dominant cost. Session .jsonl files are append-only, so a
+// per-file cache keyed on mtime+size lets unchanged files skip the parse
+// entirely; only appended/new files are re-read.
+interface SessionInfoCacheEntry {
+  mtimeMs: number;
+  size: number;
+  info: SessionFileInfo | null;
+}
+const sessionInfoCache = new Map<string, SessionInfoCacheEntry>();
+
+/** Parse one session file, reusing the cached result when mtime+size are unchanged. */
+function parseSessionFileInfoCached(filePath: string): SessionFileInfo | null {
+  let stat: ReturnType<typeof statSync>;
+  try {
+    stat = statSync(filePath);
+  } catch {
+    sessionInfoCache.delete(filePath);
+    return null;
+  }
+  const cached = sessionInfoCache.get(filePath);
+  if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+    return cached.info;
+  }
+  const info = parseSessionFileInfo(filePath);
+  sessionInfoCache.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, info });
+  return info;
+}
+
 export function listSessions(): ProjectGroup[] {
   const dirs = getSessionDirs();
   const groups = new Map<string, ProjectGroup>();
+  const seen = new Set<string>();
 
   for (const dir of dirs) {
     const dirName = dir.split("/").pop() || dir;
@@ -1587,7 +1619,8 @@ export function listSessions(): ProjectGroup[] {
 
     for (const file of files) {
       const filePath = join(dir, file);
-      const session = parseSessionFileInfo(filePath);
+      seen.add(filePath);
+      const session = parseSessionFileInfoCached(filePath);
       if (session) {
         const decoded = decodeProjectName(dirName);
         const projectPath = session.projectPath || decoded.projectPath;
@@ -1611,6 +1644,12 @@ export function listSessions(): ProjectGroup[] {
   // every other group jump around. The current workspace stays first, then
   // folders use a deterministic locale-aware name order.
   const currentProjectPath = resolve(process.cwd());
+  // Drop cache entries for files that no longer exist (trashed/deleted).
+  if (sessionInfoCache.size > seen.size) {
+    for (const key of sessionInfoCache.keys()) {
+      if (!seen.has(key)) sessionInfoCache.delete(key);
+    }
+  }
   return Array.from(groups.values())
     .filter((g) => g.sessions.length > 0)
     .sort((a, b) => {
@@ -1900,146 +1939,6 @@ function readSessionMessages(filePath: string, limit?: number, truncateAt?: numb
 /** Read the first user/assistant messages of a session file (text parts only). */
 export function readSessionPreview(filePath: string, limit = 20): { messages: SessionPreviewMessage[]; total: number } | null {
   return readSessionMessages(filePath, limit, 400);
-}
-
-/** Load all displayable user and assistant turns for a known local session id. */
-export function readSessionHistory(sessionId: string): { messages: SessionPreviewMessage[]; total: number } | null {
-  if (!/^[A-Za-z0-9_-]{1,100}$/.test(sessionId)) return null;
-  for (const group of listSessions()) {
-    const session = group.sessions.find((item) => item.id === sessionId);
-    if (session) return readSessionMessages(session.filePath);
-  }
-  return null;
-}
-
-/** Aggregate token usage for one session file, plus the model actually used. */
-export interface SessionUsageSummary {
-  sessionId: string;
-  providerId?: string;
-  modelId?: string;
-  requests: number;
-  totalInput: number;
-  totalOutput: number;
-  totalCacheRead: number;
-  totalCacheWrite: number;
-  totalTokens: number;
-  totalCost: number;
-  /** Prompt size of the most recent assistant turn — the live context usage. */
-  lastContextTokens: number;
-  contextWindow?: number;
-  cacheHitRate: number;
-}
-
-/** Context window for a provider/model, from models.json first, then pi's builtin catalog. */
-function lookupContextWindow(providerId?: string, modelId?: string): number | undefined {
-  if (!providerId || !modelId) return undefined;
-  const custom = readModels()?.providers?.[providerId]?.models;
-  if (Array.isArray(custom)) {
-    const hit = custom.find((m: any) => m?.id === modelId);
-    if (hit?.contextWindow) return hit.contextWindow;
-  }
-  const builtin = readBuiltinCatalog()?.find((p) => p.id === providerId);
-  return builtin?.models.find((m) => m.id === modelId)?.contextWindow;
-}
-
-export function readSessionUsage(sessionId: string): SessionUsageSummary | null {
-  if (!/^[A-Za-z0-9_-]{1,100}$/.test(sessionId)) return null;
-  const session = listSessions().flatMap((group) => group.sessions).find((item) => item.id === sessionId);
-  if (!session) return null;
-  const resolved = resolve(session.filePath);
-  if (!resolved.startsWith(SESSIONS_DIR + sep) || !resolved.endsWith(".jsonl") || !existsSync(resolved)) return null;
-
-  const summary: SessionUsageSummary = {
-    sessionId,
-    requests: 0,
-    totalInput: 0,
-    totalOutput: 0,
-    totalCacheRead: 0,
-    totalCacheWrite: 0,
-    totalTokens: 0,
-    totalCost: 0,
-    lastContextTokens: 0,
-    cacheHitRate: 0,
-  };
-
-  try {
-    for (const line of readFileSync(resolved, "utf-8").split("\n")) {
-      if (!line.trim()) continue;
-      let obj: any;
-      try { obj = JSON.parse(line); } catch { continue; }
-      const msg = obj?.message;
-      if (obj?.type !== "message" || msg?.role !== "assistant") continue;
-      const usage = msg.usage;
-      // Streaming rows repeat with zeroed usage; only completed turns carry totals.
-      if (!usage || typeof usage.input !== "number" || usage.input <= 0) continue;
-      summary.requests++;
-      summary.totalInput += usage.input ?? 0;
-      summary.totalOutput += usage.output ?? 0;
-      summary.totalCacheRead += usage.cacheRead ?? 0;
-      summary.totalCacheWrite += usage.cacheWrite ?? 0;
-      summary.totalCost += usage.cost?.total ?? 0;
-      summary.lastContextTokens = (usage.input ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
-      if (typeof msg.provider === "string") summary.providerId = msg.provider;
-      if (typeof msg.model === "string") summary.modelId = msg.model;
-    }
-  } catch {
-    return null;
-  }
-
-  summary.totalTokens = summary.totalInput + summary.totalOutput + summary.totalCacheRead + summary.totalCacheWrite;
-  const readable = summary.totalInput + summary.totalCacheRead;
-  summary.cacheHitRate = readable > 0 ? (summary.totalCacheRead / readable) * 100 : 0;
-  summary.contextWindow = lookupContextWindow(summary.providerId, summary.modelId);
-  return summary;
-}
-
-/** Replace the visible text of one user turn while preserving its message metadata and attachments. */
-export function updateSessionUserMessage(sessionId: string, messageId: string, text: string): boolean {
-  if (!/^[A-Za-z0-9_-]{1,100}$/.test(sessionId) || !/^[A-Za-z0-9_-]{1,100}$/.test(messageId)) return false;
-  const nextText = text.trim();
-  if (!nextText || nextText.length > 200_000) return false;
-
-  const session = listSessions().flatMap((group) => group.sessions).find((item) => item.id === sessionId);
-  if (!session) return false;
-  const filePath = resolve(session.filePath);
-  if (!filePath.startsWith(SESSIONS_DIR + sep) || !filePath.endsWith(".jsonl") || !existsSync(filePath)) return false;
-
-  try {
-    const lines = readFileSync(filePath, "utf-8").split("\n");
-    const index = lines.findIndex((line) => {
-      try {
-        const entry = JSON.parse(line);
-        return entry.type === "message" && entry.id === messageId && entry.message?.role === "user";
-      } catch {
-        return false;
-      }
-    });
-    if (index < 0) return false;
-
-    const entry = JSON.parse(lines[index]!);
-    const content = entry.message.content;
-    if (typeof content === "string") {
-      entry.message.content = nextText;
-    } else if (Array.isArray(content)) {
-      let replaced = false;
-      entry.message.content = content.map((part: any) => {
-        if (!replaced && part?.type === "text") {
-          replaced = true;
-          return { ...part, text: nextText };
-        }
-        return part;
-      });
-      if (!replaced) entry.message.content.push({ type: "text", text: nextText });
-    } else {
-      entry.message.content = nextText;
-    }
-
-    lines[index] = JSON.stringify(entry);
-    writeFileSync(filePath, lines.join("\n"), "utf-8");
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 // ─── Memory Entry Deletion ───────────────────────────
@@ -2426,270 +2325,6 @@ function getPiVersion(): string | null {
   return resolvePiBinary()?.version ?? null;
 }
 
-
-// ─── Web Chat: run local pi via the browser ───────────────────
-// The dashboard talks to pi through its own dev server. These functions
-// spawn the local `pi` CLI in JSON streaming mode, relay structured NDJSON
-// events to the browser as SSE, and keep an in-process registry of active
-// runs so the UI can stop an in-flight turn safely.
-
-export interface WebChatStatus {
-  kind: "starting" | "thinking" | "tool" | "responding";
-  toolName?: string;
-}
-
-/** One visible step of pi's work, streamed to the UI as it happens. */
-export interface WebChatStep {
-  kind: "thinking" | "tool" | "tool_result";
-  text?: string;
-  toolName?: string;
-  args?: string;
-  isError?: boolean;
-}
-
-export interface WebChatResult {
-  sessionId: string;
-  text: string;
-  error?: string;
-}
-
-const activeWebChats = new Map<string, { kill: (signal?: NodeJS.Signals) => boolean; stopped: boolean }>();
-
-/** SIGTERM an in-flight pi run for `sessionId`; false when no run is active. */
-export function stopWebChat(sessionId: string): boolean {
-  const active = activeWebChats.get(sessionId);
-  if (!active) return false;
-  active.stopped = true;
-  active.kill("SIGTERM");
-  return true;
-}
-
-/** Session ids with a pi child process currently running. */
-export function listActiveWebChats(): string[] {
-  return [...activeWebChats.keys()];
-}
-
-/** Open the platform folder picker for an explicit user-initiated chat workspace choice. */
-export function chooseChatDirectory(): Promise<string | null> {
-  if (platform() !== "darwin") return Promise.resolve(null);
-  return new Promise((resolvePromise) => {
-    let stdout = "";
-    const child = spawn(
-      "osascript",
-      ["-e", 'POSIX path of (choose folder with prompt "选择 Pi 工作目录")'],
-      { stdio: ["ignore", "pipe", "ignore"] },
-    );
-    child.stdout?.on("data", (chunk) => {
-      stdout += String(chunk);
-    });
-    child.on("error", () => resolvePromise(null));
-    child.on("close", (code) =>
-      resolvePromise(code === 0 ? stdout.trim() || null : null),
-    );
-  });
-}
-
-/** Execute one non-interactive local pi turn, preserving its project session. */
-export async function runWebChat(
-  prompt: string,
-  requestedSessionId?: string,
-  onChunk?: (chunk: string) => void,
-  requestedCwd?: string,
-  requestedModel?: string,
-  requestedThinking?: string,
-  onStatus?: (status: WebChatStatus) => void,
-  onStep?: (step: WebChatStep) => void,
-): Promise<WebChatResult> {
-  const pi = resolvePiBinary();
-  const sessionId =
-    requestedSessionId && /^[A-Za-z0-9_-]{1,100}$/.test(requestedSessionId)
-      ? requestedSessionId
-      : `web-${randomUUID()}`;
-  if (!pi) return { sessionId, text: "", error: "pi executable not found" };
-  if (activeWebChats.has(sessionId))
-    return { sessionId, text: "", error: "this session is already running" };
-  // A session belongs to the directory where pi originally created it. A
-  // stale browser project selection must not silently fork its history.
-  const existingProject = listSessions().find((group) =>
-    group.sessions.some((session) => session.id === sessionId),
-  )?.projectPath;
-  const selectedCwd = existingProject ?? (requestedCwd ? resolve(requestedCwd) : resolve(process.cwd()));
-  try {
-    if (!statSync(selectedCwd).isDirectory())
-      return { sessionId, text: "", error: "invalid project directory" };
-  } catch {
-    return { sessionId, text: "", error: "invalid project directory" };
-  }
-  return new Promise((resolvePromise) => {
-    let stdout = "";
-    let stderr = "";
-    let settled = false;
-    const model =
-      typeof requestedModel === "string" &&
-      /^[A-Za-z0-9._/-]+(?::(?:off|minimal|low|medium|high|xhigh|max))?$/.test(
-        requestedModel,
-      )
-        ? requestedModel
-        : "";
-    // JSON mode streams structured NDJSON events, which is what lets the UI
-    // distinguish "thinking" from tool work instead of only seeing final text.
-    const args = ["--mode", "json", "--print", "--session-id", sessionId];
-    if (model) args.push("--model", model);
-    if (
-      ["off", "minimal", "low", "medium", "high", "xhigh", "max"].includes(
-        requestedThinking ?? "",
-      )
-    )
-      args.push("--thinking", requestedThinking!);
-    args.push(prompt);
-    const child = spawn(pi.bin, args, {
-      cwd: selectedCwd,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    const active = { kill: child.kill.bind(child), stopped: false };
-    activeWebChats.set(sessionId, active);
-    const finish = (error?: string) => {
-      if (settled) return;
-      settled = true;
-      activeWebChats.delete(sessionId);
-      resolvePromise({ sessionId, text: stdout.trim(), error });
-    };
-    const timeout = setTimeout(
-      () => {
-        child.kill("SIGKILL");
-        finish("pi response timed out");
-      },
-      600000,
-    );
-
-    onStatus?.({ kind: "starting" });
-    let pending = "";
-    // Accumulate streamed thinking / tool-argument text so each step can be
-    // emitted once, complete, instead of as hundreds of tiny deltas.
-    let thinkingBuffer = "";
-    const toolArgs = new Map<string, { toolName?: string; args: string }>();
-    const handleEvent = (line: string) => {
-      let event: any;
-      try {
-        event = JSON.parse(line);
-      } catch {
-        return; // non-JSON warning lines (e.g. "creating a new session")
-      }
-      if (event.type === "tool_execution_start") {
-        onStatus?.({
-          kind: "tool",
-          toolName:
-            typeof event.toolName === "string"
-              ? event.toolName
-              : undefined,
-        });
-        return;
-      }
-      if (event.type === "tool_execution_end") {
-        const result = event.result?.content;
-        const text = Array.isArray(result)
-          ? result
-              .filter((part: any) => part?.type === "text" && part.text)
-              .map((part: any) => part.text)
-              .join("\n")
-          : "";
-        onStep?.({
-          kind: "tool_result",
-          toolName:
-            typeof event.toolName === "string"
-              ? event.toolName
-              : undefined,
-          text: text.length > 4000 ? `${text.slice(0, 4000)}…` : text,
-          isError: !!event.isError,
-        });
-        return;
-      }
-      if (event.type !== "message_update") return;
-      const inner = event.assistantMessageEvent;
-      if (!inner || typeof inner.type !== "string") return;
-      if (inner.type === "thinking_start") {
-        thinkingBuffer = "";
-        onStatus?.({ kind: "thinking" });
-      } else if (inner.type === "thinking_delta" && typeof inner.delta === "string") {
-        thinkingBuffer += inner.delta;
-      } else if (inner.type === "thinking_end") {
-        const text =
-          typeof inner.content === "string" && inner.content
-            ? inner.content
-            : thinkingBuffer;
-        thinkingBuffer = "";
-        if (text.trim())
-          onStep?.({
-            kind: "thinking",
-            text:
-              text.length > 8000 ? `${text.slice(0, 8000)}…` : text,
-          });
-      } else if (inner.type === "toolcall_start") {
-        const toolName =
-          typeof inner.toolName === "string" ? inner.toolName : undefined;
-        if (typeof inner.id === "string")
-          toolArgs.set(inner.id, { toolName, args: "" });
-        onStatus?.({ kind: "tool", toolName });
-      } else if (
-        inner.type === "toolcall_delta" &&
-        typeof inner.delta === "string"
-      ) {
-        const entry = [...toolArgs.values()].at(-1);
-        if (entry) entry.args += inner.delta;
-      } else if (inner.type === "toolcall_end") {
-        const call = inner.toolCall ?? {};
-        const id = typeof call.id === "string" ? call.id : undefined;
-        const entry = id
-          ? toolArgs.get(id)
-          : [...toolArgs.values()].at(-1);
-        const args =
-          call.args !== undefined
-            ? JSON.stringify(call.args)
-            : entry?.args ?? "";
-        if (id) toolArgs.delete(id);
-        onStep?.({
-          kind: "tool",
-          toolName:
-            typeof call.name === "string" ? call.name : entry?.toolName,
-          args:
-            args.length > 2000 ? `${args.slice(0, 2000)}…` : args,
-        });
-      } else if (inner.type === "text_start") onStatus?.({ kind: "responding" });
-      else if (
-        inner.type === "text_delta" &&
-        typeof inner.delta === "string"
-      ) {
-        stdout += inner.delta;
-        onChunk?.(inner.delta);
-      }
-    };
-
-    child.stdout?.on("data", (chunk) => {
-      pending += String(chunk);
-      const lines = pending.split("\n");
-      pending = lines.pop() ?? "";
-      for (const line of lines) if (line.trim()) handleEvent(line);
-    });
-    child.stderr?.on("data", (chunk) => {
-      stderr += String(chunk);
-    });
-    child.on("error", (error) => {
-      clearTimeout(timeout);
-      finish(error.message);
-    });
-    child.on("close", (code) => {
-      clearTimeout(timeout);
-      if (pending.trim()) handleEvent(pending);
-      finish(
-        code === 0
-          ? undefined
-          : active.stopped
-            ? "generation stopped"
-            : stderr.trim() || `pi exited with ${code}`,
-      );
-    });
-  });
-}
 
 function readJsonFile<T>(filePath: string): T | null {
   try {
