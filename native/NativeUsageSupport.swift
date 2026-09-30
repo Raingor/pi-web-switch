@@ -46,6 +46,8 @@ struct TodayProviderTotals {
     var requests: Int = 0
 }
 
+/// One quota window. Used for the Codex 5h/7d windows and for the OpenCode Go
+/// plan windows (rolling / weekly / monthly).
 struct CodexUsageWindow {
     var windowSeconds: Int
     var usedPercent: Double
@@ -60,6 +62,26 @@ struct CodexUsageStatus {
     var primary: CodexUsageWindow?
     var secondary: CodexUsageWindow?
     var error: String?
+    var notice: String? = nil
+}
+
+/// Official OpenCode Go plan usage. The upstream endpoint only reports the
+/// three windows as used percentages plus reset timestamps, so no dollar
+/// amounts are derived here.
+struct OpenCodeGoUsageStatus {
+    var configured: Bool
+    var rolling: CodexUsageWindow?
+    var weekly: CodexUsageWindow?
+    var monthly: CodexUsageWindow?
+    var error: String?
+}
+
+func hasOpenAILogin(_ auth: [String: Any]) -> Bool {
+    guard let openai = auth["openai"] as? [String: Any],
+          (openai["type"] as? String) == "oauth",
+          let access = openai["access"] as? String, !access.isEmpty,
+          let expires = openai["expires"] as? NSNumber else { return false }
+    return expires.doubleValue > Date().timeIntervalSince1970 * 1_000
 }
 
 struct UsageSummary {
@@ -70,6 +92,7 @@ struct UsageSummary {
     var providers: [ProviderTotals] = []
     var todayProviders: [TodayProviderTotals] = []
     var codex: CodexUsageStatus?
+    var openCodeGo: OpenCodeGoUsageStatus?
     var updatedAt = Date()
     var error: String?
 }
@@ -77,6 +100,76 @@ struct UsageSummary {
 enum UsageScope {
     case pi
     case chatgpt
+}
+
+/// Reads the `opencode-go` API key from `~/.pi/agent/auth.json` and queries
+/// `https://opencode.ai/zen/go/v1/usage` for the official plan windows.
+/// The key is only sent to that canonical host and is never logged.
+func readOpenCodeGoPlanUsage() -> OpenCodeGoUsageStatus {
+    let authURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".pi/agent/auth.json")
+    guard let data = try? Data(contentsOf: authURL),
+          let auth = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        return OpenCodeGoUsageStatus(configured: false, error: nil)
+    }
+    guard let entry = auth["opencode-go"] as? [String: Any],
+          (entry["type"] as? String) == "api_key",
+          let key = entry["key"] as? String, !key.isEmpty else {
+        return OpenCodeGoUsageStatus(configured: false, error: nil)
+    }
+
+    var request = URLRequest(url: URL(string: "https://opencode.ai/zen/go/v1/usage")!)
+    request.timeoutInterval = 15
+    request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+    request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+    let semaphore = DispatchSemaphore(value: 0)
+    var result = OpenCodeGoUsageStatus(configured: true, error: "无法查询 OpenCode Go 使用量")
+    URLSession.shared.dataTask(with: request) { data, response, _ in
+        defer { semaphore.signal() }
+        guard let http = response as? HTTPURLResponse else { return }
+        guard (200..<300).contains(http.statusCode) else {
+            result.error = "OpenCode 返回 \(http.statusCode)"
+            return
+        }
+        guard let data,
+              let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let usage = payload["usage"] as? [String: Any] else {
+            result.error = "OpenCode 返回了无法解析的额度数据"
+            return
+        }
+        result = OpenCodeGoUsageStatus(
+            configured: true,
+            rolling: planWindow(usage["rolling"]),
+            weekly: planWindow(usage["weekly"]),
+            monthly: planWindow(usage["monthly"]),
+            error: nil
+        )
+    }.resume()
+    _ = semaphore.wait(timeout: .now() + 16)
+    return result
+}
+
+/// Parses one OpenCode Go window: `{ status, percent (used), resetsAt }`.
+/// The window length is only informational here; `percent` is authoritative
+/// because the upstream service does not report per-window dollar limits.
+func planWindow(_ raw: Any?) -> CodexUsageWindow? {
+    guard let value = raw as? [String: Any] else { return nil }
+    let used = min(100, max(0, (value["percent"] as? NSNumber)?.doubleValue ?? 0))
+    let resetAt = (value["resetsAt"] as? String).flatMap(parseISO8601Timestamp)
+    return CodexUsageWindow(
+        windowSeconds: 0,
+        usedPercent: used,
+        remainingPercent: max(0, 100 - used),
+        resetAfterSeconds: resetAt.map { max(0, Int($0.timeIntervalSinceNow)) },
+        resetAt: resetAt
+    )
+}
+
+func parseISO8601Timestamp(_ value: String) -> Date? {
+    let fractional = ISO8601DateFormatter()
+    fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    if let date = fractional.date(from: value) { return date }
+    return ISO8601DateFormatter().date(from: value)
 }
 
 func number(_ dictionary: [String: Any], _ key: String) -> Double {
@@ -108,8 +201,12 @@ func formatCacheHitRate(_ totals: UsageTotals) -> String {
 
 func formatDuration(_ seconds: Int?) -> String? {
     guard let seconds, seconds >= 0 else { return nil }
-    let hours = seconds / 3600
-    let minutes = (seconds % 3600) / 60
+    let days = seconds / 86_400
+    if days > 0 {
+        return "\(days)天\((seconds % 86_400) / 3_600)小时"
+    }
+    let hours = seconds / 3_600
+    let minutes = (seconds % 3_600) / 60
     return hours > 0 ? "\(hours)小时\(minutes)分" : "\(minutes)分"
 }
 

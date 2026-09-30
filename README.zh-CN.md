@@ -90,6 +90,7 @@
 ### 🖥️ Native macOS 菜单栏
 - **两个轻量原生应用** — 分别统计 Pi 和 ChatGPT/Codex，用 Swift/AppKit 实现，不依赖 Electron、WebView 或常驻 Web 服务
 - **Pi 用量应用** — 显示 Pi 今日/近 7 日用量、成本、缓存命中率和提供商统计
+- **OpenCode Go 额度** — 用本地 `opencode-go` API Key 从 `https://opencode.ai/zen/go/v1/usage` 查询官方 5 小时 / 7 天 / 1 个月计划窗口
 - **ChatGPT 用量应用** — 显示本地 ChatGPT/Codex 会话用量和 Codex 官方额度
 - **后台刷新** — 在后台读取本地会话并刷新额度，不阻塞菜单栏交互
 - **独立显示开关** — 设置页通过 `~/.pi/agent/settings.json` 分别控制两个菜单栏应用

@@ -80,6 +80,7 @@
 ### 🖥️ Native macOS メニューバー
 - **2 つの軽量アプリ** — Pi 用と ChatGPT/Codex 用を分離した Swift/AppKit 実装。Electron、WebView、常駐 Web サーバーは不要
 - **Pi 使用量アプリ** — Pi の今日/7 日間の使用量、コスト、キャッシュ率、プロバイダー統計を表示
+- **OpenCode Go 利用枠** — ローカルの `opencode-go` API キーで `https://opencode.ai/zen/go/v1/usage` から公式の 5 時間 / 7 日間 / 1 か月のプラン枠を取得
 - **ChatGPT 使用量アプリ** — ローカル ChatGPT/Codex セッションの使用量と Codex 公式利用枠を表示
 - **バックグラウンド更新** — メニューバー操作をブロックせずにローカルセッションと利用枠を更新
 - **個別表示切替** — 設定ページから `~/.pi/agent/settings.json` を通じて各アプリを個別に制御

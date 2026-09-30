@@ -2,9 +2,9 @@
 
 ## Requirement
 
-Remove the local-pi Web Chat module from pi-web-switch cleanly, leaving all
-unrelated features (Sessions, trash/restore, usage, providers, Jev, generate)
-fully intact.
+Remove the local-pi Web Chat and Jev structured-evaluation modules cleanly,
+while leaving shared Sessions, trash/restore, usage, and Agnes generation
+features intact.
 
 ## Research Findings
 
@@ -27,6 +27,11 @@ fully intact.
 - False-positive matches that must be kept: `chatgpt-usage-range`,
   `codex-usage-status`, OpenAI `chat/completions` provider label, `relay/chat`
   test fixture, kimi pricing comment, and `agnes-chat`/`chatAgnes`.
+- Jev was self-contained: `JevPage` only called `typesafe-config` and
+  `typesafe-evaluate`; the corresponding `TypeSafe*` functions/config were only
+  consumed by those endpoints. Agnes APIs are separately used by GeneratePage
+  and were preserved. `~/.pi/agent/typesafe-config.json` exists locally; it is
+  preserved pending explicit confirmation because it may contain a credential.
 
 ## Technical Decisions
 
@@ -39,3 +44,5 @@ fully intact.
 | Keep the session metadata cache | General `listSessions` optimization, not Chat-specific. |
 | Strip `.codex-*` CSS via PostCSS AST | Rules are compressed/mixed on shared lines; AST parsing removes Chat selectors safely and prunes emptied `@media`. |
 | Renumber sidebar nav codes after removing Chat | Keep the `01…09` sequence contiguous. |
+| Remove TypeSafe APIs/functions with Jev | No other source callers; keep Agnes APIs used by GeneratePage. |
+| Preserve the local TypeSafe config file | Avoid deleting a user credential/data file without confirmation. |

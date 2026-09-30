@@ -91,6 +91,7 @@
 ### 🖥️ Native macOS Menu Bar
 - **Two Lightweight Apps** — Separate Swift/AppKit menu bar apps for Pi usage and ChatGPT/Codex usage, with no Electron, WebView, or resident web server
 - **Pi Usage App** — Pi today/7-day usage, cost, cache rate, and provider totals
+- **OpenCode Go Quota** — Official 5-hour / 7-day / monthly plan windows queried from `https://opencode.ai/zen/go/v1/usage` with the local `opencode-go` API key
 - **ChatGPT Usage App** — Local ChatGPT/Codex session usage and official Codex quota
 - **Background Refresh** — Reads local session files and refreshes quota data without blocking the menu bar
 - **Separate Visibility Controls** — The Settings page controls each menu bar app through `~/.pi/agent/settings.json`

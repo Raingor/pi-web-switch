@@ -2,14 +2,14 @@
 
 ## Goal
 
-Remove the local-pi Web Chat feature from pi-web-switch cleanly: delete the
-Chat UI, its route and nav entry, all Chat-only server endpoints and functions,
-the Chat-only CSS, and the four-language Chat labels — without touching Sessions,
-trash/restore, usage, Jev, or any other unrelated feature.
+Remove the local-pi Web Chat and Jev structured-evaluation modules cleanly:
+delete their UI, routes, nav entries, dedicated endpoints/functions/styles, and
+translations — while preserving shared Sessions, trash/restore, usage, and Agnes
+generation features.
 
 ## Current Phase
 
-Phase 9 — Remove Chat module (complete)
+Phase 10 — Remove Jev structured-evaluation module (in progress)
 
 ## Scope
 
@@ -33,7 +33,15 @@ Phase 9 — Remove Chat module (complete)
 - `trashSessionFile`, `/api/pi/trash`, `/api/pi/session/trash`, `auto-trash`, `restoreFromTrash` (Sessions trash tab).
 - `readSessionPreview` + `GET /api/pi/session-preview` (Sessions preview).
 - The mtime+size session metadata cache in `pi-reader.ts` (general `listSessions` optimization).
-- `agnes-chat`/`chatAgnes`, `chatgpt-usage-range`, `codex-usage-status`, OpenAI `chat/completions` label — unrelated to the Web Chat module.
+- `agnes-chat`/`chatAgnes`, `chatgpt-usage-range`, `codex-usage-status`, OpenAI `chat/completions` label — unrelated features.
+
+### Phase 10: Remove Jev structured-evaluation module
+- [x] Remove the Jev page, `/jev` route, sidebar item, and four-language `jev.*` labels.
+- [x] Remove TypeSafe config/evaluation API endpoints and server functions.
+- [x] Preserve Agnes config/chat/generation endpoints used by GeneratePage.
+- [x] Verify no Jev/TypeSafe source references remain; run tests, typecheck, build, and diff check.
+- [ ] Decide separately whether to remove the existing `~/.pi/agent/typesafe-config.json` credential file; it is preserved for now to avoid deleting user data.
+- **Status:** implementation complete; local credential cleanup awaits user decision.
 
 ## Verification
 

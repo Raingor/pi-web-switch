@@ -46,3 +46,16 @@ optimizations: session metadata cache, task-sidebar component split + `MessageTe
 memoization, remove-dialog accessibility, and route-level lazy loading. The
 session cache and route lazy loading are general improvements and remain; the
 Chat-specific parts were removed in Phase 9 above.
+
+### Phase 10: Remove Jev structured-evaluation module
+
+- **Status:** implementation complete; local credential file preserved pending confirmation.
+- Deleted `src/components/jev/JevPage.tsx` and removed the `/jev` lazy route,
+  sidebar entry, and all `nav.jev`/`jev.*` translations in en, zh-CN, zh-TW, ja.
+- Removed `/api/pi/typesafe-config`, `/api/pi/typesafe-evaluate`, and the
+  `TypeSafeConfig`, `TypeSafeEvaluationInput`, `readTypeSafeConfig`,
+  `writeTypeSafeConfig`, `evaluateTypeSafe`, and related constants/helpers.
+- Preserved Agnes config/chat/generation APIs because GeneratePage uses them.
+- `~/.pi/agent/typesafe-config.json` exists; left untouched because it may hold
+  a user API credential. Ask before deleting it.
+- Verification: no TypeSafe/Jev source references remain; `tsc --noEmit` passes.

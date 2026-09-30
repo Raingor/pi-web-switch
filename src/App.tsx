@@ -10,7 +10,6 @@ const SubagentsPage = lazy(() => import("@/components/subagents/SubagentsPage").
 const SettingsPage = lazy(() => import("@/components/settings/SettingsPage").then((m) => ({ default: m.SettingsPage })));
 const ModelSpeedTestPage = lazy(() => import("@/components/speedtest/ModelSpeedTestPage").then((m) => ({ default: m.ModelSpeedTestPage })));
 const GeneratePage = lazy(() => import("@/components/generate/GeneratePage").then((m) => ({ default: m.GeneratePage })));
-const JevPage = lazy(() => import("@/components/jev/JevPage").then((m) => ({ default: m.JevPage })));
 
 function PageFallback() {
   return (
@@ -38,7 +37,6 @@ export default function App() {
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/speed-test" element={<ModelSpeedTestPage />} />
           <Route path="/generate" element={<GeneratePage />} />
-          <Route path="/jev" element={<JevPage />} />
         </Route>
         </Routes>
       </Suspense>

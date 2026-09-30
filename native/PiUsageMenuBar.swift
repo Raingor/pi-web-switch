@@ -6,9 +6,40 @@ final class PiUsagePanel: NSView {
 
     override var isFlipped: Bool { true }
 
+    private static func quotaSectionY(for summary: UsageSummary) -> CGFloat {
+        let providerRows = max(1, min(summary.providers.count, 5))
+        let todayRows = max(1, summary.todayProviders.count)
+        return 240 + 42 + CGFloat(providerRows * 26) + 20 + 42 + CGFloat(todayRows * 24) + 20
+    }
+
+    private static func codexSectionHeight(for summary: UsageSummary) -> CGFloat {
+        let hasRows = summary.codex?.loggedIn == true && summary.codex?.error == nil && summary.codex?.notice == nil
+        return hasRows ? 149 : 69
+    }
+
+    private static func openCodeGoSectionY(for summary: UsageSummary) -> CGFloat {
+        quotaSectionY(for: summary) + codexSectionHeight(for: summary)
+    }
+
+    private static func openCodeGoSectionHeight(for summary: UsageSummary) -> CGFloat {
+        guard let status = summary.openCodeGo, status.configured, status.error == nil,
+              status.rolling != nil || status.weekly != nil || status.monthly != nil else {
+            return 69
+        }
+        // Header + three quota rows (5 小时 / 7 天 / 1 个月), 56pt apart.
+        return 41 + 56 * 2 + 59
+    }
+
+    private static func openCodeGoHasRows(_ status: OpenCodeGoUsageStatus?) -> Bool {
+        guard let status, status.configured, status.error == nil else { return false }
+        return status.rolling != nil || status.weekly != nil || status.monthly != nil
+    }
+
     init(summary: UsageSummary) {
         self.summary = summary
-        let height: CGFloat = summary.todayProviders.isEmpty ? 610 : 820
+        let height: CGFloat = summary.error == nil
+            ? Self.openCodeGoSectionY(for: summary) + Self.openCodeGoSectionHeight(for: summary) + 12
+            : 100
         super.init(frame: NSRect(x: 0, y: 0, width: 400, height: height))
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
@@ -122,11 +153,12 @@ final class PiUsagePanel: NSView {
             text("暂无今日使用记录", 20, todayProviderStartY, 360, color: .secondaryLabelColor)
         }
 
-        let todayProviderRowCount = max(1, summary.todayProviders.count)
-        let quotaSectionY = todayProviderStartY + CGFloat(todayProviderRowCount * 24) + 20
+        let quotaSectionY = Self.quotaSectionY(for: summary)
         line(quotaSectionY)
         text("ChatGPT / Codex 额度", 20, quotaSectionY + 15, 230, size: 11, bold: true)
-        if let status = summary.codex, status.loggedIn, status.error == nil {
+        if let notice = summary.codex?.notice {
+            text(notice, 20, quotaSectionY + 50, 360, color: .secondaryLabelColor)
+        } else if let status = summary.codex, status.loggedIn, status.error == nil {
             quota("5 小时窗口", window: status.primary, y: quotaSectionY + 41)
             quota("7 天窗口", window: status.secondary, y: quotaSectionY + 100)
         } else if let status = summary.codex, !status.loggedIn {
@@ -135,6 +167,26 @@ final class PiUsagePanel: NSView {
             text("额度查询失败：" + (status.error ?? "错误"), 20, quotaSectionY + 50, 360, color: .systemRed)
         } else {
             text("正在查询 ChatGPT / Codex 官方额度…", 20, quotaSectionY + 50, 360, color: .secondaryLabelColor)
+        }
+
+        let openCodeGoSectionY = Self.openCodeGoSectionY(for: summary)
+        line(openCodeGoSectionY)
+        text("OpenCode Go 计划额度", 20, openCodeGoSectionY + 15, 230, size: 11, bold: true)
+        text("官方 5 小时 / 7 天 / 1 个月", 230, openCodeGoSectionY + 15, 150, size: 10, color: .secondaryLabelColor, right: true)
+        if let status = summary.openCodeGo {
+            if !status.configured {
+                text("未配置 opencode-go API Key", 20, openCodeGoSectionY + 50, 360, color: .secondaryLabelColor)
+            } else if let error = status.error {
+                text("额度查询失败：" + error, 20, openCodeGoSectionY + 50, 360, color: .systemRed)
+            } else if Self.openCodeGoHasRows(status) {
+                quota("5 小时", window: status.rolling, y: openCodeGoSectionY + 41)
+                quota("7 天", window: status.weekly, y: openCodeGoSectionY + 97)
+                quota("1 个月", window: status.monthly, y: openCodeGoSectionY + 153)
+            } else {
+                text("暂无额度信息", 20, openCodeGoSectionY + 50, 360, color: .secondaryLabelColor)
+            }
+        } else {
+            text("正在查询 OpenCode Go 官方额度…", 20, openCodeGoSectionY + 50, 360, color: .secondaryLabelColor)
         }
     }
 }
@@ -148,6 +200,7 @@ final class PiUsageAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
     private var nativeEnabled = false
     private var isRefreshing = false
     private var codexCache: (value: CodexUsageStatus, at: Date)?
+    private var openCodeGoCache: (value: OpenCodeGoUsageStatus, at: Date)?
     private let codexCacheTTL: TimeInterval = 30
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -214,6 +267,7 @@ final class PiUsageAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
             guard let self else { return }
             var summary = self.reader.read(scope: .pi)
             summary.codex = self.readCodexUsage(force: force)
+            summary.openCodeGo = self.readOpenCodeGoUsage(force: force)
             DispatchQueue.main.async {
                 self.cachedSummary = summary
                 self.isRefreshing = false
@@ -229,11 +283,17 @@ final class PiUsageAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
 
         let authURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".pi/agent/auth.json")
         guard let data = try? Data(contentsOf: authURL),
-              let auth = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let codex = auth["openai-codex"] as? [String: Any],
+              let auth = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return CodexUsageStatus(loggedIn: false, planType: nil, primary: nil, secondary: nil, error: nil)
+        }
+        guard let codex = auth["openai-codex"] as? [String: Any],
               (codex["type"] as? String) == "oauth",
               let access = codex["access"] as? String, !access.isEmpty,
               let accountID = codex["accountId"] as? String, !accountID.isEmpty else {
+            if hasOpenAILogin(auth) {
+                return CodexUsageStatus(loggedIn: true, planType: nil, primary: nil, secondary: nil,
+                                        error: nil, notice: "已登录 OpenAI；此登录无法读取 Codex 官方额度")
+            }
             return CodexUsageStatus(loggedIn: false, planType: nil, primary: nil, secondary: nil, error: nil)
         }
 
@@ -265,6 +325,15 @@ final class PiUsageAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
         }.resume()
         _ = semaphore.wait(timeout: .now() + 16)
         codexCache = (result, Date())
+        return result
+    }
+
+    private func readOpenCodeGoUsage(force: Bool) -> OpenCodeGoUsageStatus {
+        if !force, let openCodeGoCache, Date().timeIntervalSince(openCodeGoCache.at) < codexCacheTTL {
+            return openCodeGoCache.value
+        }
+        let result = readOpenCodeGoPlanUsage()
+        openCodeGoCache = (result, Date())
         return result
     }
 

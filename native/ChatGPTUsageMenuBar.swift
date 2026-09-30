@@ -95,7 +95,9 @@ final class ChatGPTUsagePanel: NSView {
         line(quotaLineY)
         text("CODEX / 官方额度", 20, quotaLineY + 15, 230, size: 11, bold: true)
         text(summary.codex?.planType?.uppercased() ?? "", 280, quotaLineY + 15, 100, size: 10, color: .secondaryLabelColor, right: true)
-        if let status = summary.codex, status.loggedIn, status.error == nil {
+        if let notice = summary.codex?.notice {
+            text(notice, 20, quotaLineY + 55, 360, color: .secondaryLabelColor)
+        } else if let status = summary.codex, status.loggedIn, status.error == nil {
             quota("5 小时", window: status.primary, y: quotaLineY + 41)
             quota("7 天", window: status.secondary, y: quotaLineY + 100)
         } else {
@@ -195,11 +197,17 @@ final class ChatGPTUsageAppDelegate: NSObject, NSApplicationDelegate, NSMenuDele
 
         let authURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".pi/agent/auth.json")
         guard let data = try? Data(contentsOf: authURL),
-              let auth = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let codex = auth["openai-codex"] as? [String: Any],
+              let auth = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return CodexUsageStatus(loggedIn: false, planType: nil, primary: nil, secondary: nil, error: nil)
+        }
+        guard let codex = auth["openai-codex"] as? [String: Any],
               (codex["type"] as? String) == "oauth",
               let access = codex["access"] as? String, !access.isEmpty,
               let accountID = codex["accountId"] as? String, !accountID.isEmpty else {
+            if hasOpenAILogin(auth) {
+                return CodexUsageStatus(loggedIn: true, planType: nil, primary: nil, secondary: nil,
+                                        error: nil, notice: "已登录 OpenAI；此登录无法读取 Codex 官方额度")
+            }
             return CodexUsageStatus(loggedIn: false, planType: nil, primary: nil, secondary: nil, error: nil)
         }
 
