@@ -28,7 +28,9 @@ struct UsageTotals {
     }
 }
 
-struct ProviderTotals {
+/// Today's per-model totals. Keyed by model id alone, so the same model served
+/// by several providers (e.g. the failover pool) counts as one entry.
+struct TodayModelTotals {
     var id: String
     var tokens: Int64 = 0
     var cost: Double = 0
@@ -89,7 +91,7 @@ struct UsageSummary {
     var sevenDays = UsageTotals()
     var chatgptToday = UsageTotals()
     var chatgptSevenDays = UsageTotals()
-    var providers: [ProviderTotals] = []
+    var todayModels: [TodayModelTotals] = []
     var todayProviders: [TodayProviderTotals] = []
     var codex: CodexUsageStatus?
     var openCodeGo: OpenCodeGoUsageStatus?
@@ -275,7 +277,7 @@ final class UsageReader {
         var sevenDays = UsageTotals()
         var chatgptToday = UsageTotals()
         var chatgptSevenDays = UsageTotals()
-        var providers: [String: ProviderTotals] = [:]
+        var todayModels: [String: TodayModelTotals] = [:]
         var todayProviders: [String: TodayProviderTotals] = [:]
 
         let directories = (try? fileManager.contentsOfDirectory(
@@ -297,7 +299,7 @@ final class UsageReader {
                     let modifiedAt = (try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? nil
                     guard modifiedAt == nil || modifiedAt! >= fileCutoff else { continue }
                     autoreleasepool {
-                        parse(file: file, todayKey: todayKey, sevenDaysKey: sevenDaysKey, today: &today, sevenDays: &sevenDays, providers: &providers, todayProviders: &todayProviders)
+                        parse(file: file, todayKey: todayKey, sevenDaysKey: sevenDaysKey, today: &today, sevenDays: &sevenDays, todayModels: &todayModels, todayProviders: &todayProviders)
                     }
                 }
             }
@@ -319,7 +321,9 @@ final class UsageReader {
             sevenDays: sevenDays,
             chatgptToday: chatgptToday,
             chatgptSevenDays: chatgptSevenDays,
-            providers: providers.values.sorted { $0.cost > $1.cost }.prefix(5).map { $0 },
+            todayModels: todayModels.values.sorted {
+                $0.requests != $1.requests ? $0.requests > $1.requests : $0.tokens > $1.tokens
+            }.map { $0 },
             todayProviders: todayProviders.values.sorted { $0.tokens > $1.tokens }.map { $0 },
             updatedAt: now
         )
@@ -331,12 +335,13 @@ final class UsageReader {
         sevenDaysKey: String,
         today: inout UsageTotals,
         sevenDays: inout UsageTotals,
-        providers: inout [String: ProviderTotals],
+        todayModels: inout [String: TodayModelTotals],
         todayProviders: inout [String: TodayProviderTotals]
     ) {
         guard let handle = try? FileHandle(forReadingFrom: file) else { return }
         defer { try? handle.close() }
         var currentProvider = "unknown"
+        var currentModel = "unknown"
         var pending = Data()
 
         func consume(_ data: Data) {
@@ -344,6 +349,7 @@ final class UsageReader {
                   let type = object["type"] as? String else { return }
             if type == "model_change" {
                 if let provider = object["provider"] as? String, !provider.isEmpty { currentProvider = provider }
+                if let model = object["modelId"] as? String, !model.isEmpty { currentModel = model }
                 return
             }
             guard type == "message",
@@ -370,12 +376,8 @@ final class UsageReader {
             let cacheWrite = integer(usage, "cacheWrite")
             let cost = (usage["cost"] as? [String: Any]).map { number($0, "total") } ?? 0
             let provider = (message["provider"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? currentProvider
+            let model = (message["model"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? currentModel
             sevenDays.add(input: input, output: output, cacheRead: cacheRead, cacheWrite: cacheWrite, cost: cost, requests: 1)
-            var providerTotal = providers[provider] ?? ProviderTotals(id: provider)
-            providerTotal.tokens += input + output + cacheRead + cacheWrite
-            providerTotal.cost += cost
-            providerTotal.requests += 1
-            providers[provider] = providerTotal
             if dateKey == todayKey {
                 today.add(input: input, output: output, cacheRead: cacheRead, cacheWrite: cacheWrite, cost: cost, requests: 1)
                 var todayProvider = todayProviders[provider] ?? TodayProviderTotals(id: provider)
@@ -387,6 +389,11 @@ final class UsageReader {
                 todayProvider.cost += cost
                 todayProvider.requests += 1
                 todayProviders[provider] = todayProvider
+                var todayModel = todayModels[model] ?? TodayModelTotals(id: model)
+                todayModel.tokens += input + output + cacheRead + cacheWrite
+                todayModel.cost += cost
+                todayModel.requests += 1
+                todayModels[model] = todayModel
             }
         }
 

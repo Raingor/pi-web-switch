@@ -6,10 +6,23 @@ final class PiUsagePanel: NSView {
 
     override var isFlipped: Bool { true }
 
+    private static let modelSectionY: CGFloat = 240
+    private static let modelRowLimit = 5
+
+    /// Top `modelRowLimit` models plus a "+N more" line when the day used more.
+    private static func modelRowCount(for summary: UsageSummary) -> Int {
+        let visible = min(summary.todayModels.count, modelRowLimit)
+        let overflow = summary.todayModels.count > modelRowLimit ? 1 : 0
+        return max(1, visible + overflow)
+    }
+
+    private static func todayProviderSectionY(for summary: UsageSummary) -> CGFloat {
+        modelSectionY + 42 + CGFloat(modelRowCount(for: summary) * 24) + 20
+    }
+
     private static func quotaSectionY(for summary: UsageSummary) -> CGFloat {
-        let providerRows = max(1, min(summary.providers.count, 5))
         let todayRows = max(1, summary.todayProviders.count)
-        return 240 + 42 + CGFloat(providerRows * 26) + 20 + 42 + CGFloat(todayRows * 24) + 20
+        return todayProviderSectionY(for: summary) + 42 + CGFloat(todayRows * 24) + 20
     }
 
     private static func codexSectionHeight(for summary: UsageSummary) -> CGFloat {
@@ -121,23 +134,26 @@ final class PiUsagePanel: NSView {
         period("今日", totals: summary.today, x: 20)
         period("近 7 日", totals: summary.sevenDays, x: 210)
 
-        let providerSectionY: CGFloat = 240
-        line(providerSectionY)
-        text("提供商", 20, providerSectionY + 15, 180, size: 11, bold: true)
-        text("近 7 日 · 按成本", 230, providerSectionY + 15, 150, size: 10, color: .secondaryLabelColor, right: true)
-        let rowStartY = providerSectionY + 42
-        for (i, provider) in summary.providers.prefix(5).enumerated() {
-            let y = rowStartY + CGFloat(i * 26)
-            text(provider.id, 20, y, 169, size: 11)
-            text(formatTokens(provider.tokens), 193, y, 83, size: 11, color: .secondaryLabelColor, right: true)
-            text(formatCost(provider.cost), 280, y, 100, size: 11, right: true)
+        let modelSectionY = Self.modelSectionY
+        line(modelSectionY)
+        text("模型调用排行", 20, modelSectionY + 15, 180, size: 11, bold: true)
+        text("今日 · 按调用次数", 210, modelSectionY + 15, 170, size: 10, color: .secondaryLabelColor, right: true)
+        let modelRowStartY = modelSectionY + 42
+        for (i, model) in summary.todayModels.prefix(Self.modelRowLimit).enumerated() {
+            let y = modelRowStartY + CGFloat(i * 24)
+            text("\(i + 1). \(model.id)", 20, y, 165, size: 11)
+            text("\(model.requests) 次", 190, y, 55, size: 11, right: true)
+            text(formatTokens(model.tokens), 250, y, 60, size: 11, color: .secondaryLabelColor, right: true)
+            text(formatCost(model.cost), 315, y, 65, size: 11, right: true)
         }
-        if summary.providers.isEmpty {
-            text("暂无使用记录", 20, rowStartY, 360, color: .secondaryLabelColor)
+        if summary.todayModels.isEmpty {
+            text("暂无今日调用记录", 20, modelRowStartY, 360, color: .secondaryLabelColor)
+        } else if summary.todayModels.count > Self.modelRowLimit {
+            let y = modelRowStartY + CGFloat(Self.modelRowLimit * 24)
+            text("还有 \(summary.todayModels.count - Self.modelRowLimit) 个模型未显示", 20, y, 360, size: 10, color: .secondaryLabelColor)
         }
 
-        let providerRowCount = max(1, min(summary.providers.count, 5))
-        let sectionY = providerSectionY + 42 + CGFloat(providerRowCount * 26) + 20
+        let sectionY = Self.todayProviderSectionY(for: summary)
         line(sectionY)
         text("今日提供商排名", 20, sectionY + 15, 180, size: 11, bold: true)
         text("按 token 量降序", 210, sectionY + 15, 170, size: 10, color: .secondaryLabelColor, right: true)
