@@ -3,12 +3,25 @@ import Foundation
 
 final class ChatGPTUsagePanel: NSView {
     private let summary: UsageSummary
+    private static let modelSectionY: CGFloat = 270
+    private static let modelRowLimit = 5
+
+    private static func displayedRows(for models: [TodayModelTotals]) -> Int {
+        guard !models.isEmpty else { return 1 }
+        return min(models.count, modelRowLimit) + (models.count > modelRowLimit ? 1 : 0)
+    }
+
+    private static func quotaSectionY(for summary: UsageSummary) -> CGFloat {
+        let rows = max(displayedRows(for: summary.chatgptTodayModels), displayedRows(for: summary.chatgptSevenDaysModels))
+        return modelSectionY + 42 + CGFloat(rows * 22) + 18
+    }
 
     override var isFlipped: Bool { true }
 
     init(summary: UsageSummary) {
         self.summary = summary
-        super.init(frame: NSRect(x: 0, y: 0, width: 400, height: 470))
+        let height = summary.error == nil ? Self.quotaSectionY(for: summary) + 152 : 100
+        super.init(frame: NSRect(x: 0, y: 0, width: 400, height: height))
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
         setAccessibilityLabel("ChatGPT 使用情况")
@@ -91,7 +104,38 @@ final class ChatGPTUsagePanel: NSView {
         period("今日", totals: summary.chatgptToday, x: 20, y: 92)
         period("近 7 日", totals: summary.chatgptSevenDays, x: 210, y: 92)
 
-        let quotaLineY: CGFloat = 270
+        let modelSectionY = Self.modelSectionY
+        line(modelSectionY)
+        text("模型 Token 排行", 20, modelSectionY + 14, 180, size: 11, bold: true)
+        text("今日 TOP 5", 20, modelSectionY + 34, 170, size: 10, color: .secondaryLabelColor)
+        text("近 7 日 TOP 5", 210, modelSectionY + 34, 170, size: 10, color: .secondaryLabelColor)
+
+        let modelRowStartY = modelSectionY + 55
+        for (i, model) in summary.chatgptTodayModels.prefix(Self.modelRowLimit).enumerated() {
+            let y = modelRowStartY + CGFloat(i * 22)
+            text("\(i + 1). \(model.id)", 20, y, 124, size: 10)
+            text(formatTokens(model.tokens), 145, y, 45, size: 10, color: .secondaryLabelColor, right: true)
+        }
+        if summary.chatgptTodayModels.isEmpty {
+            text("暂无调用记录", 20, modelRowStartY, 170, size: 10, color: .secondaryLabelColor)
+        } else if summary.chatgptTodayModels.count > Self.modelRowLimit {
+            text("还有 \(summary.chatgptTodayModels.count - Self.modelRowLimit) 个模型", 20,
+                 modelRowStartY + CGFloat(Self.modelRowLimit * 22), 170, size: 9, color: .secondaryLabelColor)
+        }
+
+        for (i, model) in summary.chatgptSevenDaysModels.prefix(Self.modelRowLimit).enumerated() {
+            let y = modelRowStartY + CGFloat(i * 22)
+            text("\(i + 1). \(model.id)", 210, y, 124, size: 10)
+            text(formatTokens(model.tokens), 335, y, 45, size: 10, color: .secondaryLabelColor, right: true)
+        }
+        if summary.chatgptSevenDaysModels.isEmpty {
+            text("暂无调用记录", 210, modelRowStartY, 170, size: 10, color: .secondaryLabelColor)
+        } else if summary.chatgptSevenDaysModels.count > Self.modelRowLimit {
+            text("还有 \(summary.chatgptSevenDaysModels.count - Self.modelRowLimit) 个模型", 210,
+                 modelRowStartY + CGFloat(Self.modelRowLimit * 22), 170, size: 9, color: .secondaryLabelColor)
+        }
+
+        let quotaLineY = Self.quotaSectionY(for: summary)
         line(quotaLineY)
         text("CODEX / 官方额度", 20, quotaLineY + 15, 230, size: 11, bold: true)
         text(summary.codex?.planType?.uppercased() ?? "", 280, quotaLineY + 15, 100, size: 10, color: .secondaryLabelColor, right: true)

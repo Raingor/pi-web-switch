@@ -92,6 +92,8 @@ struct UsageSummary {
     var chatgptToday = UsageTotals()
     var chatgptSevenDays = UsageTotals()
     var todayModels: [TodayModelTotals] = []
+    var chatgptTodayModels: [TodayModelTotals] = []
+    var chatgptSevenDaysModels: [TodayModelTotals] = []
     var todayProviders: [TodayProviderTotals] = []
     var codex: CodexUsageStatus?
     var openCodeGo: OpenCodeGoUsageStatus?
@@ -278,6 +280,8 @@ final class UsageReader {
         var chatgptToday = UsageTotals()
         var chatgptSevenDays = UsageTotals()
         var todayModels: [String: TodayModelTotals] = [:]
+        var chatgptTodayModels: [String: TodayModelTotals] = [:]
+        var chatgptSevenDaysModels: [String: TodayModelTotals] = [:]
         var todayProviders: [String: TodayProviderTotals] = [:]
 
         let directories = (try? fileManager.contentsOfDirectory(
@@ -310,7 +314,8 @@ final class UsageReader {
                 for file in jsonlFiles(in: directory) {
                     autoreleasepool {
                         parseChatGPT(file: file, todayKey: todayKey, sevenDaysKey: sevenDaysKey,
-                                     today: &chatgptToday, sevenDays: &chatgptSevenDays)
+                                     today: &chatgptToday, sevenDays: &chatgptSevenDays,
+                                     todayModels: &chatgptTodayModels, sevenDaysModels: &chatgptSevenDaysModels)
                     }
                 }
             }
@@ -324,9 +329,19 @@ final class UsageReader {
             todayModels: todayModels.values.sorted {
                 $0.requests != $1.requests ? $0.requests > $1.requests : $0.tokens > $1.tokens
             }.map { $0 },
+            chatgptTodayModels: sortModelsByTokens(chatgptTodayModels),
+            chatgptSevenDaysModels: sortModelsByTokens(chatgptSevenDaysModels),
             todayProviders: todayProviders.values.sorted { $0.tokens > $1.tokens }.map { $0 },
             updatedAt: now
         )
+    }
+
+    private func sortModelsByTokens(_ models: [String: TodayModelTotals]) -> [TodayModelTotals] {
+        models.values.sorted {
+            if $0.tokens != $1.tokens { return $0.tokens > $1.tokens }
+            if $0.requests != $1.requests { return $0.requests > $1.requests }
+            return $0.id.localizedCaseInsensitiveCompare($1.id) == .orderedAscending
+        }
     }
 
     func parse(
@@ -427,16 +442,26 @@ final class UsageReader {
         todayKey: String,
         sevenDaysKey: String,
         today: inout UsageTotals,
-        sevenDays: inout UsageTotals
+        sevenDays: inout UsageTotals,
+        todayModels: inout [String: TodayModelTotals],
+        sevenDaysModels: inout [String: TodayModelTotals]
     ) {
         guard let handle = try? FileHandle(forReadingFrom: file) else { return }
         defer { try? handle.close() }
         var pending = Data()
+        var currentModel = "未知模型"
 
         func consume(_ data: Data) {
             guard let envelope = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let payload = envelope["payload"] as? [String: Any],
-                  payload["type"] as? String == "token_count",
+                  let payload = envelope["payload"] as? [String: Any] else { return }
+
+            if envelope["type"] as? String == "turn_context",
+               let model = payload["model"] as? String, !model.isEmpty {
+                currentModel = model
+                return
+            }
+
+            guard payload["type"] as? String == "token_count",
                   let info = payload["info"] as? [String: Any],
                   let usage = info["last_token_usage"] as? [String: Any],
                   let timestamp = envelope["timestamp"] as? String,
@@ -450,8 +475,16 @@ final class UsageReader {
             let input = max(rawInput - cacheRead - cacheWrite, 0)
             let output = integer(usage, "output_tokens")
             sevenDays.add(input: input, output: output, cacheRead: cacheRead, cacheWrite: cacheWrite, cost: 0, requests: 1)
+            var sevenDayModel = sevenDaysModels[currentModel] ?? TodayModelTotals(id: currentModel)
+            sevenDayModel.tokens += input + output + cacheRead + cacheWrite
+            sevenDayModel.requests += 1
+            sevenDaysModels[currentModel] = sevenDayModel
             if dateKey == todayKey {
                 today.add(input: input, output: output, cacheRead: cacheRead, cacheWrite: cacheWrite, cost: 0, requests: 1)
+                var todayModel = todayModels[currentModel] ?? TodayModelTotals(id: currentModel)
+                todayModel.tokens += input + output + cacheRead + cacheWrite
+                todayModel.requests += 1
+                todayModels[currentModel] = todayModel
             }
         }
 
