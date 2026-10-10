@@ -243,7 +243,7 @@ function piApiPlugin(): Plugin {
           }).catch((error: unknown) => {
             res.statusCode = 500;
             res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ success: false, error: error instanceof Error ? error.message : "Optimize failed" }));
+            res.end(JSON.stringify({ success: false, message: error instanceof Error ? error.message : "Optimize failed" }));
           });
         },
         "POST /api/pi/memory/delete-entry"(req, res) {

@@ -2186,19 +2186,29 @@ export async function optimizeMemory(): Promise<OptimizeMemoryResult> {
   // force a full page reload when the socket reconnects. Async spawn keeps the
   // loop free so /api/pi/memory/status polling and HMR stay responsive.
   try {
-    const status2: { code: number | null; killed: boolean; error?: Error } = await new Promise((resolvePromise) => {
-      const child = spawn(bin, args, { stdio: ["ignore", "ignore", "ignore"] });
+    // Capture stderr so a non-zero exit surfaces the real pi/API error
+    // (e.g. "Codex error: The usage limit has been reached") instead of a
+    // bare "exit 1" with no clue what went wrong.
+    const status2: { code: number | null; killed: boolean; error?: Error; stderr: string } = await new Promise((resolvePromise) => {
+      const child = spawn(bin, args, { stdio: ["ignore", "ignore", "pipe"] });
       let settled = false;
+      let stderr = "";
       const finish = (r: { code: number | null; killed: boolean; error?: Error }) => {
         if (settled) return;
         settled = true;
         clearTimeout(killTimer);
-        resolvePromise(r);
+        resolvePromise({ ...r, stderr });
       };
       const killTimer = setTimeout(() => {
         child.kill("SIGKILL");
         finish({ code: null, killed: true });
       }, timeoutMs);
+      child.stderr?.on("data", (chunk: Buffer) => {
+        stderr += chunk.toString("utf-8");
+        // pi's own error output is small; cap it so a chatty extension
+        // can't balloon the result payload.
+        if (stderr.length > 8000) stderr = stderr.slice(-8000);
+      });
       child.on("error", (error) => finish({ code: null, killed: false, error }));
       child.on("close", (code) => finish({ code, killed: false }));
     });
@@ -2206,13 +2216,14 @@ export async function optimizeMemory(): Promise<OptimizeMemoryResult> {
     const after = memoryFileSizes();
     const freedBytes = Object.values(before).reduce((a, b) => a + b, 0)
       - Object.values(after).reduce((a, b) => a + b, 0);
+    const stderrTail = (status2.stderr ?? "").trim().slice(-500);
     if (status2.error) {
       return { success: false, before, after, freedBytes, message: String(status2.error.message) };
     }
     if (status2.killed) {
-      return { success: false, before, after, freedBytes, message: `consolidation timed out after ${Math.round(timeoutMs / 1000)}s` };
+      return { success: false, before, after, freedBytes, message: `consolidation timed out after ${Math.round(timeoutMs / 1000)}s${stderrTail ? ` — ${stderrTail}` : ""}` };
     }
-    return { success: status2.code === 0, before, after, freedBytes, message: status2.code === 0 ? undefined : `exit ${status2.code}` };
+    return { success: status2.code === 0, before, after, freedBytes, message: status2.code === 0 ? undefined : `exit ${status2.code}${stderrTail ? ` — ${stderrTail}` : ""}` };
   } catch (e) {
     const after = memoryFileSizes();
     return { success: false, before, after, freedBytes: 0, message: e instanceof Error ? e.message : String(e) };
