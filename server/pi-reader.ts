@@ -2142,7 +2142,13 @@ export async function optimizeMemory(): Promise<OptimizeMemoryResult> {
   }
 
   const cfg = readHermesMemoryConfig();
-  const args = ["-p", "--no-session", "-e", HERMES_EXTENSION_ENTRY];
+  // -ne keeps the consolidation child isolated: it must load ONLY the
+  // hermes memory extension passed via -e. Other auto-discovered
+  // extensions (e.g. pi-subagents) can fail to load against the host
+  // pi's bundled pi-ai ("toToolDeclaration is not a function" when
+  // pi-ai < 0.86.1), which aborts the whole non-interactive run with
+  // exit 1 even though those extensions are irrelevant to memory work.
+  const args = ["-p", "--no-session", "-ne", "-e", HERMES_EXTENSION_ENTRY];
   if (cfg.llmModelOverride) args.push("--model", cfg.llmModelOverride);
   args.push("--thinking", cfg.llmThinkingOverride ?? "off");
 
