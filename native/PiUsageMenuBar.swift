@@ -30,28 +30,10 @@ final class PiUsagePanel: NSView {
         return hasRows ? 149 : 69
     }
 
-    private static func openCodeGoSectionY(for summary: UsageSummary) -> CGFloat {
-        quotaSectionY(for: summary) + codexSectionHeight(for: summary)
-    }
-
-    private static func openCodeGoSectionHeight(for summary: UsageSummary) -> CGFloat {
-        guard let status = summary.openCodeGo, status.configured, status.error == nil,
-              status.rolling != nil || status.weekly != nil || status.monthly != nil else {
-            return 69
-        }
-        // Header + three quota rows (5 小时 / 7 天 / 1 个月), 56pt apart.
-        return 41 + 56 * 2 + 59
-    }
-
-    private static func openCodeGoHasRows(_ status: OpenCodeGoUsageStatus?) -> Bool {
-        guard let status, status.configured, status.error == nil else { return false }
-        return status.rolling != nil || status.weekly != nil || status.monthly != nil
-    }
-
     init(summary: UsageSummary) {
         self.summary = summary
         let height: CGFloat = summary.error == nil
-            ? Self.openCodeGoSectionY(for: summary) + Self.openCodeGoSectionHeight(for: summary) + 12
+            ? Self.quotaSectionY(for: summary) + Self.codexSectionHeight(for: summary) + 12
             : 100
         super.init(frame: NSRect(x: 0, y: 0, width: 400, height: height))
         setAccessibilityElement(true)
@@ -185,25 +167,6 @@ final class PiUsagePanel: NSView {
             text("正在查询 ChatGPT / Codex 官方额度…", 20, quotaSectionY + 50, 360, color: .secondaryLabelColor)
         }
 
-        let openCodeGoSectionY = Self.openCodeGoSectionY(for: summary)
-        line(openCodeGoSectionY)
-        text("OpenCode Go 计划额度", 20, openCodeGoSectionY + 15, 230, size: 11, bold: true)
-        text("官方 5 小时 / 7 天 / 1 个月", 230, openCodeGoSectionY + 15, 150, size: 10, color: .secondaryLabelColor, right: true)
-        if let status = summary.openCodeGo {
-            if !status.configured {
-                text("未配置 opencode-go API Key", 20, openCodeGoSectionY + 50, 360, color: .secondaryLabelColor)
-            } else if let error = status.error {
-                text("额度查询失败：" + error, 20, openCodeGoSectionY + 50, 360, color: .systemRed)
-            } else if Self.openCodeGoHasRows(status) {
-                quota("5 小时", window: status.rolling, y: openCodeGoSectionY + 41)
-                quota("7 天", window: status.weekly, y: openCodeGoSectionY + 97)
-                quota("1 个月", window: status.monthly, y: openCodeGoSectionY + 153)
-            } else {
-                text("暂无额度信息", 20, openCodeGoSectionY + 50, 360, color: .secondaryLabelColor)
-            }
-        } else {
-            text("正在查询 OpenCode Go 官方额度…", 20, openCodeGoSectionY + 50, 360, color: .secondaryLabelColor)
-        }
     }
 }
 
@@ -216,7 +179,6 @@ final class PiUsageAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
     private var nativeEnabled = false
     private var isRefreshing = false
     private var codexCache: (value: CodexUsageStatus, at: Date)?
-    private var openCodeGoCache: (value: OpenCodeGoUsageStatus, at: Date)?
     private let codexCacheTTL: TimeInterval = 30
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -283,7 +245,6 @@ final class PiUsageAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
             guard let self else { return }
             var summary = self.reader.read(scope: .pi)
             summary.codex = self.readCodexUsage(force: force)
-            summary.openCodeGo = self.readOpenCodeGoUsage(force: force)
             DispatchQueue.main.async {
                 self.cachedSummary = summary
                 self.isRefreshing = false
@@ -341,15 +302,6 @@ final class PiUsageAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
         }.resume()
         _ = semaphore.wait(timeout: .now() + 16)
         codexCache = (result, Date())
-        return result
-    }
-
-    private func readOpenCodeGoUsage(force: Bool) -> OpenCodeGoUsageStatus {
-        if !force, let openCodeGoCache, Date().timeIntervalSince(openCodeGoCache.at) < codexCacheTTL {
-            return openCodeGoCache.value
-        }
-        let result = readOpenCodeGoPlanUsage()
-        openCodeGoCache = (result, Date())
         return result
     }
 
