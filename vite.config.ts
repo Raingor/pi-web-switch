@@ -2,6 +2,8 @@ import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
+import { spawn, spawnSync } from "child_process";
+import { existsSync } from "fs";
 import type { Connect } from "vite";
 
 // ─── Pi Config API Plugin ───────────────────────────────
@@ -29,6 +31,31 @@ function piApiPlugin(): Plugin {
         }
       }, 0);
 
+      // Restart a native macOS usage menu bar app: kill the running instance
+      // and relaunch the built .app bundle from <project>/release. The short
+      // delay lets the dying process exit first, otherwise macOS `open` would
+      // just re-activate it instead of starting a fresh instance.
+      const restartNativeApp = (which: "pi" | "chatgpt"): { success: boolean; message?: string } => {
+        const name = which === "pi" ? "PiUsageMenuBar" : "ChatGPTUsageMenuBar";
+        const appPath = path.join(process.cwd(), "release", `${name}.app`);
+        if (!existsSync(appPath)) {
+          return { success: false, message: `${name}.app not found — run npm run native:build first` };
+        }
+        try {
+          spawnSync("killall", [name], { stdio: "ignore" });
+        } catch {
+          /* not running — nothing to kill */
+        }
+        setTimeout(() => {
+          try {
+            spawn("open", [appPath], { detached: true, stdio: "ignore" }).unref();
+          } catch {
+            /* ignore relaunch failure */
+          }
+        }, 700);
+        return { success: true };
+      };
+
       const routes: Record<string, (req: Connect.IncomingMessage, res: any) => void> = {
         "GET /api/pi/settings"(_, res) {
           const data = pi.readSettings();
@@ -39,9 +66,42 @@ function piApiPlugin(): Plugin {
           let body = "";
           req.on("data", (chunk: string) => (body += chunk));
           req.on("end", () => {
-            const ok = pi.writeSettings(JSON.parse(body));
+            const patch = JSON.parse(body);
+            const before = (pi.readSettings() ?? {}) as Record<string, unknown>;
+            const ok = pi.writeSettings(patch);
+            // Auto-restart the Pi menu bar app when a native section toggle
+            // changes so the new panel layout takes effect immediately.
+            let restarted: string[] = [];
+            if (ok) {
+              const sectionDefaults: Record<string, boolean> = {
+                showCodexNative: true,
+                showOpenCodeGoNative: false,
+              };
+              const changed = Object.keys(sectionDefaults).filter(
+                (k) => patch[k] !== undefined && ((before[k] as boolean | undefined) ?? sectionDefaults[k]) !== patch[k]
+              );
+              if (changed.length > 0 && restartNativeApp("pi").success) {
+                restarted.push("PiUsageMenuBar");
+              }
+            }
             res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ success: ok }));
+            res.end(JSON.stringify({ success: ok, restarted }));
+          });
+        },
+        "POST /api/pi/native/restart"(req, res) {
+          let body = "";
+          req.on("data", (chunk: string) => (body += chunk));
+          req.on("end", () => {
+            let which: "pi" | "chatgpt" = "pi";
+            try {
+              const parsed = JSON.parse(body);
+              if (parsed?.app === "chatgpt") which = "chatgpt";
+            } catch {
+              /* default to pi */
+            }
+            const result = restartNativeApp(which);
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify(result));
           });
         },
         "GET /api/pi/skills"(_, res) {

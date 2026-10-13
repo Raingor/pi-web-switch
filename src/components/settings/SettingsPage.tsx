@@ -111,6 +111,8 @@ export function SettingsPage() {
   const [importError, setImportError] = useState("");
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showPackageBrowser, setShowPackageBrowser] = useState(false);
+  const [restartingNative, setRestartingNative] = useState<string | null>(null);
+  const [restartNativeMsg, setRestartNativeMsg] = useState<string | null>(null);
   const [fontSize, setFontSize] = useState(() => {
     const saved = Number(localStorage.getItem(FONT_SIZE_KEY));
     return saved >= 12 && saved <= 24 ? saved : 16;
@@ -288,6 +290,26 @@ export function SettingsPage() {
     updateSettings(clearModel ? { defaultProvider: v, defaultModel: undefined } : { defaultProvider: v || undefined });
   };
 
+  const restartNativeApp = async (app: "pi" | "chatgpt") => {
+    setRestartingNative(app);
+    setRestartNativeMsg(null);
+    try {
+      const res = await fetch("/api/pi/native/restart", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ app }),
+      });
+      const result = (await res.json()) as { success: boolean; message?: string };
+      setRestartNativeMsg(
+        result.success ? t("settings.restart_native_done") : t("settings.restart_native_failed", result.message ?? "")
+      );
+    } catch {
+      setRestartNativeMsg(t("settings.restart_native_failed", ""));
+    } finally {
+      setRestartingNative(null);
+    }
+  };
+
   const tabs: { key: SettingsTab; icon: typeof Palette; label: string }[] = [
     { key: "appearance", icon: Palette, label: t("settings.appearance") },
     { key: "models", icon: LayoutGrid, label: t("settings.tab_models") },
@@ -407,6 +429,45 @@ export function SettingsPage() {
                 <Monitor className="h-3.5 w-3.5 text-blue-400" />
                 {t("settings.show_chatgpt_native")}
               </label>
+              <label className="flex items-center gap-2 text-sm text-gray-400">
+                <input
+                  type="checkbox"
+                  checked={settings?.showCodexNative ?? true}
+                  onChange={(e) => updateSettings({ showCodexNative: e.target.checked })}
+                  className="rounded border-gray-600 bg-gray-800 text-blue-500"
+                />
+                <Monitor className="h-3.5 w-3.5 text-blue-400" />
+                {t("settings.show_codex_native")}
+              </label>
+              <label className="flex items-center gap-2 text-sm text-gray-400">
+                <input
+                  type="checkbox"
+                  checked={settings?.showOpenCodeGoNative ?? false}
+                  onChange={(e) => updateSettings({ showOpenCodeGoNative: e.target.checked })}
+                  className="rounded border-gray-600 bg-gray-800 text-blue-500"
+                />
+                <Monitor className="h-3.5 w-3.5 text-blue-400" />
+                {t("settings.show_opencodego_native")}
+              </label>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => restartNativeApp("pi")}
+                disabled={restartingNative !== null}
+                className="flex items-center gap-1.5 rounded-full border border-gray-700 bg-gray-800 px-3 py-1 text-xs text-gray-300 transition-all hover:border-blue-500 hover:text-blue-400 disabled:opacity-50"
+              >
+                <RefreshCw className={cn("h-3 w-3", restartingNative === "pi" && "animate-spin")} />
+                {t("settings.restart_pi_native")}
+              </button>
+              <button
+                onClick={() => restartNativeApp("chatgpt")}
+                disabled={restartingNative !== null}
+                className="flex items-center gap-1.5 rounded-full border border-gray-700 bg-gray-800 px-3 py-1 text-xs text-gray-300 transition-all hover:border-blue-500 hover:text-blue-400 disabled:opacity-50"
+              >
+                <RefreshCw className={cn("h-3 w-3", restartingNative === "chatgpt" && "animate-spin")} />
+                {t("settings.restart_chatgpt_native")}
+              </button>
+              {restartNativeMsg && <span className="text-xs text-gray-500">{restartNativeMsg}</span>}
             </div>
             <p className="mt-2 text-xs text-gray-600">{t("settings.show_native_desc")}</p>
           </Card>

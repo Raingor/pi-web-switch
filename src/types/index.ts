@@ -140,6 +140,10 @@ export interface PiSettings {
   showPiNative?: boolean;
   /** Show the ChatGPT/Codex usage menu bar app. */
   showChatGPTNative?: boolean;
+  /** Show the Codex quota section in the Pi usage menu bar app. */
+  showCodexNative?: boolean;
+  /** Show the OpenCode Go plan quota section in the Pi usage menu bar app. */
+  showOpenCodeGoNative?: boolean;
   enableInstallTelemetry?: boolean;
   enableSkillCommands?: boolean;
   steeringMode?: "one-at-a-time" | "all";

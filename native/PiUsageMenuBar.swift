@@ -3,6 +3,8 @@ import Foundation
 
 final class PiUsagePanel: NSView {
     private let summary: UsageSummary
+    private let showCodex: Bool
+    private let showOpenCodeGo: Bool
 
     override var isFlipped: Bool { true }
 
@@ -30,10 +32,31 @@ final class PiUsagePanel: NSView {
         return hasRows ? 149 : 69
     }
 
+    private static func openCodeGoSectionHeight(for summary: UsageSummary) -> CGFloat {
+        guard let status = summary.openCodeGo, status.configured, status.error == nil,
+              status.rolling != nil || status.weekly != nil || status.monthly != nil else {
+            return 69
+        }
+        // Header + three quota rows (5 小时 / 7 天 / 1 个月), 56pt apart.
+        return 41 + 56 * 2 + 59
+    }
+
+    private static func openCodeGoHasRows(_ status: OpenCodeGoUsageStatus?) -> Bool {
+        guard let status, status.configured, status.error == nil else { return false }
+        return status.rolling != nil || status.weekly != nil || status.monthly != nil
+    }
+
     init(summary: UsageSummary) {
         self.summary = summary
+        // Per-section display toggles from ~/.pi/agent/settings.json, read
+        // once per panel build. The web settings page restarts this app when
+        // these keys change so a fresh panel picks the new layout up at once.
+        self.showCodex = readBoolSetting("showCodexNative", defaultValue: true)
+        self.showOpenCodeGo = readBoolSetting("showOpenCodeGoNative", defaultValue: false)
+        let codexHeight = showCodex ? Self.codexSectionHeight(for: summary) : 0
+        let openCodeGoHeight = showOpenCodeGo ? Self.openCodeGoSectionHeight(for: summary) : 0
         let height: CGFloat = summary.error == nil
-            ? Self.quotaSectionY(for: summary) + Self.codexSectionHeight(for: summary) + 12
+            ? Self.quotaSectionY(for: summary) + codexHeight + openCodeGoHeight + 12
             : 100
         super.init(frame: NSRect(x: 0, y: 0, width: 400, height: height))
         setAccessibilityElement(true)
@@ -151,22 +174,45 @@ final class PiUsagePanel: NSView {
             text("暂无今日使用记录", 20, todayProviderStartY, 360, color: .secondaryLabelColor)
         }
 
-        let quotaSectionY = Self.quotaSectionY(for: summary)
-        line(quotaSectionY)
-        text("ChatGPT / Codex 额度", 20, quotaSectionY + 15, 230, size: 11, bold: true)
-        if let notice = summary.codex?.notice {
-            text(notice, 20, quotaSectionY + 50, 360, color: .secondaryLabelColor)
-        } else if let status = summary.codex, status.loggedIn, status.error == nil {
-            quota("5 小时窗口", window: status.primary, y: quotaSectionY + 41)
-            quota("7 天窗口", window: status.secondary, y: quotaSectionY + 100)
-        } else if let status = summary.codex, !status.loggedIn {
-            text("未登录 openai-codex，无官方额度", 20, quotaSectionY + 50, 360, color: .secondaryLabelColor)
-        } else if let status = summary.codex, status.error != nil {
-            text("额度查询失败：" + (status.error ?? "错误"), 20, quotaSectionY + 50, 360, color: .systemRed)
-        } else {
-            text("正在查询 ChatGPT / Codex 官方额度…", 20, quotaSectionY + 50, 360, color: .secondaryLabelColor)
+        var quotaSectionY = Self.quotaSectionY(for: summary)
+        if showCodex {
+            line(quotaSectionY)
+            text("ChatGPT / Codex 额度", 20, quotaSectionY + 15, 230, size: 11, bold: true)
+            if let notice = summary.codex?.notice {
+                text(notice, 20, quotaSectionY + 50, 360, color: .secondaryLabelColor)
+            } else if let status = summary.codex, status.loggedIn, status.error == nil {
+                quota("5 小时窗口", window: status.primary, y: quotaSectionY + 41)
+                quota("7 天窗口", window: status.secondary, y: quotaSectionY + 100)
+            } else if let status = summary.codex, !status.loggedIn {
+                text("未登录 openai-codex，无官方额度", 20, quotaSectionY + 50, 360, color: .secondaryLabelColor)
+            } else if let status = summary.codex, status.error != nil {
+                text("额度查询失败：" + (status.error ?? "错误"), 20, quotaSectionY + 50, 360, color: .systemRed)
+            } else {
+                text("正在查询 ChatGPT / Codex 官方额度…", 20, quotaSectionY + 50, 360, color: .secondaryLabelColor)
+            }
+            quotaSectionY += Self.codexSectionHeight(for: summary)
         }
 
+        if showOpenCodeGo {
+            line(quotaSectionY)
+            text("OpenCode Go 计划额度", 20, quotaSectionY + 15, 230, size: 11, bold: true)
+            text("官方 5 小时 / 7 天 / 1 个月", 230, quotaSectionY + 15, 150, size: 10, color: .secondaryLabelColor, right: true)
+            if let status = summary.openCodeGo {
+                if !status.configured {
+                    text("未配置 opencode-go API Key", 20, quotaSectionY + 50, 360, color: .secondaryLabelColor)
+                } else if let error = status.error {
+                    text("额度查询失败：" + error, 20, quotaSectionY + 50, 360, color: .systemRed)
+                } else if Self.openCodeGoHasRows(status) {
+                    quota("5 小时", window: status.rolling, y: quotaSectionY + 41)
+                    quota("7 天", window: status.weekly, y: quotaSectionY + 97)
+                    quota("1 个月", window: status.monthly, y: quotaSectionY + 153)
+                } else {
+                    text("暂无额度信息", 20, quotaSectionY + 50, 360, color: .secondaryLabelColor)
+                }
+            } else {
+                text("正在查询 OpenCode Go 官方额度…", 20, quotaSectionY + 50, 360, color: .secondaryLabelColor)
+            }
+        }
     }
 }
 
@@ -179,6 +225,7 @@ final class PiUsageAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
     private var nativeEnabled = false
     private var isRefreshing = false
     private var codexCache: (value: CodexUsageStatus, at: Date)?
+    private var openCodeGoCache: (value: OpenCodeGoUsageStatus, at: Date)?
     private let codexCacheTTL: TimeInterval = 30
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -245,6 +292,9 @@ final class PiUsageAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
             guard let self else { return }
             var summary = self.reader.read(scope: .pi)
             summary.codex = self.readCodexUsage(force: force)
+            if readBoolSetting("showOpenCodeGoNative", defaultValue: false) {
+                summary.openCodeGo = self.readOpenCodeGoUsage(force: force)
+            }
             DispatchQueue.main.async {
                 self.cachedSummary = summary
                 self.isRefreshing = false
@@ -302,6 +352,15 @@ final class PiUsageAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate 
         }.resume()
         _ = semaphore.wait(timeout: .now() + 16)
         codexCache = (result, Date())
+        return result
+    }
+
+    private func readOpenCodeGoUsage(force: Bool) -> OpenCodeGoUsageStatus {
+        if !force, let openCodeGoCache, Date().timeIntervalSince(openCodeGoCache.at) < codexCacheTTL {
+            return openCodeGoCache.value
+        }
+        let result = readOpenCodeGoPlanUsage()
+        openCodeGoCache = (result, Date())
         return result
     }
 
