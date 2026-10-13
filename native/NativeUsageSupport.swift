@@ -65,6 +65,10 @@ struct CodexUsageStatus {
     var secondary: CodexUsageWindow?
     var error: String?
     var notice: String? = nil
+    /// 剩余可用的限额重置卡（rate limit reset credits）数量。
+    var resetCredits: Int? = nil
+    /// 重置卡对应的限额重置到期时间（primary window 的 reset_at）。
+    var resetCreditsAt: Date? = nil
 }
 
 /// Official OpenCode Go plan usage. The upstream endpoint only reports the

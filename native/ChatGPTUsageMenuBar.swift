@@ -20,7 +20,7 @@ final class ChatGPTUsagePanel: NSView {
 
     init(summary: UsageSummary) {
         self.summary = summary
-        let height = summary.error == nil ? Self.quotaSectionY(for: summary) + 152 : 100
+        let height = summary.error == nil ? Self.quotaSectionY(for: summary) + 181 : 100
         super.init(frame: NSRect(x: 0, y: 0, width: 400, height: height))
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
@@ -142,8 +142,23 @@ final class ChatGPTUsagePanel: NSView {
         if let notice = summary.codex?.notice {
             text(notice, 20, quotaLineY + 55, 360, color: .secondaryLabelColor)
         } else if let status = summary.codex, status.loggedIn, status.error == nil {
-            quota("5 小时", window: status.primary, y: quotaLineY + 41)
-            quota("7 天", window: status.secondary, y: quotaLineY + 100)
+            // 限额重置卡：剩余可用数量 + 到期时间
+            let resetY = quotaLineY + 41
+            text("限额重置卡", 20, resetY, 140, size: 11, bold: true)
+            if let count = status.resetCredits {
+                text("\(count) 张", 160, resetY, 55, size: 12, color: .systemTeal, right: true, bold: true)
+            } else {
+                text("—", 160, resetY, 55, size: 11, color: .secondaryLabelColor, right: true)
+            }
+            let resetSeconds = status.resetCreditsAt
+                .map { max(0, Int($0.timeIntervalSinceNow)) }
+            let countdown = formatDuration(resetSeconds).map { "\($0)后到期" } ?? ""
+            let atText = formatResetAt(status.resetCreditsAt).map { "\($0) UTC+8" } ?? ""
+            let timeText = [countdown, atText].filter { !$0.isEmpty }.joined(separator: " · ")
+            text(timeText.isEmpty ? "到期时间未知" : timeText, 220, resetY, 160, size: 10,
+                 color: .secondaryLabelColor, right: true)
+            quota("5 小时", window: status.primary, y: quotaLineY + 70)
+            quota("7 天", window: status.secondary, y: quotaLineY + 129)
         } else {
             let message = summary.codex.map { $0.loggedIn ? ($0.error ?? "暂无额度信息") : "未登录 openai-codex" } ?? "正在查询官方额度…"
             text(message, 20, quotaLineY + 55, 360, color: .secondaryLabelColor)
@@ -273,12 +288,18 @@ final class ChatGPTUsageAppDelegate: NSObject, NSApplicationDelegate, NSMenuDele
                 return
             }
             let rateLimit = payload["rate_limit"] as? [String: Any]
+            let resetCredits = payload["rate_limit_reset_credits"] as? [String: Any]
+            let resetCreditsCount = (resetCredits?["available_count"] as? NSNumber).map { $0.intValue }
+            let resetCreditsAt: Date? = ((rateLimit?["primary_window"] as? [String: Any])?["reset_at"] as? NSNumber)
+                .map { Date(timeIntervalSince1970: $0.doubleValue) }
             result = CodexUsageStatus(
                 loggedIn: true,
                 planType: payload["plan_type"] as? String,
                 primary: self.codexWindow(rateLimit?["primary_window"]),
                 secondary: self.codexWindow(rateLimit?["secondary_window"]),
-                error: nil
+                error: nil,
+                resetCredits: resetCreditsCount,
+                resetCreditsAt: resetCreditsAt
             )
         }.resume()
         _ = semaphore.wait(timeout: .now() + 16)
